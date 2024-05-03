@@ -1,0 +1,23 @@
+{
+  "name": "tree8",
+  "version": "0.0.1",
+  "description": "A JavaScript virtual machine for ESTree syntax trees",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shicks/tree8.git"
+  },
+  "author": "Stephen Hicks <stephenhicks@gmail.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/shicks/tree8/issues"
+  },
+  "homepage": "https://github.com/shicks/tree8#readme",
+  "devDependencies": {
+    "@types/estree": "^1.0.5",
+    "typescript": "^5.4.5"
+  }
+}
