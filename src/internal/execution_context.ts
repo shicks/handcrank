@@ -1,4 +1,4 @@
-import { EnvironmentRecord } from './EnvironmentRecord';
+import { EnvironmentRecord } from './environment_record';
 
 export class ExecutionContext {
   //Function?: Obj;
@@ -15,5 +15,5 @@ export class ExecutionContext {
     readonly VariableEnvironment: EnvironmentRecord,
     //PrivateEnvironment?: PrivateEnvironmentRecord;
     //Generator?: Gen;
-  ) { super(); }
+  ) { }
 }

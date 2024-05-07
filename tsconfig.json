@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "lib": "es2022",
+    "lib": ["es2022"],
     "allowJs": false,
     "target": "es2022",
     "inlineSourceMap": true,
@@ -19,5 +19,6 @@
   },
   "exclude": [
     "unused/*.ts",
+    "scraps/*.ts",
   ]
 }
