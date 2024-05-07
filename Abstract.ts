@@ -4,15 +4,6 @@ import { type Obj, type Property, type Val, type Prim, type Type, type PrimType,
 import type { EnvironmentRecord } from './EnvironmentRecord';
 import { ReferenceRecord } from './ReferenceRecord';
 
-export function GetIdentifierReference(env: EnvironmentRecord|null, name: string, strict: boolean): CR<ReferenceRecord> {
-  if (!env) {
-    return new ReferenceRecord
-  }
-}
-
-
-
-
 
 ////////
 

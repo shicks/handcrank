@@ -1,15 +1,17 @@
-import {parseScript} from 'esprima';
+import { parseScript } from 'esprima';
 
-import {CR} from './CompletionRecord';
-import {Val} from './Obj';
+import { CR } from './CompletionRecord';
+import { Val } from './Obj';
+import { ExecutionContext } from './ExecutionContext';
 
 export class VM {
 
-  private readonly internal = new InternalVM();
+  execStack: ExecutionContext[] = [];
+
+
+
 
   evaluateScript(script: string, filename?: string): CR<Val> {
-    const 
+
   }
-
-
 }
