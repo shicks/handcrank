@@ -1,7 +1,7 @@
 import { EMPTY } from './enums';
 import { RecordFor, makeRecord } from './record';
 import { Assert } from './assert';
-import { Val } from './values';
+import { Str, Val } from './values';
 
 /**
  * 6.2.4 The Completion Record Specification Type
@@ -64,6 +64,11 @@ export function IsAbrupt(x: CR<unknown>): x is Abrupt {
   return x instanceof Abrupt;
 }
 
+export function CastNotAbrupt<T>(x: CR<T>): T {
+  Assert(!IsAbrupt(x));
+  return x;
+}
+
 /**
  * 6.2.4.1 NormalCompletion ( value )
  *
@@ -89,7 +94,7 @@ export function ThrowCompletion(value: Val): CR<never> {
 // NOTE: This is a convenience for throwing an error
 export function Throw(name: string, msg?: string): Abrupt {
   // TODO - actual errors
-  return ThrowCompletion(msg ? `${name}: ${msg}` : name);
+  return ThrowCompletion(Str(msg ? `${name}: ${msg}` : name));
 }
 
 /**

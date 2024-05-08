@@ -19,3 +19,15 @@ export type UNUSED = typeof UNUSED;
 
 export const EMPTY: unique symbol = Symbol('empty');
 export type EMPTY = typeof EMPTY;
+
+// Used by FunctionEnvironmentRecord
+export const LEXICAL: unique symbol = Symbol('lexical');
+export type LEXICAL = typeof LEXICAL;
+
+// Used by FunctionEnvironmentRecord
+export const INITIALIZED: unique symbol = Symbol('initialized');
+export type INITIALIZED = typeof INITIALIZED;
+
+// Used by FunctionEnvironmentRecord
+export const UNINITIALIZED: unique symbol = Symbol('uninitialized');
+export type UNINITIALIZED = typeof UNINITIALIZED;

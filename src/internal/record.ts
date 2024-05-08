@@ -3,6 +3,12 @@
 type OptOf<T> = {[K in keyof T]-?: {} extends Pick<T, K> ? K : never}[keyof T];
 type FillOpt<T> = {[K in OptOf<T>]-?: T[K]};
 type Rest<F extends RecordFor<any>> = OptOf<F> extends never ? [] : [FillOpt<F>];
+
+export interface FauxCtor<T, A extends unknown[]> {
+  (...args: A): T;
+  readonly [Symbol.hasInstance]: (arg: unknown) => arg is T;
+}
+
 type MakeRecordFn =
   <F extends RecordFor<any>>(name: string, ...rest: Rest<F>) => {
     (arg: F[RECORD_INIT]): F;
@@ -23,16 +29,19 @@ export const makeRecord: MakeRecordFn = <F extends RecordFor<any>>(name: string,
   for (const k in rest[0] || {}) {
     defs.push([k, (rest[0] as any)[k]]);
   }
-  function brand(obj: any) {
-    for (const [k, v] of defs) {
-      if (!(k in obj)) obj[k] = v;
-    }
-    return obj;
-  }
-  Object.defineProperty(brand, Symbol.hasInstance, {value: (arg: any) => arg && arg[sym]});
-  return brand as any;
+  return withHasInstance(
+    (obj: any) => {
+      for (const [k, v] of defs) {
+        if (!(k in obj)) obj[k] = v;
+      }
+      return obj;
+    }, (arg: any) => arg && typeof arg === 'object' && arg[sym]) as any;
 };
 
+export function withHasInstance<F, H>(fn: F, hi: H): F&{readonly [Symbol.hasInstance]: H} {
+  Object.defineProperty(fn, Symbol.hasInstance, {value: hi});
+  return fn as F&{readonly [Symbol.hasInstance]: H};
+}
 
 // There are a few alternative ways to do this.  For instance, a
 // "dumber" version that only relies on static inheritance
