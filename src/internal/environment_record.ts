@@ -1,14 +1,15 @@
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt, Throw } from './completion_record';
-import { Func, IsUndefined, Obj, UNDEFINED, Val, Void } from './values';
-import { EMPTY, INITIALIZED, LEXICAL, UNINITIALIZED, UNUSED } from './enums';
+import { Func, Obj, Val } from './values';
+import { EMPTY, INITIALIZED, LEXICAL, UNINITIALIZED, UNRESOLVABLE, UNUSED } from './enums';
 import { VM } from './vm';
-import { RecordFor, makeRecord } from './record';
+import { ReferenceRecord } from './reference_record';
+import { ModuleRecord } from './module_record';
 
 declare const HasProperty: any;
 declare const HasOwnProperty: any;
 declare const Get: any;
-declare const Set: any;
+declare const Set$: any;
 declare const ToBoolean: any;
 declare const DefinePropertyOrThrow: any;
 declare const PropertyDescriptor: any;
@@ -127,30 +128,65 @@ export abstract class EnvironmentRecord {
    * HasThisBinding() - Determine if an Environment Record establishes
    * a this binding. Return true if it does and false if it does not.
    */
-  abstract HasThisBinding($: VM): CR<boolean>;
+  abstract HasThisBinding(): boolean;
   /**
    * HasSuperBinding() - Determine if an Environment Record
    * establishes a super method binding. Return true if it does and
    * false if it does not.
    */
-  abstract HasSuperBinding($: VM): CR<boolean>;
+  abstract HasSuperBinding(): boolean;
   /**
    * WithBaseObject() - If this Environment Record is associated with
    * a with statement, return the with object. Otherwise, return
    * undefined.
    */
-  abstract WithBaseObject($: VM): CR<Obj|undefined>;
+  abstract WithBaseObject(): Obj|undefined;
+
+  /**
+   * NOTE: The spec doesn't indicate this as being present on the
+   * base class, but it's called on it, so we include it here.
+   */
+  override GetThisBinding(): CR<Val|undefined> {
+    return undefined;
+  }
 }
 
-// NOTE: There is no concrete specification for what a binding should
-// actually look like.
-interface Binding extends RecordFor<{
-  Value: Val|EMPTY;
-  Mutable: boolean;
-  Deletable: boolean;
-  Strict: boolean;
-}> {}
-const Binding = makeRecord<Binding>('Binding');
+/** Abstract base class reresenting a binding. */
+abstract class Binding {
+  Value: Val = undefined;
+  Initialized = false;
+  abstract readonly Deletable: boolean;
+  abstract readonly Strict: boolean;
+}
+
+/** A mutable binding. */
+class MutableBinding extends Binding {
+  override readonly Strict!: false;
+  constructor(readonly Deletable: boolean) { super(); }
+}
+MutableBinding.prototype.Strict = false;
+
+/** An immutable binding. */
+class ImmutableBinding extends Binding {
+  override readonly Deletable!: false;
+  constructor(readonly Strict: boolean) { super(); }
+}
+ImmutableBinding.prototype.Deletable = false;
+
+/** An indirect module binding. */
+class IndirectBinding extends Binding {
+  override readonly Initialized!: true;
+  override readonly Deletable!: false;
+  override readonly Strict!: true;
+  constructor(
+    readonly Module: ModuleRecord,
+    readonly Name: string,
+  ) { super(); }
+  get Value() { throw new Error('not allowed'); }
+}
+IndirectBinding.prototype.Initialized = true;
+IndirectBinding.prototype.Deletable = false;
+IndirectBinding.prototype.Strict = true;
 
 /**
  * 9.1.1.1 Declarative Environment Records
@@ -165,8 +201,15 @@ const Binding = makeRecord<Binding>('Binding');
  * Environment Records is defined by the following algorithms.
  */
 export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
-  private readonly bindings = new Map<string, Binding>;
+  protected readonly bindings = new Map<string, Binding>;
 
+  /**
+   * 9.1.2.2 NewDeclarativeEnvironment ( E )
+   *
+   * The abstract operation NewDeclarativeEnvironment takes argument E
+   * (an Environment Record or null) and returns a Declarative
+   * Environment Record. It performs the following steps when called:
+   */
   constructor(readonly OuterEnv: EnvironmentRecord|null) { super(); }
 
   /**
@@ -178,7 +221,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * identifier is one of the identifiers bound by the record. It
    * performs the following steps when called:
    */
-  override HasBinding(_$: VM, N: string): CR<boolean> {
+  override HasBinding(_$: VM, N: string): boolean {
     return this.bindings.has(N);
   }
 
@@ -196,12 +239,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    */
   override CreateMutableBinding(_$: VM, N: string, D: boolean): CR<UNUSED> {
     Assert(!this.bindings.has(N));
-    const binding = Binding({
-      Value: EMPTY,
-      Mutable: true,
-      Deletable: D,
-      Strict: false,
-    });
+    const binding = new MutableBinding(D);
     this.bindings.set(N, binding);
     return UNUSED;
   }
@@ -219,12 +257,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    */
   override CreateImmutableBinding(_$: VM, N: string, S: boolean): CR<UNUSED> {
     Assert(!this.bindings.has(N));
-    const binding = Binding({
-      Value: EMPTY,
-      Mutable: false,
-      Deletable: false,
-      Strict: S,
-    });
+    const binding = new ImmutableBinding(S);
     this.bindings.set(N, binding);
     return UNUSED;
   }
@@ -243,8 +276,9 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
   override InitializeBinding(_$: VM, N: string, V: Val): CR<UNUSED> {
     Assert(this.bindings.has(N));
     const binding = this.bindings.get(N)!;
-    Assert(binding.Value == null);
+    Assert(!binding.Initialized);
     binding.Value = V;
+    binding.Initialized = true;
     return UNUSED;
   }
 
@@ -271,9 +305,10 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
 
     const binding = this.bindings.get(N)!;
     S ||= binding.Strict;
-    if (binding.Value == null) return Throw('ReferenceError');
-    if (binding.Mutable) {
-      binding!.Value = V;
+    if (!binding.Initialized) return Throw('ReferenceError');
+    if (binding instanceof MutableBinding) {
+      binding.Value = V;
+      binding.Initialized = true;
       return UNUSED;
     }
     // Assert: Attempt to change value of an immutable binding
@@ -295,7 +330,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
   override GetBindingValue(_$: VM, N: string, _S: boolean): CR<Val> {
     Assert(this.bindings.has(N));
     const binding = this.bindings.get(N)!;
-    if (binding.Value === EMPTY) return Throw('ReferenceError', '');
+    if (!binding.Initialized) return Throw('ReferenceError', '');
     return binding.Value;
   }
 
@@ -323,7 +358,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * Record envRec takes no arguments and returns false. It performs
    * the following steps when called:
    */
-  override HasThisBinding(_$: VM): CR<boolean> {
+  override HasThisBinding(): false {
     return false;
   }
 
@@ -334,7 +369,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * Record envRec takes no arguments and returns false. It performs
    * the following steps when called:
    */
-  override HasSuperBinding(_$: VM): CR<boolean> {
+  override HasSuperBinding(): false {
     return false;
   }
 
@@ -345,7 +380,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * Record envRec takes no arguments and returns undefined. It
    * performs the following steps when called:
    */
-  override WithBaseObject(_$: VM): CR<undefined> {
+  override WithBaseObject(): undefined {
     return undefined;
   }
 }
@@ -375,12 +410,22 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
  * [[IsWithEnvironment]] field.
  */
 export class ObjectEnvironmentRecord extends EnvironmentRecord {
+  /**
+   * 9.1.2.3 NewObjectEnvironment ( O, W, E )
+   *
+   * The abstract operation NewObjectEnvironment takes arguments O (an
+   * Object), W (a Boolean), and E (an Environment Record or null) and
+   * returns an Object Environment Record. It performs the following
+   * steps when called:
+   */
   constructor(
-    readonly OuterEnv: EnvironmentRecord|null,
     /** The binding object of this Environment Record. */
     readonly BindingObject: Obj,
     /** Indicates whether this Environment Record is created for a with statement. */
-    readonly IsWithEnvironment: boolean) { super(); }
+    readonly IsWithEnvironment: boolean,
+    /** Outer environment, passed through to the super class. */
+    readonly OuterEnv: EnvironmentRecord|null,
+  ) { super(); }
 
   /**
    * 9.1.1.2.1 HasBinding ( N )
@@ -485,7 +530,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
     const stillExists = HasProperty($, bindingObject, N);
     if (IsAbrupt(stillExists)) return stillExists;
     if (!stillExists && S) return Throw('ReferenceError');
-    const result = Set($, bindingObject, N, V, S);
+    const result = Set$($, bindingObject, N, V, S);
     if (IsAbrupt(result)) return result;
     return UNUSED;
   }
@@ -536,7 +581,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    *
    * NOTE: Object Environment Records do not provide a this binding.
    */
-  override HasThisBinding(_$: VM): CR<boolean> {
+  override HasThisBinding(): false {
     return false;
   }
 
@@ -549,7 +594,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    *
    * NOTE: Object Environment Records do not provide a super binding.
    */
-  override HasSuperBinding(_$: VM): CR<boolean> {
+  override HasSuperBinding(): false {
     return false;
   }
 
@@ -560,7 +605,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    * Record envRec takes no arguments and returns an Object or
    * undefined. It performs the following steps when called:
    */
-  override WithBaseObject(_$: VM): CR<Obj|undefined> {
+  override WithBaseObject(): Obj|undefined {
     if (this.IsWithEnvironment) return this.BindingObject;
     return undefined;
   }
@@ -593,10 +638,18 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
    */
   ThisBindingStatus: LEXICAL|INITIALIZED|UNINITIALIZED = UNINITIALIZED;
 
+  /** This is the `this` value used for this invocation of the function. */
+  ThisValue: Val;
+
+  /**
+   * 9.1.2.4 NewFunctionEnvironment ( F, newTarget )
+   *
+   * The abstract operation NewFunctionEnvironment takes arguments F
+   * (an ECMAScript function) and newTarget (an Object or undefined)
+   * and returns a Function Environment Record. It performs the
+   * following steps when called:
+   */
   constructor(
-    OuterEnv: EnvironmentRecord|null,
-    /** This is the `this` value used for this invocation of the function. */
-    public ThisValue: Val,
     /**
      * The function object whose invocation caused this Environment
      * Record to be created.
@@ -607,8 +660,11 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
      * internal method, [[NewTarget]] is the value of the [[Construct]]
      * newTarget parameter. Otherwise, its value is undefined.
      */
-    readonly NewTarget: Obj|Void,
-  ) { super(OuterEnv); }
+    readonly NewTarget: Obj|undefined,
+  ) {
+    super(FunctionObject.Environment);
+    this.ThisBindingStatus = LEXICAL.is(FunctionObject.ThisMode) ? LEXICAL : UNINITIALIZED;
+  }    
 
   /**
    * 9.1.1.3.1 BindThisValue ( V )
@@ -634,7 +690,7 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * Record envRec takes no arguments and returns a Boolean. It
    * performs the following steps when called:
    */
-  override HasThisBinding(_$: VM): CR<boolean> {
+  override HasThisBinding(): boolean {
     return this.ThisBindingStatus !== LEXICAL;
   }
 
@@ -645,9 +701,9 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * Record envRec takes no arguments and returns a Boolean. It
    * performs the following steps when called:
    */
-  override HasSuperBinding(_$: VM): CR<boolean> {
+  override HasSuperBinding(): boolean {
     if (this.ThisBindingStatus === LEXICAL) return false;
-    if (IsUndefined(this.FunctionObject.HomeObject)) return false;
+    if (this.FunctionObject.HomeObject == undefined) return false;
     return true;
   }
 
@@ -659,7 +715,7 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * completion containing an ECMAScript language value or a throw
    * completion. It performs the following steps when called:
    */
-  GetThisBinding(_$: VM): CR<Val> {
+  override GetThisBinding(): CR<Val> {
     Assert(this.ThisBindingStatus !== LEXICAL);
     if (this.ThisBindingStatus === UNINITIALIZED) return Throw('ReferenecError');
     return this.ThisValue;
@@ -673,9 +729,9 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * containing either an Object, null, or undefined, or a throw
    * completion. It performs the following steps when called:
    */
-  GetSuperBase($: VM): CR<Obj|Void> {
+  GetSuperBase($: VM): CR<Obj|undefined> {
     const home = this.FunctionObject.HomeObject;
-    if (IsUndefined(home)) return UNDEFINED;
+    if (home == undefined) return undefined;
     Assert(home instanceof Obj);
     return home.GetPrototypeOf($);
   }
@@ -696,7 +752,7 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
  * and a Declarative Environment Record. The Object Environment Record
  * has as its base object the global object of the associated Realm
  * Record. This global object is the value returned by the Global
- * Environment Record\'s GetThisBinding concrete method. The Object
+ * Environment Record's GetThisBinding concrete method. The Object
  * Environment Record component of a Global Environment Record
  * contains the bindings for all built-in globals (clause 19) and all
  * bindings introduced by a FunctionDeclaration, GeneratorDeclaration,
@@ -751,6 +807,23 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    */
   readonly VarNames: Set<string>;
 
+  /** Not relevant. */
+  override readonly OuterEnv = null;
+
+  /**
+   * 9.1.2.5 NewGlobalEnvironment ( G, thisValue )
+   *
+   * The abstract operation NewGlobalEnvironment takes arguments G (an
+   * Object) and thisValue (an Object) and returns a Global
+   * Environment Record. It performs the following steps when called:
+   */
+  constructor(G: Obj, thisValue: Obj) {
+    super();
+    this.ObjectRecord = new ObjectEnvironmentRecord(G, false, null);
+    this.GlobalThisValue = thisValue;
+    this.DeclarativeRecord = new DeclarativeEnvironmentRecord(null);
+    this.VarNames = new Set();
+  }
 
   /**
    * 9.1.1.4.1 HasBinding ( N )
@@ -816,7 +889,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * value V. An uninitialized binding for N must already exist. It
    * performs the following steps when called:
    */
-  InitializeBinding($: VM, N: string, V: Val): CR<UNUSED> {
+  override InitializeBinding($: VM, N: string, V: Val): CR<UNUSED> {
     const DclRec = this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
       return CastNotAbrupt(DclRec.InitializeBinding($, N, V));
@@ -840,7 +913,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * error handling is determined by S. It performs the following
    * steps when called:
    */
-  SetMutableBinding($: VM, N: string, V: Val, S: boolean): CR<UNUSED> {
+  override SetMutableBinding($: VM, N: string, V: Val, S: boolean): CR<UNUSED> {
     const DclRec = this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
       return DclRec.SetMutableBinding($, N, V, S);
@@ -862,7 +935,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * not currently writable, error handling is determined by S. It
    * performs the following steps when called:
    */
-  GetBindingValue($: VM, N: string, S: boolean): CR<Val> {
+  override GetBindingValue($: VM, N: string, S: boolean): CR<Val> {
     const DclRec =this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
       return DclRec.GetBindingValue($, N, S);
@@ -881,7 +954,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * being subject to deletion. It performs the following steps when
    * called:
    */
-  DeleteBinding($: VM, N: string): CR<boolean> {
+  override DeleteBinding($: VM, N: string): CR<boolean> {
     const DclRec = this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
       return CastNotAbrupt(DclRec.DeleteBinding($, N));
@@ -901,114 +974,381 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
     return true;
   }
 
-/*
-9.1.1.4.8 HasThisBinding ( )
+  /**
+   * 9.1.1.4.8 HasThisBinding ( )
+   *
+   * The HasThisBinding concrete method of a Global Environment Record
+   * envRec takes no arguments and returns true. It performs the
+   * following steps when called:
+   */
+  override HasThisBinding(): true {
+    return true;
+  }
 
-The HasThisBinding concrete method of a Global Environment Record envRec takes no arguments and returns true. It performs the following steps when called:
+  /**
+   * 9.1.1.4.9 HasSuperBinding ( )
+   *
+   * The HasSuperBinding concrete method of a Global Environment
+   * Record envRec takes no arguments and returns false. It performs
+   * the following steps when called:
+   */
+  override HasSuperBinding(): false {
+    return false;
+  }
 
-1. 1. Return true.
-NOTE
+  /**
+   * 9.1.1.4.10 WithBaseObject ( )
+   *
+   * The WithBaseObject concrete method of a Global Environment Record
+   * envRec takes no arguments and returns undefined. It performs the
+   * following steps when called:
+   */
+  override WithBaseObject(): undefined {
+    return undefined;
+  }
 
-Global Environment Records always provide a this binding.
+  /**
+   * 9.1.1.4.11 GetThisBinding ( )
+   *
+   * The GetThisBinding concrete method of a Global Environment Record
+   * envRec takes no arguments and returns a normal completion
+   * containing an Object. It performs the following steps when
+   * called:
+   */
+  override GetThisBinding(): CR<Val> {
+    return this.GlobalThisValue;
+  }
 
-9.1.1.4.9 HasSuperBinding ( )
+  /**
+   * 9.1.1.4.12 HasVarDeclaration ( N )
+   *
+   * The HasVarDeclaration concrete method of a Global Environment
+   * Record envRec takes argument N (a String) and returns a
+   * Boolean. It determines if the argument identifier has a binding
+   * in this record that was created using a VariableStatement or a
+   * FunctionDeclaration. It performs the following steps when called:
+   */
+  HasVarDeclaration(_$: VM, N: string): boolean {
+    const varDeclaredNames = this.VarNames;
+    return varDeclaredNames.has(N);
+  }
 
-The HasSuperBinding concrete method of a Global Environment Record envRec takes no arguments and returns false. It performs the following steps when called:
+  /**
+   * 9.1.1.4.13 HasLexicalDeclaration ( N )
+   *
+   * The HasLexicalDeclaration concrete method of a Global Environment
+   * Record envRec takes argument N (a String) and returns a
+   * Boolean. It determines if the argument identifier has a binding
+   * in this record that was created using a lexical declaration such
+   * as a LexicalDeclaration or a ClassDeclaration. It performs the
+   * following steps when called:
+   */
+  HasLexicalDeclaration($: VM, N: string): boolean {
+    return CastNotAbrupt(this.DeclarativeRecord.HasBinding($, N));
+  }
 
-1. 1. Return false.
-NOTE
+  /**
+   * 9.1.1.4.14 HasRestrictedGlobalProperty ( N )
+   *
+   * The HasRestrictedGlobalProperty concrete method of a Global
+   * Environment Record envRec takes argument N (a String) and returns
+   * either a normal completion containing a Boolean or a throw
+   * completion. It determines if the argument identifier is the name
+   * of a property of the global object that must not be shadowed by a
+   * global lexical binding. It performs the following steps when
+   * called:
+   *
+   * Properties may exist upon a global object that were directly
+   * created rather than being declared using a var or function
+   * declaration. A global lexical binding may not be created that has
+   * the same name as a non-configurable property of the global
+   * object. The global property "undefined" is an example of such a
+   * property.
+   */
+  HasRestrictedGlobalProperty($: VM, N: string): CR<boolean> {
+    const globalObject = this.ObjectRecord.BindingObject;
+    const existingProp = globalObject.GetOwnProperty($, N);
+    if (IsAbrupt(existingProp)) return existingProp;
+    if (existingProp === undefined) return false;
+    if (existingProp.Configurable) return false;
+    return true;
+  }
 
-Global Environment Records do not provide a super binding.
+  /**
+   * 9.1.1.4.15 CanDeclareGlobalVar ( N )
+   *
+   * The CanDeclareGlobalVar concrete method of a Global Environment
+   * Record envRec takes argument N (a String) and returns either a
+   * normal completion containing a Boolean or a throw completion. It
+   * determines if a corresponding CreateGlobalVarBinding call would
+   * succeed if called for the same argument N. Redundant var
+   * declarations and var declarations for pre-existing global object
+   * properties are allowed. It performs the following steps when
+   * called:
+   */
+  CanDeclareGlobalVar($: VM, N: string): CR<boolean> {
+    const globalObject = this.ObjectRecord.BindingObject;
+    const hasProperty = HasOwnProperty($, globalObject, N);
+    if (IsAbrupt(hasProperty)) return hasProperty;
+    if (hasProperty === true) return true;
+    return IsExtensible(globalObject);
+  }
 
-9.1.1.4.10 WithBaseObject ( )
+  /**
+   * 9.1.1.4.16 CanDeclareGlobalFunction ( N )
+   *
+   * The CanDeclareGlobalFunction concrete method of a Global
+   * Environment Record envRec takes argument N (a String) and returns
+   * either a normal completion containing a Boolean or a throw
+   * completion. It determines if a corresponding
+   * CreateGlobalFunctionBinding call would succeed if called for the
+   * same argument N. It performs the following steps when called:
+   */
+  CanDeclareGlobalFunction($: VM, N: string): CR<boolean> {
+    const globalObject = this.ObjectRecord.BindingObject;
+    const existingProp = globalObject.GetOwnProperty($, N);
+    if (IsAbrupt(existingProp)) return existingProp;
+    if (existingProp === undefined) return IsExtensible(globalObject);
+    if (existingProp.Configurable) return true;
+    if (IsDataDescriptor(existingProp) && existingProp.Writable && existingProp.Enumerable) {
+      return true;
+    }
+    return false;
+  }
 
-The WithBaseObject concrete method of a Global Environment Record envRec takes no arguments and returns undefined. It performs the following steps when called:
+  /**
+   * 9.1.1.4.17 CreateGlobalVarBinding ( N, D )
+   *
+   * The CreateGlobalVarBinding concrete method of a Global
+   * Environment Record envRec takes arguments N (a String) and D (a
+   * Boolean) and returns either a normal completion containing unused
+   * or a throw completion. It creates and initializes a mutable
+   * binding in the associated Object Environment Record and records
+   * the bound name in the associated [[VarNames]] List. If a binding
+   * already exists, it is reused and assumed to be initialized. It
+   * performs the following steps when called:
+   */
+  CreateGlobalVarBinding ($: VM, N: string, D: boolean): CR<UNUSED> {
+    const globalObject = this.ObjectRecord.BindingObject;
+    const hasProperty = HasOwnProperty($, globalObject, N);
+    if (IsAbrupt(hasProperty)) return hasProperty;
+    const extensible = IsExtensible(globalObject);
+    if (IsAbrupt(extensible)) return extensible;
+    if (!hasProperty && extensible) {
+      let result = this.ObjectRecord.CreateMutableBinding($, N, D);
+      if (IsAbrupt(result)) return result;
+      result = this.ObjectRecord.InitializeBinding($, N, undefined);
+      if (IsAbrupt(result)) return result;
+    }
+    if (!this.VarNames.has(N)) this.VarNames.add(N);
+    return UNUSED;
+  }
 
-1. 1. Return undefined.
-9.1.1.4.11 GetThisBinding ( )
+  /**
+   * 9.1.1.4.18 CreateGlobalFunctionBinding ( N, V, D )
+   *
+   * The CreateGlobalFunctionBinding concrete method of a Global
+   * Environment Record envRec takes arguments N (a String), V (an
+   * ECMAScript language value), and D (a Boolean) and returns either
+   * a normal completion containing unused or a throw completion. It
+   * creates and initializes a mutable binding in the associated
+   * Object Environment Record and records the bound name in the
+   * associated [[VarNames]] List. If a binding already exists, it is
+   * replaced. It performs the following steps when called:
+   *
+   * NOTE: Global function declarations are always represented as own
+   * properties of the global object. If possible, an existing own
+   * property is reconfigured to have a standard set of attribute
+   * values. Step 7 is equivalent to what calling the
+   * InitializeBinding concrete method would do and if globalObject is
+   * a Proxy will produce the same sequence of Proxy trap calls.
+   */
+  CreateGlobalFunctionBinding($: VM, N: string, V: Val, D: boolean): CR<UNUSED> {
+    const globalObject = this.ObjectRecord.BindingObject;
+    const existingProp = globalObject.GetOwnProperty($, N);
+    if (IsAbrupt(existingProp)) return existingProp;
+    const desc = (existingProp === undefined || existingProp.Configurable) ?
+        PropertyDescriptor({Value: V, Writable: true, Enumerable: true, Configurable: D}) :
+        PropertyDescriptor({Value: V});
+    {
+      const result = DefinePropertyOrThrow($, globalObject, N, desc);
+      if (IsAbrupt(result)) return result;
+    }
+    {
+      const result = Set$($, globalObject, N, V, false);
+      if (IsAbrupt(result)) return result;
+    }
+    if (!this.VarNames.has(N)) this.VarNames.add(N);
+    return UNUSED;
+  }
+}
 
-The GetThisBinding concrete method of a Global Environment Record envRec takes no arguments and returns a normal completion containing an Object. It performs the following steps when called:
+/**
+ * 9.1.1.5 Module Environment Records
+ *
+ * A Module Environment Record is a Declarative Environment Record
+ * that is used to represent the outer scope of an ECMAScript
+ * Module. In additional to normal mutable and immutable bindings,
+ * Module Environment Records also provide immutable import bindings
+ * which are bindings that provide indirect access to a target binding
+ * that exists in another Environment Record.
+ *
+ * Module Environment Records support all of the Declarative
+ * Environment Record methods listed in Table 16 and share the same
+ * specifications for all of those methods except for GetBindingValue,
+ * DeleteBinding, HasThisBinding and GetThisBinding. In addition,
+ * Module Environment Records support the methods listed below:
+ *
+ * CreateImportBinding(N, M, N2) - Create an immutable indirect
+ * binding in a Module Environment Record. The String value N is the
+ * text of the bound name. M is a Module Record, and N2 is a binding
+ * that exists in M's Module Environment Record.
+ *
+ * GetThisBinding() - Return the value of this Environment Record's
+ * this binding.
+ *
+ * The behaviour of the additional concrete specification methods for
+ * Module Environment Records are defined by the following algorithms:
+ *
+ * ---
+ *
+ * 9.1.2.6 NewModuleEnvironment ( E )
+ *
+ * The abstract operation NewModuleEnvironment takes argument E (an
+ * Environment Record) and returns a Module Environment Record. It
+ * performs the following steps when called:
+ *
+ * 1. Let env be a new Module Environment Record containing no bindings.
+ * 2. Set env.[[OuterEnv]] to E.
+ * 3. Return env.
+ *
+ * ---
+ *
+ * Note that the inherited constructor for DeclarativeEnvironmentRecord
+ * already just works.
+ */
+export class ModuleEnvironmentRecord extends DeclarativeEnvironmentRecord {
 
-1. 1. Return envRec.[[GlobalThisValue]].
-9.1.1.4.12 HasVarDeclaration ( N )
+  /**
+   * 9.1.1.5.1 GetBindingValue ( N, S )
+   *
+   * The GetBindingValue concrete method of a Module Environment
+   * Record envRec takes arguments N (a String) and S (a Boolean) and
+   * returns either a normal completion containing an ECMAScript
+   * language value or a throw completion. It returns the value of its
+   * bound identifier whose name is N. However, if the binding is an
+   * indirect binding the value of the target binding is returned. If
+   * the binding exists but is uninitialized a ReferenceError is
+   * thrown. It performs the following steps when called:
+   */
+  override GetBindingValue($: VM, N: string, S: boolean): CR<Val> {
+    // NOTE: S will always be true because a Module is always strict mode code.
+    Assert(S === true);
+    const binding = this.bindings.get(N);
+    Assert(binding != null);
+    if (binding instanceof IndirectBinding) {
+      const targetEnv = binding.Module.Environment;
+      return targetEnv.GetBindingValue(binding.Name, true);
+    }
+    if (!binding.Initialized) return Throw('ReferenceError');
+    return binding.Value;
+  }
 
-The HasVarDeclaration concrete method of a Global Environment Record envRec takes argument N (a String) and returns a Boolean. It determines if the argument identifier has a binding in this record that was created using a VariableStatement or a FunctionDeclaration. It performs the following steps when called:
+  /**
+   * 9.1.1.5.2 DeleteBinding ( N )
+   *
+   * The DeleteBinding concrete method of a Module Environment Record is
+   * never used within this specification.
+   *
+   * NOTE: Module Environment Records are only used within strict code
+   * and an early error rule prevents the delete operator, in strict
+   * code, from being applied to a Reference Record that would resolve
+   * to a Module Environment Record binding. See 13.5.1.1.
+   */
+  override DeleteBinding($: VM, N: string): never {
+    throw new Error('ModuleEnvironmentRecord#DeleteBinding is not allowed');
+  }
 
-1. 1. Let varDeclaredNames be envRec.[[VarNames]].
-2. 2. If varDeclaredNames contains N, return true.
-3. 3. Return false.
-9.1.1.4.13 HasLexicalDeclaration ( N )
+  /**
+   * 9.1.1.5.3 HasThisBinding ( )
+   *
+   * The HasThisBinding concrete method of a Module Environment Record
+   * envRec takes no arguments and returns true. It performs the
+   * following steps when called:
+   *
+   * NOTE: Module Environment Records always provide a this binding.
+   */
+  override HasThisBinding($: VM): true {
+    return true;
+  }
 
-The HasLexicalDeclaration concrete method of a Global Environment Record envRec takes argument N (a String) and returns a Boolean. It determines if the argument identifier has a binding in this record that was created using a lexical declaration such as a LexicalDeclaration or a ClassDeclaration. It performs the following steps when called:
+  /**
+   * 9.1.1.5.4 GetThisBinding ( )
+   *
+   * The GetThisBinding concrete method of a Module Environment Record
+   * envRec takes no arguments and returns a normal completion
+   * containing undefined. It performs the following steps when
+   * called:
+   */
+  override GetThisBinding(): undefined {
+    return undefined;
+  }
 
-1. 1. Let DclRec be envRec.[[DeclarativeRecord]].
-2. 2. Return ! DclRec.HasBinding(N).
-9.1.1.4.14 HasRestrictedGlobalProperty ( N )
+  /**
+   * 9.1.1.5.5 CreateImportBinding ( N, M, N2 )
+   *
+   * The CreateImportBinding concrete method of a Module Environment
+   * Record envRec takes arguments N (a String), M (a Module Record),
+   * and N2 (a String) and returns unused. It creates a new
+   * initialized immutable indirect binding for the name N. A binding
+   * must not already exist in this Environment Record for N. N2 is
+   * the name of a binding that exists in M\'s Module Environment
+   * Record. Accesses to the value of the new binding will indirectly
+   * access the bound value of the target binding. It performs the
+   * following steps when called:
+   */
+  CreateImportBinding(N: string, M: ModuleRecord, N2: string): UNUSED {
+    Assert(!this.bindings.has(N));
+    Assert(!M.Environment.Instantiated || M.HasDirectBinding(N2));
+    const binding = new IndirectBinding(M, N2);
+    this.bindings.set(N, binding); // TODO - record binding as initialized??? what does this mean?
+    return UNUSED;
+  }
+}
 
-The HasRestrictedGlobalProperty concrete method of a Global Environment Record envRec takes argument N (a String) and returns either a normal completion containing a Boolean or a throw completion. It determines if the argument identifier is the name of a property of the global object that must not be shadowed by a global lexical binding. It performs the following steps when called:
+// 9.1.2 Environment Record Operations
+//
+// The following abstract operations are used in this specification to
+// operate upon Environment Records:
 
-1. 1. Let ObjRec be envRec.[[ObjectRecord]].
-2. 2. Let globalObject be ObjRec.[[BindingObject]].
-3. 3. Let existingProp be ? globalObject.[[GetOwnProperty]](N).
-4. 4. If existingProp is undefined, return false.
-5. 5. If existingProp.[[Configurable]] is true, return false.
-6. 6. Return true.
-NOTE
-
-Properties may exist upon a global object that were directly created rather than being declared using a var or function declaration. A global lexical binding may not be created that has the same name as a non-configurable property of the global object. The global property "undefined" is an example of such a property.
-
-9.1.1.4.15 CanDeclareGlobalVar ( N )
-
-The CanDeclareGlobalVar concrete method of a Global Environment Record envRec takes argument N (a String) and returns either a normal completion containing a Boolean or a throw completion. It determines if a corresponding CreateGlobalVarBinding call would succeed if called for the same argument N. Redundant var declarations and var declarations for pre-existing global object properties are allowed. It performs the following steps when called:
-
-1. 1. Let ObjRec be envRec.[[ObjectRecord]].
-2. 2. Let globalObject be ObjRec.[[BindingObject]].
-3. 3. Let hasProperty be ? HasOwnProperty(globalObject, N).
-4. 4. If hasProperty is true, return true.
-5. 5. Return ? IsExtensible(globalObject).
-9.1.1.4.16 CanDeclareGlobalFunction ( N )
-
-The CanDeclareGlobalFunction concrete method of a Global Environment Record envRec takes argument N (a String) and returns either a normal completion containing a Boolean or a throw completion. It determines if a corresponding CreateGlobalFunctionBinding call would succeed if called for the same argument N. It performs the following steps when called:
-
-1. 1. Let ObjRec be envRec.[[ObjectRecord]].
-2. 2. Let globalObject be ObjRec.[[BindingObject]].
-3. 3. Let existingProp be ? globalObject.[[GetOwnProperty]](N).
-4. 4. If existingProp is undefined, return ? IsExtensible(globalObject).
-5. 5. If existingProp.[[Configurable]] is true, return true.
-6. 6. If IsDataDescriptor(existingProp) is true and existingProp has attribute values { [[Writable]]: true, [[Enumerable]]: true }, return true.
-7. 7. Return false.
-9.1.1.4.17 CreateGlobalVarBinding ( N, D )
-
-The CreateGlobalVarBinding concrete method of a Global Environment Record envRec takes arguments N (a String) and D (a Boolean) and returns either a normal completion containing unused or a throw completion. It creates and initializes a mutable binding in the associated Object Environment Record and records the bound name in the associated [[VarNames]] List. If a binding already exists, it is reused and assumed to be initialized. It performs the following steps when called:
-
-1. 1. Let ObjRec be envRec.[[ObjectRecord]].
-2. 2. Let globalObject be ObjRec.[[BindingObject]].
-3. 3. Let hasProperty be ? HasOwnProperty(globalObject, N).
-4. 4. Let extensible be ? IsExtensible(globalObject).
-5. 5. If hasProperty is false and extensible is true, then
-a. a. Perform ? ObjRec.CreateMutableBinding(N, D).
-b. b. Perform ? ObjRec.InitializeBinding(N, undefined).
-6. 6. If envRec.[[VarNames]] does not contain N, then
-a. a. Append N to envRec.[[VarNames]].
-7. 7. Return unused.
-9.1.1.4.18 CreateGlobalFunctionBinding ( N, V, D )
-
-The CreateGlobalFunctionBinding concrete method of a Global Environment Record envRec takes arguments N (a String), V (an ECMAScript language value), and D (a Boolean) and returns either a normal completion containing unused or a throw completion. It creates and initializes a mutable binding in the associated Object Environment Record and records the bound name in the associated [[VarNames]] List. If a binding already exists, it is replaced. It performs the following steps when called:
-
-1. 1. Let ObjRec be envRec.[[ObjectRecord]].
-2. 2. Let globalObject be ObjRec.[[BindingObject]].
-3. 3. Let existingProp be ? globalObject.[[GetOwnProperty]](N).
-4. 4. If existingProp is undefined or existingProp.[[Configurable]] is true, then
-a. a. Let desc be the PropertyDescriptor { [[Value]]: V, [[Writable]]: true, [[Enumerable]]: true, [[Configurable]]: D }.
-5. 5. Else,
-a. a. Let desc be the PropertyDescriptor { [[Value]]: V }.
-6. 6. Perform ? DefinePropertyOrThrow(globalObject, N, desc).
-7. 7. Perform ? Set(globalObject, N, V, false).
-8. 8. If envRec.[[VarNames]] does not contain N, then
-a. a. Append N to envRec.[[VarNames]].
-9. 9. Return unused.
-NOTE
-
-Global function declarations are always represented as own properties of the global object. If possible, an existing own property is reconfigured to have a standard set of attribute values. Step 7 is equivalent to what calling the InitializeBinding concrete method would do and if globalObject is a Proxy will produce the same sequence of Proxy trap calls.
-/**/
+/**
+ * 9.1.2.1 GetIdentifierReference ( env, name, strict )
+ *
+ * The abstract operation GetIdentifierReference takes arguments env
+ * (an Environment Record or null), name (a String), and strict (a
+ * Boolean) and returns either a normal completion containing a
+ * Reference Record or a throw completion. It performs the following
+ * steps when called:
+ */
+export function GetIdentifierReference($: VM, env: EnvironmentRecord|null,
+                                       name: string, strict: boolean): CR<ReferenceRecord> {
+  if (env == null) {
+    return ReferenceRecord({
+      Base: UNRESOLVABLE,
+      ReferencedName: name,
+      Strict: strict,
+      ThisValue: EMPTY,
+    });
+  }
+  const exists = env.HasBinding($, name);
+  if (IsAbrupt(exists)) return exists;
+  if (exists) {
+    return ReferenceRecord({
+      Base: env,
+      ReferencedName: name,
+      Strict: strict,
+      ThisValue: EMPTY,
+    });
+  }
+  return GetIdentifierReference($, env.OuterEnv, name, strict);
 }

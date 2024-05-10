@@ -8,6 +8,11 @@ export class VM {
 
   executionStack: ExecutionContext[] = [];
 
+  // TODO - can we store strictness of executing production here?
+
+  getRunningContext(): ExecutionContext {
+    // TODO - how is this defined?
+  }
 
 
   evaluateScript(script: string, filename?: string): CR<Val> {

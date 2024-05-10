@@ -11,23 +11,30 @@
  * implies nothing about its usage or meaning in context.
  */
 
-export const UNRESOLVABLE: unique symbol = Symbol('unresolvable');
-export type UNRESOLVABLE = typeof UNRESOLVABLE;
+class EnumSym<const S extends string> {
+  constructor(readonly Symbol: S) {}
+  is<T>(this: T, arg: unknown): arg is T {
+    return arg === this;
+  }
+}
 
-export const UNUSED: unique symbol = Symbol('unused');
-export type UNUSED = typeof UNUSED;
+export const UNRESOLVABLE: UNRESOLVABLE = new EnumSym('unresolvable');
+export interface UNRESOLVABLE extends EnumSym<'unresolvable'> {}
 
-export const EMPTY: unique symbol = Symbol('empty');
-export type EMPTY = typeof EMPTY;
+export const UNUSED: UNUSED = new EnumSym('unused');
+export interface UNUSED extends EnumSym<'unused'> {}
+
+export const EMPTY: EMPTY = new EnumSym('empty');
+export interface EMPTY extends EnumSym<'empty'> {}
 
 // Used by FunctionEnvironmentRecord
-export const LEXICAL: unique symbol = Symbol('lexical');
-export type LEXICAL = typeof LEXICAL;
+export const LEXICAL: LEXICAL = new EnumSym('lexical');
+export interface LEXICAL extends EnumSym<'lexical'> {}
 
 // Used by FunctionEnvironmentRecord
-export const INITIALIZED: unique symbol = Symbol('initialized');
-export type INITIALIZED = typeof INITIALIZED;
+export const INITIALIZED: INITIALIZED = new EnumSym('initialized');
+export interface INITIALIZED extends EnumSym<'initialized'> {}
 
 // Used by FunctionEnvironmentRecord
-export const UNINITIALIZED: unique symbol = Symbol('uninitialized');
-export type UNINITIALIZED = typeof UNINITIALIZED;
+export const UNINITIALIZED: UNINITIALIZED = new EnumSym('uninitialized');
+export interface UNINITIALIZED extends EnumSym<'uninitialized'> {}
