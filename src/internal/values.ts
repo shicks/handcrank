@@ -2,6 +2,7 @@ import { CR } from './completion_record';
 import { VM } from './vm';
 import { LEXICAL } from './enums';
 import { EnvironmentRecord } from './environment_record';
+import { PropertyDescriptor } from './property_descriptor';
 
 /**
  * 6.1 ECMAScript Language Types

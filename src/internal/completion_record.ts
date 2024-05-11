@@ -1,7 +1,7 @@
 import { EMPTY } from './enums';
-import { RecordFor, makeRecord } from './record';
+import { makeRecord } from './record';
 import { Assert } from './assert';
-import { Str, Val } from './values';
+import { Val } from './values';
 
 /**
  * 6.2.4 The Completion Record Specification Type
@@ -17,15 +17,16 @@ export type CR<T> = T|Abrupt;
  * Abrupt completion refers to any Completion Record with a [[Type]]
  * value other than normal.
  */
-export interface Abrupt extends RecordFor<{
+export interface Abrupt {
+  readonly __brand__: 'Abrupt';
   /** The type of completion that occurred. */
   readonly Type: CompletionType;
   /** The value that was produced. */
   readonly Value: unknown;
   /** The target label for directed control transfers. */
   readonly Target: string|EMPTY;
-}> {}
-export const Abrupt = makeRecord<Abrupt>('Abrupt');
+}
+export const Abrupt = makeRecord<Abrupt>();
 
 export enum CompletionType {
   /**
@@ -94,7 +95,7 @@ export function ThrowCompletion(value: Val): CR<never> {
 // NOTE: This is a convenience for throwing an error
 export function Throw(name: string, msg?: string): Abrupt {
   // TODO - actual errors
-  return ThrowCompletion(Str(msg ? `${name}: ${msg}` : name));
+  return ThrowCompletion(msg ? `${name}: ${msg}` : name);
 }
 
 /**

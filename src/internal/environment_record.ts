@@ -5,14 +5,15 @@ import { EMPTY, INITIALIZED, LEXICAL, UNINITIALIZED, UNRESOLVABLE, UNUSED } from
 import { VM } from './vm';
 import { ReferenceRecord } from './reference_record';
 import { ModuleRecord } from './module_record';
+import { IsDataDescriptor, PropertyDescriptor } from './property_descriptor';
 
+declare const IsExtensible: any;
 declare const HasProperty: any;
 declare const HasOwnProperty: any;
 declare const Get: any;
 declare const Set$: any;
 declare const ToBoolean: any;
 declare const DefinePropertyOrThrow: any;
-declare const PropertyDescriptor: any;
 
 /**
  * 6.2.7 The Environment Record Specification Type
@@ -146,32 +147,41 @@ export abstract class EnvironmentRecord {
    * NOTE: The spec doesn't indicate this as being present on the
    * base class, but it's called on it, so we include it here.
    */
-  override GetThisBinding(): CR<Val|undefined> {
+  GetThisBinding(): CR<Val|undefined> {
     return undefined;
   }
 }
 
+interface UninitializedBinding {
+  Value: Val;
+  Initialized: boolean;
+}
+
 /** Abstract base class reresenting a binding. */
 abstract class Binding {
-  Value: Val = undefined;
-  Initialized = false;
+  abstract readonly Value: Val;
+  abstract readonly Initialized: boolean;
   abstract readonly Deletable: boolean;
   abstract readonly Strict: boolean;
 }
 
 /** A mutable binding. */
 class MutableBinding extends Binding {
+  override Value: Val = undefined;
+  override readonly Initialized: boolean = false;
   override readonly Strict!: false;
   constructor(readonly Deletable: boolean) { super(); }
 }
-MutableBinding.prototype.Strict = false;
+(MutableBinding.prototype as any).Strict = false;
 
 /** An immutable binding. */
 class ImmutableBinding extends Binding {
+  override readonly Value: Val = undefined;
+  override readonly Initialized: boolean = false;
   override readonly Deletable!: false;
   constructor(readonly Strict: boolean) { super(); }
 }
-ImmutableBinding.prototype.Deletable = false;
+(ImmutableBinding.prototype as any).Deletable = false;
 
 /** An indirect module binding. */
 class IndirectBinding extends Binding {
@@ -182,11 +192,11 @@ class IndirectBinding extends Binding {
     readonly Module: ModuleRecord,
     readonly Name: string,
   ) { super(); }
-  get Value() { throw new Error('not allowed'); }
+  override get Value(): Val { throw new Error('not allowed'); }
 }
-IndirectBinding.prototype.Initialized = true;
-IndirectBinding.prototype.Deletable = false;
-IndirectBinding.prototype.Strict = true;
+(IndirectBinding.prototype as any).Initialized = true;
+(IndirectBinding.prototype as any).Deletable = false;
+(IndirectBinding.prototype as any).Strict = true;
 
 /**
  * 9.1.1.1 Declarative Environment Records
@@ -277,8 +287,9 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
     Assert(this.bindings.has(N));
     const binding = this.bindings.get(N)!;
     Assert(!binding.Initialized);
-    binding.Value = V;
-    binding.Initialized = true;
+    const b = binding as UninitializedBinding;
+    b.Value = V;
+    b.Initialized = true;
     return UNUSED;
   }
 
@@ -308,7 +319,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
     if (!binding.Initialized) return Throw('ReferenceError');
     if (binding instanceof MutableBinding) {
       binding.Value = V;
-      binding.Initialized = true;
+      (binding as UninitializedBinding).Initialized = true;
       return UNUSED;
     }
     // Assert: Attempt to change value of an immutable binding
@@ -358,7 +369,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * Record envRec takes no arguments and returns false. It performs
    * the following steps when called:
    */
-  override HasThisBinding(): false {
+  override HasThisBinding(): boolean {
     return false;
   }
 
@@ -369,7 +380,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * Record envRec takes no arguments and returns false. It performs
    * the following steps when called:
    */
-  override HasSuperBinding(): false {
+  override HasSuperBinding(): boolean {
     return false;
   }
 
@@ -551,7 +562,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
     const value = HasProperty($, bindingObject, N);
     if (IsAbrupt(value)) return value;
     if (!value) {
-      if (!S) return UNDEFINED;
+      if (!S) return undefined;
       return Throw('ReferenceError');
     }
     return Get($, bindingObject, N);
@@ -581,7 +592,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    *
    * NOTE: Object Environment Records do not provide a this binding.
    */
-  override HasThisBinding(): false {
+  override HasThisBinding(): boolean {
     return false;
   }
 
@@ -1265,7 +1276,7 @@ export class ModuleEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * code, from being applied to a Reference Record that would resolve
    * to a Module Environment Record binding. See 13.5.1.1.
    */
-  override DeleteBinding($: VM, N: string): never {
+  override DeleteBinding(_$: VM, _N: string): never {
     throw new Error('ModuleEnvironmentRecord#DeleteBinding is not allowed');
   }
 
@@ -1278,7 +1289,7 @@ export class ModuleEnvironmentRecord extends DeclarativeEnvironmentRecord {
    *
    * NOTE: Module Environment Records always provide a this binding.
    */
-  override HasThisBinding($: VM): true {
+  override HasThisBinding(): true {
     return true;
   }
 

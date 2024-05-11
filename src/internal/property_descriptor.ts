@@ -1,8 +1,8 @@
 import { Assert } from './assert';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { UNUSED } from './enums';
-import { RecordFor, makeRecord } from './record';
-import { IsUndefined, Obj, UNDEFINED, Val, Void } from './values';
+import { makeRecord } from './record';
+import { Obj, Val } from './values';
 import { VM } from './vm';
 
 declare const OrdinaryCreateObject: any;
@@ -39,15 +39,16 @@ declare const IsCallable: any;
  * accessor Property Descriptor or a data Property Descriptor and that
  * has all of the corresponding fields defined in Table 3.
  */
-export interface PropertyDescriptor extends RecordFor<{
+export interface PropertyDescriptor {
+  __brand__: 'PropertyDescriptor';
   Enumerable?: boolean;
   Configurable?: boolean;
   Writable?: boolean
   Value?: Val;
-  Get?: Obj|Void;
-  Set?: Obj|Void;
-}> {}
-export const PropertyDescriptor = makeRecord<PropertyDescriptor>('PropertyDescriptor');
+  Get?: Obj|undefined;
+  Set?: Obj|undefined;
+}
+export const PropertyDescriptor = makeRecord<PropertyDescriptor>();
 
 /**
  * 6.2.6.1 IsAccessorDescriptor ( Desc )
@@ -158,7 +159,7 @@ export function ToPropertyDescriptor($: VM, obj: Val): CR<PropertyDescriptor> {
   if (hasGet) {
     const getter = Get($, obj, 'get');
     if (IsAbrupt(getter)) return getter;
-    if (!IsCallable(getter) && !IsUndefined(getter)) return Throw('TypeError');
+    if (!IsCallable(getter) && getter != undefined) return Throw('TypeError');
     desc.Get = getter;
   }
   const hasSet = HasProperty($, obj, 'set');
@@ -166,7 +167,7 @@ export function ToPropertyDescriptor($: VM, obj: Val): CR<PropertyDescriptor> {
   if (hasSet) {
     const setter = Set($, obj, 'set');
     if (IsAbrupt(setter)) return setter;
-    if (!IsCallable(setter) && !IsUndefined(setter)) return Throw('TypeError');
+    if (!IsCallable(setter) && setter != undefined) return Throw('TypeError');
     desc.Set = setter;
   }
   if (desc.Get || desc.Set) {
@@ -182,13 +183,13 @@ export function ToPropertyDescriptor($: VM, obj: Val): CR<PropertyDescriptor> {
  * Desc (a Property Descriptor) and returns unused. It performs the
  * following steps when called:
  */
-export function CompletePropertyDescriptor($: VM, Desc: PropertyDescriptor): UNUSED {
+export function CompletePropertyDescriptor(_$: VM, Desc: PropertyDescriptor): UNUSED {
   if (IsGenericDescriptor(Desc) || IsDataDescriptor(Desc)) {
-    if (!Desc.Value) Desc.Value = UNDEFINED;
+    if (!Desc.Value) Desc.Value = undefined;
     if (!Desc.Writable) Desc.Writable = false;
   } else {
-    if (!Desc.Get) Desc.Get = UNDEFINED;
-    if (!Desc.Set) Desc.Set = UNDEFINED;
+    if (!Desc.Get) Desc.Get = undefined;
+    if (!Desc.Set) Desc.Set = undefined;
   }
   if (!Desc.Enumerable) Desc.Enumerable = false;
   if (!Desc.Configurable) Desc.Configurable = false;

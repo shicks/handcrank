@@ -1,4 +1,11 @@
+import { Assert } from "./assert";
+import { CR } from "./completion_record";
+import { UNUSED } from "./enums";
 import { GlobalEnvironmentRecord } from "./environment_record";
+import { Obj } from "./values";
+import { VM } from "./vm";
+
+declare const OrdinaryObjectCreate: any;
 
 /**
  * 9.3 Realms
@@ -74,7 +81,7 @@ export function CreateRealm($: VM): RealmRecord {
  * Realm Record) and returns unused. It performs the following steps
  * when called:
  */
-export function CreateIntrinsics($: VM, realmRec: RealmRecord): UNUSED {
+export function CreateIntrinsics(_$: VM, _realmRec: RealmRecord): UNUSED {
   // TODO - TABLE 6
   //      - this is a great place for plugins...?
   //        -> could be registered with VM
@@ -119,11 +126,11 @@ export function SetRealmGlobalObject(_$: VM,
                                      thisValue: Obj|undefined): UNUSED {
   if (globalObj == undefined) {
     const intrinsics = realmRec.Intrinsics;
-    globalObj = OrdinaryObjectCreate(intrinsice.get('%Object.prototype%'));
+    globalObj = OrdinaryObjectCreate(intrinsics.get('%Object.prototype%'));
   }
   Assert(globalObj instanceof Obj);
   if (thisValue == undefined) thisValue = globalObj;
-  realmRec.GlobalObj = globalObj;
+  realmRec.GlobalObject = globalObj;
   realmRec.GlobalEnv = new GlobalEnvironmentRecord(globalObj, thisValue);
   return UNUSED;
 }
@@ -138,7 +145,7 @@ export function SetRealmGlobalObject(_$: VM,
  */
 export function SetDefaultGlobalBindings($: VM, realmRec: RealmRecord): CR<Obj> {
   const gbl = realmRec.GlobalObject;
-  for (const prop of $.defaultGlobals) { // ???
+  //for (const prop of $.defaultGlobals) { // ???
     // 2. For each property of the Global Object specified in clause 19, do
     //   a. Let name be the String value of the property name.
     //   b. Let desc be the fully populated data Property
@@ -147,6 +154,6 @@ export function SetDefaultGlobalBindings($: VM, realmRec: RealmRecord): CR<Obj> 
     //      19.3, or 19.4 the value of the [[Value]] attribute is the
     //      corresponding intrinsic object from realmRec.
     //   c. Perform ? DefinePropertyOrThrow(global, name, desc).
-  }
-  return gbl;
+  //}
+  return gbl!;
 }

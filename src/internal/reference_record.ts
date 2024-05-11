@@ -2,7 +2,7 @@ import { Assert } from './assert';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { EMPTY, UNRESOLVABLE, UNUSED } from './enums';
 import { EnvironmentRecord } from './environment_record';
-import { RecordFor, makeRecord } from './record';
+import { makeRecord } from './record';
 import { Val } from './values';
 import { VM } from './vm';
 
@@ -26,7 +26,8 @@ declare const ResolvePrivateIdentifier: any;
  * A Reference Record is a resolved name or property binding; its
  * fields are defined by Table 8.
  */
-export interface ReferenceRecord extends RecordFor<{
+export interface ReferenceRecord {
+  __brand__: 'ReferenceRecord';
   /**
    * The value or Environment Record which holds the binding. A
    * [[Base]] of unresolvable indicates that the binding could not
@@ -52,8 +53,8 @@ export interface ReferenceRecord extends RecordFor<{
    * Reference Record was created.
    */
   readonly ThisValue: Val|EMPTY;
-}> {}
-export const ReferenceRecord = makeRecord<ReferenceRecord>('ReferenceRecord');
+}
+export const ReferenceRecord = makeRecord<ReferenceRecord>();
 
 interface ObjectReferenceRecord extends ReferenceRecord {
   readonly Base: Val|UNRESOLVABLE;

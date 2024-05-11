@@ -1,6 +1,14 @@
-import { CreateRealm, RealmRecord } from './realm_record';
+import { RealmRecord } from './realm_record';
 import * as esprima from 'esprima';
 import * as ESTree from 'estree';
+import { VM } from './vm';
+import { CR, IsAbrupt } from './completion_record';
+import { Val } from './values';
+import { ExecutionContext } from './execution_context';
+import { EMPTY } from './enums';
+import { Assert } from './assert';
+
+declare const GlobalDeclarationInstantiation: any;
 
 /**
  * 16.1.4 Script Records
@@ -92,20 +100,20 @@ export function ScriptEvaluation($: VM, scriptRecord: ScriptRecord): CR<Val> {
 
     // TODO - evaluate needs plugins
 
-    result = $.evaluate(script);
+    result = $.operate('Evaluation', script);
     if (!IsAbrupt(result) && EMPTY.is(result)) {
       result = undefined;
     }
   }
   // 14. Suspend scriptContext and remove it from the execution context stack.
   scriptContext.suspend();
-  if ($.executionStack.at(-1) !== scriptContext);
+  Assert($.executionStack.at(-1) === scriptContext);
   $.executionStack.pop();
   // 15. Assert: The execution context stack is not empty.
   Assert($.executionStack.length > 0);
   // 16. Resume the context that is now on the top of the execution context
   // stack as the running execution context.
-  $.executionStack.at(-1).resume();
+  $.executionStack.at(-1)!.resume();
   // 17. Return ? result.
   return result;
 }

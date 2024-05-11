@@ -1,8 +1,11 @@
 import { Assert } from './assert';
 import { CR } from './completion_record';
 import { EnvironmentRecord, FunctionEnvironmentRecord, GetIdentifierReference } from './environment_record';
+import { ModuleRecord } from './module_record';
+import { RealmRecord } from './realm_record';
 import { ReferenceRecord } from './reference_record';
-import { Func } from './values';
+import { ScriptRecord } from './script_record';
+import { Func, Obj, Val } from './values';
 import { VM } from './vm';
 
 /**
@@ -221,5 +224,5 @@ export function GetNewTarget($: VM): Obj|undefined {
  * steps when called:
  */
 export function GetGlobalObject($: VM): Obj {
-  return $.getRunningContext().Realm.GlobalObject;
+  return $.getRunningContext().Realm.GlobalObject!;
 }

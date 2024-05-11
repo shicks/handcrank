@@ -1,31 +1,18 @@
 // Infrastructure for defining record classes.
 
-type OptOf<T> = {[K in keyof T]-?: {} extends Pick<T, K> ? K : never}[keyof T];
-type FillOpt<T> = {[K in OptOf<T>]-?: T[K]};
-type Rest<F extends RecordFor<any>> = OptOf<F> extends never ? [] : [FillOpt<F>];
+interface Branded {
+  readonly __brand__: string|symbol;
+}
 
 type MakeRecordFn =
-  <F extends RecordFor<object>>(name: string, ...rest: Rest<F>) => {
-    (arg: F[RECORD_INIT]['type']): F;
+  <F extends Branded>() => {
+    (arg: Omit<F, '__brand__'>): F;
     [Symbol.hasInstance](arg: unknown): arg is F;
   };
 
-declare const RECORD_INIT: unique symbol;
-type RECORD_INIT = typeof RECORD_INIT;
-
-interface Inv<in out T> {
-  inv(arg: T): T;
-  type: T;
-}
-
-// Makes all fields required and adds a tag to keep track of the original version,
-// so that `makeRecord` can unpack it.
-export type RecordFor<T extends object> = T & {[RECORD_INIT]: Inv<T>};
-//export type RecordFor<T> = {[K in keyof T]-?: T[K]} & {[RECORD_INIT]: T};
-
 // NOTE: takes ownership of the object literal
-export const makeRecord: MakeRecordFn = <F extends RecordFor<object>>() => {
-  const instances = new WeakSet<F>();
+export const makeRecord: MakeRecordFn = <F extends {__brand__: string|symbol}>() => {
+  const instances = new WeakSet<object>();
   const fn = (obj: any) => {
     instances.add(obj);
     return obj;

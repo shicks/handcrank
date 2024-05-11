@@ -1,10 +1,13 @@
-//import { parseScript } from 'esprima';
-import * as ESTree from 'estree';
-
+import { parseScript } from 'esprima';
 import { CR } from './completion_record';
 import type { Val } from './values';
 import type { ExecutionContext } from './execution_context';
-import { NOT_APPLICABLE } from './enums';
+import { EMPTY, NOT_APPLICABLE } from './enums';
+import { NodeTypes, NodeMap, Node } from './tree';
+
+interface SyntaxOp {
+  Evaluation: CR<Val|EMPTY>;
+}
 
 export class VM {
 
@@ -14,7 +17,7 @@ export class VM {
   defines = new Map<string, [string[], ($: VM, ...args: Val[]) => Val]>();
   definesRevdeps = new Map<string, string[]>();
   syntaxOperations: SyntaxOpMap = {
-    Evaluate: {},
+    Evaluation: {},
   };
 
   // TODO - can we store strictness of executing production here?
@@ -25,11 +28,29 @@ export class VM {
   }
 
   evaluateScript(script: string, filename?: string): CR<Val> {
-    return null!;
+    const result = this.operate('Evaluation', parseScript(script));
+    return EMPTY.is(result) ? undefined : result;
+  }
+
+  operate<O extends keyof SyntaxOp>(op: O, n: Node): SyntaxOp[O] {
+    for (const impl of this.syntaxOperations[op][n.type] || []) {
+      const result = impl(this, n as any, (child) => this.operate(op, child));
+      if (!NOT_APPLICABLE.is(result)) return result;
+    }
+    console.dir(n);
+    throw new Error(`Could not do '${op}' on ${n.type}({\n  ${
+        Object.entries(n).map((k, v) => `${k}: ${v}`).join(',\n  ')}\n})`);
   }
 
   install(plugin: Plugin): void {
-    plugin.install({
+    const pushSyntaxOp = <const O extends keyof SyntaxOp>(op: O) =>
+      <const N extends NodeTypes>(nodeTypes: N[], fn: SyntaxOpFn<O, N>) => {
+        const ops: SyntaxOpNodeMap<O> = this.syntaxOperations[op];
+        for (const nt of nodeTypes) {
+          (ops[nt] || (ops[nt] = [] as any[])).push(fn);
+        }
+      };
+    plugin({
       define: (name: string, deps: string[], fn: ($: VM, ...args: Val[]) => Val) => {
         if (this.defines.has(name)) throw new Error(`already defined: ${name}`);
         this.defines.set(name, [deps, fn]);
@@ -39,43 +60,32 @@ export class VM {
           revdeps.push(name);
         }
       },
-      syntax: <const O extends keyof SyntaxOp, T extends keyof ESTree.NodeMap>(
-        op: O,
-        nodeTypes: T[],
-        fn: ($: VM, node: ESTree.NodeMap[T]) => SyntaxOp[O]|NOT_APPLICABLE,
-      ) => {
-        const ops = this.syntaxOperations[op];
-        for (const nt of nodeTypes) {
-          (ops[nt] || (ops[nt] = [] as any[])).push(fn);
-        }
-      },
+      onEvaluation: pushSyntaxOp('Evaluation'),
     });
   }
 }
 
-type SyntaxOpFn<O, N> = ($: VM, node: N) => O|NOT_APPLICABLE;
-type SyntaxOpNodeMap<O> = {
-  [N in keyof ESTree.NodeMap]?: Array<SyntaxOpFn<O, ESTree.NodeMap[N]>>
+type SyntaxOpFn<O extends keyof SyntaxOp, N extends keyof NodeMap> =
+    ($: VM, node: NodeMap[N],
+     recurse: (n: Node) => SyntaxOp[O]) => SyntaxOp[O]|NOT_APPLICABLE;
+type SyntaxOpNodeMap<O extends keyof SyntaxOp> = {
+  [N in NodeTypes]?: Array<SyntaxOpFn<O, N>>
 };
 type SyntaxOpMap = {
-  [O in keyof SyntaxOp]: SyntaxOpNodeMap<SyntaxOp[O]>
-}
-interface SyntaxOp {
-  'Evaluate': Val;
-}
-interface PluginSPI {
-  // NOTE: names can be %intrinsics% or GlobalBindings.
-  define(name: string, deps: string[], fn: ($: VM, ...args: Val[]) => Val): void;
-  syntax<const O extends keyof SyntaxOp, T extends keyof ESTree.NodeMap>(
-    op: O,
-    nodeTypes: T[],
-    fn: ($: VM, node: ESTree.NodeMap[T]) => SyntaxOp[O]|NOT_APPLICABLE,
-  ): void;
+  [O in keyof SyntaxOp]: SyntaxOpNodeMap<O>
+};
+
+type SyntaxSPI = {
+  [O in keyof SyntaxOp as `on${O}`]: <N extends NodeTypes>(nodeTypes: N[],
+                                                           fn: SyntaxOpFn<O, N>) => void
 }
 
-export interface Plugin {
-  // TODO - how to solve ordering issues?
-  //      - can we just install an as-needed graph so that
-  //        we can just assume all prereqs exist?
-  install(spi: PluginSPI): void;
+export interface PluginSPI extends SyntaxSPI {
+  // NOTE: names can be %intrinsics% or GlobalBindings.
+  define(name: string, deps: string[], fn: ($: VM, ...args: Val[]) => Val): void;
 }
+
+// TODO - how to solve ordering issues?
+//      - can we just install an as-needed graph so that
+//        we can just assume all prereqs exist?
+export type Plugin = (spi: PluginSPI) => void;
