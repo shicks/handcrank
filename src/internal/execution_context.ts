@@ -111,6 +111,14 @@ export class ExecutionContext {
     //PrivateEnvironment?: PrivateEnvironmentRecord;
     //Generator?: Gen;
   ) { }
+
+  suspend(): void {
+    // TODO ???
+  }
+
+  resume(): void {
+    // TODO ???
+  }
 }
 
 /**
@@ -215,5 +223,3 @@ export function GetNewTarget($: VM): Obj|undefined {
 export function GetGlobalObject($: VM): Obj {
   return $.getRunningContext().Realm.GlobalObject;
 }
-
-/**/

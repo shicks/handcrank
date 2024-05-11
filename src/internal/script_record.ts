@@ -1,4 +1,6 @@
-import { RealmRecord } from "./realm_record";
+import { CreateRealm, RealmRecord } from './realm_record';
+import * as esprima from 'esprima';
+import * as ESTree from 'estree';
 
 /**
  * 16.1.4 Script Records
@@ -8,28 +10,29 @@ import { RealmRecord } from "./realm_record";
  */
 export class ScriptRecord {
 
-  /**
-   * The realm within which this script was created. undefined if
-   * not yet assigned.
-   */
-  Realm: RealmRecord|undefined;
-
-  /** The result of parsing the source text of this script. */
-  ECMAScriptCode: ESTree.Program;
-
   // /**
   //  * A map from the specifier strings imported by this script to the
   //  * resolved Module Record. The list does not contain two different
   //  * Records with the same [[Specifier]].
   //  */
   // a List of Records with fields [[Specifier]] (a String) and [[Module]] (a Module Record)
-  // LoadedModules: LoadedModuleRecord[];
+  // LoadedModules: LoadedModuleRecord[] = [];
 
-  /**
-   * Field reserved for use by host environments that need to associate
-   * additional information with a script.
-   */
-  HostDefined: unknown;
+  constructor(
+    /**
+     * The realm within which this script was created. undefined if
+     * not yet assigned.
+     * @see https://github.com/tc39/ecma262/issues/3326
+     */
+    readonly Realm: RealmRecord|undefined,
+    /** The result of parsing the source text of this script. */
+    readonly ECMAScriptCode: ESTree.Program,
+    /**
+     * Field reserved for use by host environments that need to associate
+     * additional information with a script.
+     */
+    readonly HostDefined: unknown,
+  ) {}
 }
 
 /**
@@ -42,42 +45,73 @@ export class ScriptRecord {
  * the result of parsing sourceText as a Script. It performs the
  * following steps when called:
  */
-export function ParseScript() {
+export function ParseScript(sourceText: string,
+                            realm: RealmRecord|undefined,
+                            hostDefined: unknown): ScriptRecord|Error[] {
 
-// 1. 1. Let script be ParseText(sourceText, Script).
-// 2. 2. If script is a List of errors, return script.
-// 3. 3. Return Script Record { [[Realm]]: realm, [[ECMAScriptCode]]: script, [[LoadedModules]]: « », [[HostDefined]]: hostDefined }.
-// NOTE
+  // NOTE: An implementation may parse script source text and analyse
+  // it for Early Error conditions prior to evaluation of ParseScript
+  // for that script source text. However, the reporting of any errors
+  // must be deferred until the point where this specification
+  // actually performs ParseScript upon that source text.
 
-// An implementation may parse script source text and analyse it for Early Error conditions prior to evaluation of ParseScript for that script source text. However, the reporting of any errors must be deferred until the point where this specification actually performs ParseScript upon that source text.
-
+  try {
+    const script = esprima.parseScript(sourceText);
+    return new ScriptRecord(realm, script, hostDefined);
+  } catch (err) {
+    // TODO - will there ever be multiple errors?
+    return [err];
+  }
 }
 
+/**
+ * 16.1.6 ScriptEvaluation ( scriptRecord )
+ *
+ * The abstract operation ScriptEvaluation takes argument scriptRecord
+ * (a Script Record) and returns either a normal completion containing
+ * an ECMAScript language value or an abrupt completion. It performs
+ * the following steps when called:
+ */
+export function ScriptEvaluation($: VM, scriptRecord: ScriptRecord): CR<Val> {
+
+  const globalEnv = scriptRecord.Realm?.GlobalEnv;
+  if (!globalEnv) throw new Error('no global env!');
+  const scriptContext = new ExecutionContext(
+    globalEnv /* LexicalEnvironment */,
+    globalEnv /* VariableEnvironment */,
+    scriptRecord /* ScriptOrModule */,
+    null /* Function */,
+    scriptRecord.Realm /* Realm */,
+    // 8. Set the PrivateEnvironment of scriptContext to null.
+  );
+  $.getRunningContext().suspend();
+  $.executionStack.push(scriptContext);
+  const script = scriptRecord.ECMAScriptCode;
+  let result = GlobalDeclarationInstantiation(script, globalEnv);
+  if (!IsAbrupt(result)) {
+
+    // TODO - evaluate needs plugins
+
+    result = $.evaluate(script);
+    if (!IsAbrupt(result) && EMPTY.is(result)) {
+      result = undefined;
+    }
+  }
+  // 14. Suspend scriptContext and remove it from the execution context stack.
+  scriptContext.suspend();
+  if ($.executionStack.at(-1) !== scriptContext);
+  $.executionStack.pop();
+  // 15. Assert: The execution context stack is not empty.
+  Assert($.executionStack.length > 0);
+  // 16. Resume the context that is now on the top of the execution context
+  // stack as the running execution context.
+  $.executionStack.at(-1).resume();
+  // 17. Return ? result.
+  return result;
+}
+
+
 /*
-16.1.6 ScriptEvaluation ( scriptRecord )
-
-The abstract operation ScriptEvaluation takes argument scriptRecord (a Script Record) and returns either a normal completion containing an ECMAScript language value or an abrupt completion. It performs the following steps when called:
-
-1. 1. Let globalEnv be scriptRecord.[[Realm]].[[GlobalEnv]].
-2. 2. Let scriptContext be a new ECMAScript code execution context.
-3. 3. Set the Function of scriptContext to null.
-4. 4. Set the Realm of scriptContext to scriptRecord.[[Realm]].
-5. 5. Set the ScriptOrModule of scriptContext to scriptRecord.
-6. 6. Set the VariableEnvironment of scriptContext to globalEnv.
-7. 7. Set the LexicalEnvironment of scriptContext to globalEnv.
-8. 8. Set the PrivateEnvironment of scriptContext to null.
-9. 9. Suspend the running execution context.
-10. 10. Push scriptContext onto the execution context stack; scriptContext is now the running execution context.
-11. 11. Let script be scriptRecord.[[ECMAScriptCode]].
-12. 12. Let result be Completion(GlobalDeclarationInstantiation(script, globalEnv)).
-13. 13. If result.[[Type]] is normal, then
-a. a. Set result to Completion(Evaluation of script).
-b. b. If result.[[Type]] is normal and result.[[Value]] is empty, then
-i. i. Set result to NormalCompletion(undefined).
-14. 14. Suspend scriptContext and remove it from the execution context stack.
-15. 15. Assert: The execution context stack is not empty.
-16. 16. Resume the context that is now on the top of the execution context stack as the running execution context.
-17. 17. Return ? result.
 16.1.7 GlobalDeclarationInstantiation ( script, env )
 
 The abstract operation GlobalDeclarationInstantiation takes arguments script (a Script Parse Node) and env (a Global Environment Record) and returns either a normal completion containing unused or a throw completion. script is the Script for which the execution context is being established. env is the global environment in which bindings are to be created.

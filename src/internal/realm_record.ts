@@ -63,7 +63,7 @@ export class RealmRecord {
  */
 export function CreateRealm($: VM): RealmRecord {
   const realmRec = new RealmRecord();
-  CreateIntrinsice($, realmRec);
+  CreateIntrinsics($, realmRec);
   return realmRec;
 }
 

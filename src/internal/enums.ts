@@ -38,3 +38,7 @@ export interface INITIALIZED extends EnumSym<'initialized'> {}
 // Used by FunctionEnvironmentRecord
 export const UNINITIALIZED: UNINITIALIZED = new EnumSym('uninitialized');
 export interface UNINITIALIZED extends EnumSym<'uninitialized'> {}
+
+// Indicates that a syntax operation implementation is not applicable
+export const NOT_APPLICABLE: NOT_APPLICABLE = new EnumSym('not applicable');
+export interface NOT_APPLICABLE extends EnumSym<'not applicable'> {}
