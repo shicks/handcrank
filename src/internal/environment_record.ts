@@ -740,7 +740,7 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * containing either an Object, null, or undefined, or a throw
    * completion. It performs the following steps when called:
    */
-  GetSuperBase($: VM): CR<Obj|undefined> {
+  GetSuperBase($: VM): CR<Obj|null|undefined> {
     const home = this.FunctionObject.HomeObject;
     if (home == undefined) return undefined;
     Assert(home instanceof Obj);
@@ -1252,7 +1252,7 @@ export class ModuleEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * the binding exists but is uninitialized a ReferenceError is
    * thrown. It performs the following steps when called:
    */
-  override GetBindingValue($: VM, N: string, S: boolean): CR<Val> {
+  override GetBindingValue(_$: VM, N: string, S: boolean): CR<Val> {
     // NOTE: S will always be true because a Module is always strict mode code.
     Assert(S === true);
     const binding = this.bindings.get(N);

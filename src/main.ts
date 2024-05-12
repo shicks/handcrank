@@ -6,4 +6,4 @@ export const vm = new VM();
 vm.install(basic);
 vm.install(arithmetic);
 
-console.dir(vm.evaluateScript('1 + 4'));
+console.dir(vm.evaluateScript(process.argv[2]));

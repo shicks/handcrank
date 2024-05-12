@@ -6,7 +6,8 @@
     "inlineSourceMap": true,
     "inlineSources": true,
     // "module": "bundler",
-    // "moduleResolution": "nodenext",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
     "noEmit": true,
     "noImplicitAny": true,
     "noImplicitThis": true,
@@ -20,5 +21,6 @@
   "exclude": [
     "unused/*.ts",
     "scraps/*.ts",
+    "test/*.js", // for now
   ]
 }

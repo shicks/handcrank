@@ -61,6 +61,19 @@ export function IsAccessorDescriptor(Desc: PropertyDescriptor|undefined): boolea
   return Boolean(Desc && (Desc.Get || Desc.Set));
 }
 
+const VALUE_PROP = (() => {
+  const Value = {} as Val;
+  const p = PropertyDescriptor({Value});
+  for (const k in p) {
+    if (p[k as keyof PropertyDescriptor] === Value) return k;
+  }
+  throw new Error(`bad PropertyDescriptor implementation`);
+})();
+
+export function HasValueField(Desc: PropertyDescriptor): boolean {
+  return VALUE_PROP in Desc;
+}
+
 /**
  * 6.2.6.2 IsDataDescriptor ( Desc )
  *
@@ -69,7 +82,7 @@ export function IsAccessorDescriptor(Desc: PropertyDescriptor|undefined): boolea
  * performs the following steps when called:
  */
 export function IsDataDescriptor(Desc: PropertyDescriptor|undefined): boolean {
-  return Boolean(Desc && (Desc.Value != null || Desc.Writable != null));
+  return Boolean(Desc && (HasValueField(Desc) || Desc.Writable != null));
 }
 
 /**

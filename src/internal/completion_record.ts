@@ -111,5 +111,5 @@ export function UpdateEmpty<T, U>(completionRecord: CR<T|EMPTY>, value: U): CR<T
   if (crValue !== EMPTY) return completionRecord as CR<T>;
   Assert(IsAbrupt(completionRecord)); // NOTE: this is not in the spec.
   Assert(completionRecord.Type !== 'return' && completionRecord.Type !== 'throw');
-  return IsAbrupt(completionRecord) ? Abrupt({...completionRecord, Value: value}) : value;
+  return IsAbrupt(completionRecord) ? Abrupt({...completionRecord, Value: value} as any) : value;
 }

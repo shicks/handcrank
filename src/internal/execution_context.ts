@@ -65,6 +65,36 @@ import { VM } from './vm';
  * component of the running execution context is also called the
  * active function object.
  *
+ * An execution context is purely a specification mechanism and need
+ * not correspond to any particular artefact of an ECMAScript
+ * implementation. It is impossible for ECMAScript code to directly
+ * access or observe an execution context.
+ */
+export class ExecutionContext {
+
+  // TODO - is there an ExecutionContext that isn't a CodeExecutionContext?
+  //      - if so, then maybe the ctor params below are pulled out for code only
+
+  isStrict: boolean = false;
+
+  constructor(
+    readonly ScriptOrModule: ScriptRecord|ModuleRecord|null,
+    readonly Function: Func|null,
+    readonly Realm: RealmRecord,
+    //PrivateEnvironment?: PrivateEnvironmentRecord;
+    //Generator?: Gen;
+  ) { }
+
+  suspend(): void {
+    // TODO ???
+  }
+
+  resume(): void {
+    // TODO ???
+  }
+}
+
+/**
  * ECMAScript code execution contexts have the additional state
  * components listed below
  *
@@ -92,36 +122,25 @@ import { VM } from './vm';
  * “LexicalEnvironment”, and “VariableEnvironment” are used without
  * qualification they are in reference to those components of the
  * running execution context.
- *
- * An execution context is purely a specification mechanism and need
- * not correspond to any particular artefact of an ECMAScript
- * implementation. It is impossible for ECMAScript code to directly
- * access or observe an execution context.
  */
-export class ExecutionContext {
-
-  // TODO - is there an ExecutionContext that isn't a CodeExecutionContext?
-  //      - if so, then maybe the ctor params below are pulled out for code only
-
-  isStrict: boolean = false;
-
+export class CodeExecutionContext extends ExecutionContext {
   constructor(
+    ScriptOrModule: ScriptRecord|ModuleRecord|null,
+    Function: Func|null,
+    Realm: RealmRecord,
     readonly LexicalEnvironment: EnvironmentRecord,
     readonly VariableEnvironment: EnvironmentRecord,
-    readonly ScriptOrModule: ScriptRecord|ModuleRecord|null,
-    readonly Function: Func|null,
-    readonly Realm: RealmRecord,
-    //PrivateEnvironment?: PrivateEnvironmentRecord;
-    //Generator?: Gen;
-  ) { }
+  ) { super(ScriptOrModule, Function, Realm); }
+}
 
-  suspend(): void {
-    // TODO ???
-  }
+export function GetLexicalEnvironment($: VM): EnvironmentRecord|undefined {
+  const ctx = $.getRunningContext();
+  return ctx instanceof CodeExecutionContext ? ctx.LexicalEnvironment : undefined;
+}
 
-  resume(): void {
-    // TODO ???
-  }
+export function GetVariableEnvironment($: VM): EnvironmentRecord|undefined {
+  const ctx = $.getRunningContext();
+  return ctx instanceof CodeExecutionContext ? ctx.VariableEnvironment : undefined;
 }
 
 /**
@@ -157,7 +176,7 @@ export function GetActiveScriptOrModule($: VM): ScriptRecord|ModuleRecord|null {
  */
 export function ResolveBinding($: VM, name: string,
                                env?: EnvironmentRecord): CR<ReferenceRecord> {
-  env ??= $.getRunningContext().LexicalEnvironment; // todo...?
+  env ??= GetLexicalEnvironment($);
   Assert(env instanceof EnvironmentRecord);
   // TODO - 3. If the source text matched by the syntactic production
   // that is being evaluated is contained in strict mode code, let
@@ -176,7 +195,8 @@ export function ResolveBinding($: VM, name: string,
  * following steps when called:
  */
 export function GetThisEnvironment($: VM): EnvironmentRecord {
-  let env = $.getRunningContext().LexicalEnvironment;
+  let env = GetLexicalEnvironment($);
+  Assert(env instanceof EnvironmentRecord); // NOTE: this assert not in spec
   // NOTE: The loop in step 2 will always terminate because the list
   // of environments always ends with the global environment which has
   // a this binding.

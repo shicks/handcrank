@@ -6,7 +6,7 @@ interface Branded {
 
 type MakeRecordFn =
   <F extends Branded>() => {
-    (arg: Omit<F, '__brand__'>): F;
+    <T extends Omit<F, '__brand__'>>(arg: T, ...noBranded: T extends Branded ? [never] : []): F;
     [Symbol.hasInstance](arg: unknown): arg is F;
   };
 
@@ -14,6 +14,7 @@ type MakeRecordFn =
 export const makeRecord: MakeRecordFn = <F extends {__brand__: string|symbol}>() => {
   const instances = new WeakSet<object>();
   const fn = (obj: any) => {
+    if (instances.has(obj)) throw new Error(`record already tagged`);
     instances.add(obj);
     return obj;
   };
@@ -22,6 +23,15 @@ export const makeRecord: MakeRecordFn = <F extends {__brand__: string|symbol}>()
   // TODO - any other static methods?
   return fn as any;
 };
+
+export function unbrand<F extends Branded>(arg: F): Omit<F, '__brand__'> {
+  return arg;
+}
+
+export function hasAnyFields(rec: object): boolean {
+  for (const _ in rec) return true;
+  return false;
+}
 
 // There are a few alternative ways to do this.  For instance, a
 // "dumber" version that only relies on static inheritance

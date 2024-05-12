@@ -4,7 +4,7 @@ import * as ESTree from 'estree';
 import { VM } from './vm';
 import { CR, IsAbrupt } from './completion_record';
 import { Val } from './values';
-import { ExecutionContext } from './execution_context';
+import { CodeExecutionContext } from './execution_context';
 import { EMPTY } from './enums';
 import { Assert } from './assert';
 
@@ -84,12 +84,13 @@ export function ScriptEvaluation($: VM, scriptRecord: ScriptRecord): CR<Val> {
 
   const globalEnv = scriptRecord.Realm?.GlobalEnv;
   if (!globalEnv) throw new Error('no global env!');
-  const scriptContext = new ExecutionContext(
-    globalEnv /* LexicalEnvironment */,
-    globalEnv /* VariableEnvironment */,
+  // TODO - this isn't quite right... need to use the InitHost... op.
+  const scriptContext = new CodeExecutionContext(
     scriptRecord /* ScriptOrModule */,
     null /* Function */,
     scriptRecord.Realm /* Realm */,
+    globalEnv /* LexicalEnvironment */,
+    globalEnv /* VariableEnvironment */,
     // 8. Set the PrivateEnvironment of scriptContext to null.
   );
   $.getRunningContext().suspend();

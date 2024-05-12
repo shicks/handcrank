@@ -1,12 +1,14 @@
 import { parseScript } from 'esprima';
-import { CR } from './completion_record';
-import type { Val } from './values';
+import { CR, IsAbrupt } from './completion_record';
+import type { Obj, Val } from './values';
 import type { ExecutionContext } from './execution_context';
 import { EMPTY, NOT_APPLICABLE } from './enums';
 import { NodeTypes, NodeMap, Node } from './tree';
+import { GetValue, ReferenceRecord } from './reference_record';
+import { PropertyDescriptor } from './property_descriptor';
 
 interface SyntaxOp {
-  Evaluation: CR<Val|EMPTY>;
+  Evaluation: CR<Val|ReferenceRecord|EMPTY>;
 }
 
 export class VM {
@@ -14,8 +16,9 @@ export class VM {
   executionStack: ExecutionContext[] = [];
 
   // Plugins
-  defines = new Map<string, [string[], ($: VM, ...args: Val[]) => Val]>();
-  definesRevdeps = new Map<string, string[]>();
+  intrinsics = new Map<string, [string[], (...args: Obj[]) => Obj]>();
+  globals = new Map<string, [string[], (...args: Val[]) => Val|PropertyDescriptor]>();
+  rdeps = new Map<string, string[]>();
   syntaxOperations: SyntaxOpMap = {
     Evaluation: {},
   };
@@ -29,7 +32,8 @@ export class VM {
 
   evaluateScript(script: string, filename?: string): CR<Val> {
     const result = this.operate('Evaluation', parseScript(script));
-    return EMPTY.is(result) ? undefined : result;
+    return IsAbrupt(result) ? result : EMPTY.is(result) ? undefined :
+      GetValue(this, result);
   }
 
   operate<O extends keyof SyntaxOp>(op: O, n: Node): SyntaxOp[O] {
@@ -37,9 +41,9 @@ export class VM {
       const result = impl(this, n as any, (child) => this.operate(op, child));
       if (!NOT_APPLICABLE.is(result)) return result;
     }
-    console.dir(n);
-    throw new Error(`Could not do '${op}' on ${n.type}({\n  ${
-        Object.entries(n).map((k, v) => `${k}: ${v}`).join(',\n  ')}\n})`);
+    // TODO - might be nice to print to depth 2?
+    throw new Error(`Cannot do '${op}' on ${n.type}({\n  ${
+        Object.entries(n).map(([k, v]) => `${k}: ${v}`).join(',\n  ')}\n})`);
   }
 
   install(plugin: Plugin): void {
@@ -51,12 +55,13 @@ export class VM {
         }
       };
     plugin({
-      define: (name: string, deps: string[], fn: ($: VM, ...args: Val[]) => Val) => {
-        if (this.defines.has(name)) throw new Error(`already defined: ${name}`);
-        this.defines.set(name, [deps, fn]);
+      define: (name: string, deps: any[], fn: any) => {
+        const map = name.startsWith('%') ? this.intrinsics : this.globals;
+        if (map.has(name)) throw new Error(`already defined: ${name}`);
+        map.set(name, [deps, fn]);
         for (const dep of deps) {
-          let revdeps = this.definesRevdeps.get(dep);
-          if (!revdeps) this.definesRevdeps.set(dep, revdeps = []);
+          let revdeps = this.rdeps.get(dep);
+          if (!revdeps) this.rdeps.set(dep, revdeps = []);
           revdeps.push(name);
         }
       },
@@ -80,9 +85,14 @@ type SyntaxSPI = {
                                                            fn: SyntaxOpFn<O, N>) => void
 }
 
+type DepsType<Name> = Name extends `%${string}` ? `%${string}%`[] : string[];
+type DefineType<Name> = Name extends `%${string}` ?
+  (...args: Obj[]) => Obj :
+(...args: Val[]) => Val|PropertyDescriptor;
+
 export interface PluginSPI extends SyntaxSPI {
   // NOTE: names can be %intrinsics% or GlobalBindings.
-  define(name: string, deps: string[], fn: ($: VM, ...args: Val[]) => Val): void;
+  define<const N extends string>(name: N, deps: DepsType<N>, fn: DefineType<N>): void;
 }
 
 // TODO - how to solve ordering issues?
