@@ -1,12 +1,12 @@
-import { BinaryExpression } from 'estree';
-import { Plugin, PluginSPI, VM } from '../vm';
+import { Plugin, PluginSPI } from '../vm';
 import { EMPTY, NOT_APPLICABLE } from '../enums';
 import { Val } from '../values';
 import { CR, IsAbrupt } from '../completion_record';
 import { GetValue } from '../reference_record';
+import { PropertyDescriptor } from '../property_descriptor';
 
 export const arithmetic: Plugin = (spi: PluginSPI) => {
-  spi.onEvaluation(['BinaryExpression'], ($: VM, n: BinaryExpression, evaluate) => {
+  spi.onEvaluation(['BinaryExpression'], ($, n, evaluate) => {
     const leftR = orUndefined(evaluate(n.left));
     if (IsAbrupt(leftR)) return leftR;
     const left = GetValue($, leftR);
@@ -21,6 +21,8 @@ export const arithmetic: Plugin = (spi: PluginSPI) => {
     }
     return NOT_APPLICABLE;
   });
+
+  spi.define('Infinity', [], () => PropertyDescriptor({Value: Infinity}));
 };
 
 function orUndefined<T>(v: T|EMPTY): T|undefined {

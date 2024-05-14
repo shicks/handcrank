@@ -2,13 +2,16 @@ import { RealmRecord } from './realm_record';
 import * as esprima from 'esprima';
 import * as ESTree from 'estree';
 import { VM } from './vm';
-import { CR, IsAbrupt } from './completion_record';
+import { CR, IsAbrupt, Throw } from './completion_record';
 import { Val } from './values';
 import { CodeExecutionContext } from './execution_context';
-import { EMPTY } from './enums';
+import { EMPTY, UNUSED } from './enums';
 import { Assert } from './assert';
+import { BoundNames, IsConstantDeclaration, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
+import { GlobalEnvironmentRecord } from './environment_record';
+import { GetValue, ReferenceRecord } from './reference_record';
 
-declare const GlobalDeclarationInstantiation: any;
+declare const InstantiateFunctionObject: any;
 
 /**
  * 16.1.4 Script Records
@@ -39,7 +42,7 @@ export class ScriptRecord {
      * Field reserved for use by host environments that need to associate
      * additional information with a script.
      */
-    readonly HostDefined: unknown,
+    readonly HostDefined?: unknown,
   ) {}
 }
 
@@ -96,14 +99,15 @@ export function ScriptEvaluation($: VM, scriptRecord: ScriptRecord): CR<Val> {
   $.getRunningContext().suspend();
   $.executionStack.push(scriptContext);
   const script = scriptRecord.ECMAScriptCode;
-  let result = GlobalDeclarationInstantiation(script, globalEnv);
-  if (!IsAbrupt(result)) {
-
-    // TODO - evaluate needs plugins
-
+  let result: CR<UNUSED|EMPTY|Val|ReferenceRecord> =
+    GlobalDeclarationInstantiation($, script, globalEnv);
+  if (!IsAbrupt(result)) { // NOTE: does not rethrow!
     result = $.operate('Evaluation', script);
     if (!IsAbrupt(result) && EMPTY.is(result)) {
       result = undefined;
+    }
+    if (result instanceof ReferenceRecord) {
+      result = GetValue($, result);
     }
   }
   // 14. Suspend scriptContext and remove it from the execution context stack.
@@ -119,71 +123,159 @@ export function ScriptEvaluation($: VM, scriptRecord: ScriptRecord): CR<Val> {
   return result;
 }
 
+/**
+ * 16.1.7 GlobalDeclarationInstantiation ( script, env )
+ *
+ * The abstract operation GlobalDeclarationInstantiation takes
+ * arguments script (a Script Parse Node) and env (a Global
+ * Environment Record) and returns either a normal completion
+ * containing unused or a throw completion. script is the Script for
+ * which the execution context is being established. env is the global
+ * environment in which bindings are to be created.
+ *
+ * NOTE 1: When an execution context is established for evaluating
+ * scripts, declarations are instantiated in the current global
+ * environment. Each global binding declared in the code is
+ * instantiated.
+ *
+ * NOTE 2: Early errors specified in 16.1.1 prevent name conflicts
+ * between function/var declarations and let/const/class declarations
+ * as well as redeclaration of let/const/class bindings for
+ * declaration contained within a single Script. However, such
+ * conflicts and redeclarations that span more than one Script are
+ * detected as runtime errors during
+ * GlobalDeclarationInstantiation. If any such errors are detected, no
+ * bindings are instantiated for the script. However, if the global
+ * object is defined using Proxy exotic objects then the runtime tests
+ * for conflicting declarations may be unreliable resulting in an
+ * abrupt completion and some global declarations not being
+ * instantiated. If this occurs, the code for the Script is not
+ * evaluated.
+ *
+ * Unlike explicit var or function declarations, properties that are
+ * directly created on the global object result in global bindings
+ * that may be shadowed by let/const/class declarations.
+ */
+export function GlobalDeclarationInstantiation(
+  $: VM,
+  script: ESTree.Program,
+  env: GlobalEnvironmentRecord,
+): CR<UNUSED> {
+  // 1. Let lexNames be the LexicallyDeclaredNames of script.
+  const lexNames = LexicallyDeclaredNames(script, true);
+  // 2. Let varNames be the VarDeclaredNames of script.
+  const varNames = VarDeclaredNames(script, true);
+  // 3. For each element name of lexNames, do
+  for (const name of lexNames) {
+    //   a. If env.HasVarDeclaration(name) is true, throw a SyntaxError exception.
+    if (env.HasVarDeclaration($, name)) return Throw('SyntaxError');
+    //   b. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
+    if (env.HasLexicalDeclaration($, name)) return Throw('SyntaxError');
+    //   c. Let hasRestrictedGlobal be ? env.HasRestrictedGlobalProperty(name).
+    const hasRestrictedGlobal = env.HasRestrictedGlobalProperty($, name);
+    if (IsAbrupt(hasRestrictedGlobal)) return hasRestrictedGlobal;
+    //   d. If hasRestrictedGlobal is true, throw a SyntaxError exception.
+    if (hasRestrictedGlobal) return Throw('SyntaxError');
+  }
+  // 4. For each element name of varNames, do
+  for (const name of varNames) {
+    //   a. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
+    if (env.HasLexicalDeclaration($, name)) return Throw('SyntaxError');
+  }
+  // 5. Let varDeclarations be the VarScopedDeclarations of script.
+  const varDeclarations = VarScopedDeclarations(script, true);
 
-/*
-16.1.7 GlobalDeclarationInstantiation ( script, env )
+  // 6. Let functionsToInitialize be a new empty List.
+  const functionsToInitialize: ESTree.FunctionDeclaration[] = [];
+  // 7. Let declaredFunctionNames be a new empty List.
+  const declaredFunctionNames = new Set<string>();
+  // 8. For each element d of varDeclarations, in reverse List order, do
+  for (const d of varDeclarations.reverse()) {
+    //   a. If d is not either a VariableDeclaration, a ForBinding, or a BindingIdentifier, then
+    //       i. Assert: d is either a FunctionDeclaration, a GeneratorDeclaration,
+    //          an AsyncFunctionDeclaration, or an AsyncGeneratorDeclaration.
+    //       ii. NOTE: If there are multiple function declarations for the same name,
+    //           the last declaration is used.
+    if (d.type === 'FunctionDeclaration') {
+      //     iii. Let fn be the sole element of the BoundNames of d.
+      const [fn, ...rest] = BoundNames(d);
+      Assert(!rest.length);
+      //     iv. If declaredFunctionNames does not contain fn, then
+      if (declaredFunctionNames.has(fn)) continue;
+      //         1. Let fnDefinable be ? env.CanDeclareGlobalFunction(fn).
+      const fnDefinable = env.CanDeclareGlobalFunction($, fn);
+      if (IsAbrupt(fnDefinable)) return fnDefinable;
+      //         2. If fnDefinable is false, throw a TypeError exception.
+      if (!fnDefinable) return Throw('TypeError');
+      //         3. Append fn to declaredFunctionNames.
+      declaredFunctionNames.add(fn);
+      //         4. Insert d as the first element of functionsToInitialize.
+      functionsToInitialize.push(d);
+    }
+  }
+  functionsToInitialize.reverse();
 
-The abstract operation GlobalDeclarationInstantiation takes arguments script (a Script Parse Node) and env (a Global Environment Record) and returns either a normal completion containing unused or a throw completion. script is the Script for which the execution context is being established. env is the global environment in which bindings are to be created.
+  // 9. Let declaredVarNames be a new empty List.
+  const declaredVarNames = new Set<string>();
+  // 10. For each element d of varDeclarations, do
+  for (const d of varDeclarations) {
+    //   a. If d is either a VariableDeclaration, a ForBinding, or a BindingIdentifier, then
+    if (d.type !== 'FunctionDeclaration') {
+      //     i. For each String vn of the BoundNames of d, do
+      for (const vn of BoundNames(d)) {
+        //       1. If declaredFunctionNames does not contain vn, then
+        if (!declaredFunctionNames.has(vn)) {
+          //         a. Let vnDefinable be ? env.CanDeclareGlobalVar(vn).
+          const vnDefinable = env.CanDeclareGlobalVar($, vn);
+          if (IsAbrupt(vnDefinable)) return vnDefinable;
+          //         b. If vnDefinable is false, throw a TypeError exception.
+          if (!vnDefinable) return Throw('TypeError');
+          //         c. If declaredVarNames does not contain vn, then
+          //             i. Append vn to declaredVarNames.
+          declaredVarNames.add(vn);
+        }
+      }
+    }
+  }
 
-NOTE 1
+  // 11. NOTE: No abnormal terminations occur after this algorithm step
+  //     if the global object is an ordinary object. However, if the global
+  //     object is a Proxy exotic object it may exhibit behaviours that
+  //     cause abnormal terminations in some of the following steps.
+  // 12. NOTE: Annex B.3.2.2 adds additional steps at this point.
 
-When an execution context is established for evaluating scripts, declarations are instantiated in the current global environment. Each global binding declared in the code is instantiated.
-
-It performs the following steps when called:
-
-1. 1. Let lexNames be the LexicallyDeclaredNames of script.
-2. 2. Let varNames be the VarDeclaredNames of script.
-3. 3. For each element name of lexNames, do
-a. a. If env.HasVarDeclaration(name) is true, throw a SyntaxError exception.
-b. b. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
-c. c. Let hasRestrictedGlobal be ? env.HasRestrictedGlobalProperty(name).
-d. d. If hasRestrictedGlobal is true, throw a SyntaxError exception.
-4. 4. For each element name of varNames, do
-a. a. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
-5. 5. Let varDeclarations be the VarScopedDeclarations of script.
-6. 6. Let functionsToInitialize be a new empty List.
-7. 7. Let declaredFunctionNames be a new empty List.
-8. 8. For each element d of varDeclarations, in reverse List order, do
-a. a. If d is not either a VariableDeclaration, a ForBinding, or a BindingIdentifier, then
-i. i. Assert: d is either a FunctionDeclaration, a GeneratorDeclaration, an AsyncFunctionDeclaration, or an AsyncGeneratorDeclaration.
-ii. ii. NOTE: If there are multiple function declarations for the same name, the last declaration is used.
-iii. iii. Let fn be the sole element of the BoundNames of d.
-iv. iv. If declaredFunctionNames does not contain fn, then
-1. 1. Let fnDefinable be ? env.CanDeclareGlobalFunction(fn).
-2. 2. If fnDefinable is false, throw a TypeError exception.
-3. 3. Append fn to declaredFunctionNames.
-4. 4. Insert d as the first element of functionsToInitialize.
-9. 9. Let declaredVarNames be a new empty List.
-10. 10. For each element d of varDeclarations, do
-a. a. If d is either a VariableDeclaration, a ForBinding, or a BindingIdentifier, then
-i. i. For each String vn of the BoundNames of d, do
-1. 1. If declaredFunctionNames does not contain vn, then
-a. a. Let vnDefinable be ? env.CanDeclareGlobalVar(vn).
-b. b. If vnDefinable is false, throw a TypeError exception.
-c. c. If declaredVarNames does not contain vn, then
-i. i. Append vn to declaredVarNames.
-11. 11. NOTE: No abnormal terminations occur after this algorithm step if the global object is an ordinary object. However, if the global object is a Proxy exotic object it may exhibit behaviours that cause abnormal terminations in some of the following steps.
-12. 12. NOTE: Annex B.3.2.2 adds additional steps at this point.
-13. 13. Let lexDeclarations be the LexicallyScopedDeclarations of script.
-14. 14. Let privateEnv be null.
-15. 15. For each element d of lexDeclarations, do
-a. a. NOTE: Lexically declared names are only instantiated here but not initialized.
-b. b. For each element dn of the BoundNames of d, do
-i. i. If IsConstantDeclaration of d is true, then
-1. 1. Perform ? env.CreateImmutableBinding(dn, true).
-ii. ii. Else,
-1. 1. Perform ? env.CreateMutableBinding(dn, false).
-16. 16. For each Parse Node f of functionsToInitialize, do
-a. a. Let fn be the sole element of the BoundNames of f.
-b. b. Let fo be InstantiateFunctionObject of f with arguments env and privateEnv.
-c. c. Perform ? env.CreateGlobalFunctionBinding(fn, fo, false).
-17. 17. For each String vn of declaredVarNames, do
-a. a. Perform ? env.CreateGlobalVarBinding(vn, false).
-18. 18. Return unused.
-NOTE 2
-
-Early errors specified in 16.1.1 prevent name conflicts between function/var declarations and let/const/class declarations as well as redeclaration of let/const/class bindings for declaration contained within a single Script. However, such conflicts and redeclarations that span more than one Script are detected as runtime errors during GlobalDeclarationInstantiation. If any such errors are detected, no bindings are instantiated for the script. However, if the global object is defined using Proxy exotic objects then the runtime tests for conflicting declarations may be unreliable resulting in an abrupt completion and some global declarations not being instantiated. If this occurs, the code for the Script is not evaluated.
-
-Unlike explicit var or function declarations, properties that are directly created on the global object result in global bindings that may be shadowed by let/const/class declarations.
-/**/
-
+  // 13. Let lexDeclarations be the LexicallyScopedDeclarations of script.
+  const lexDeclarations = LexicallyScopedDeclarations(script, true);
+  // 14. Let privateEnv be null.
+  let privateEnv = null;
+  // 15. For each element d of lexDeclarations, do
+  for (const d of lexDeclarations) {
+    //   a. NOTE: Lexically declared names are only instantiated here but not initialized.
+    //   b. For each element dn of the BoundNames of d, do
+    for (const dn of BoundNames(d)) {
+      //     i. If IsConstantDeclaration of d is true, then
+      //         1. Perform ? env.CreateImmutableBinding(dn, true).
+      //     ii. Else,
+      //         1. Perform ? env.CreateMutableBinding(dn, false).
+      const result = IsConstantDeclaration(d) ?
+        env.CreateImmutableBinding($, dn, true) :
+        env.CreateMutableBinding($, dn, false);
+      if (IsAbrupt(result)) return result;
+    }
+  }
+  // 16. For each Parse Node f of functionsToInitialize, do
+  for (const f of functionsToInitialize) {
+    //   a. Let fn be the sole element of the BoundNames of f.
+    const [fn, ...rest] = BoundNames(f);
+    Assert(!rest.length);
+    //   b. Let fo be InstantiateFunctionObject of f with arguments env and privateEnv.
+    const fo = InstantiateFunctionObject($, f, env, privateEnv);
+    //   c. Perform ? env.CreateGlobalFunctionBinding(fn, fo, false).
+    const result = env.CreateGlobalFunctionBinding($, fn, fo, false);
+    if (IsAbrupt(result)) return result;
+  }
+  // 17. For each String vn of declaredVarNames, do
+  //     a. Perform ? env.CreateGlobalVarBinding(vn, false).
+  // 18. Return unused.
+  return UNUSED;
+}

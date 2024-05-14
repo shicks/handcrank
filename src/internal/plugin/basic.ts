@@ -40,6 +40,15 @@ export const basic: Plugin = (spi: PluginSPI) => {
   spi.define('%Object%', [], () => {
     return new ObjectConstructor();
   });
+
+
+
+
+
+
+
+
+
 };
 
 // TODO - regex as a separate thing...

@@ -1,11 +1,12 @@
-import { parseScript } from 'esprima';
-import { CR, IsAbrupt } from './completion_record';
+import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import type { Obj, Val } from './values';
 import type { ExecutionContext } from './execution_context';
 import { EMPTY, NOT_APPLICABLE } from './enums';
-import { NodeTypes, NodeMap, Node } from './tree';
+import { NodeType, NodeMap, Node } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
 import { PropertyDescriptor } from './property_descriptor';
+import { InitializeHostDefinedRealm, RealmRecord } from './realm_record';
+import { ParseScript, ScriptEvaluation } from './script_record';
 
 interface SyntaxOp {
   Evaluation: CR<Val|ReferenceRecord|EMPTY>;
@@ -23,6 +24,10 @@ export class VM {
     Evaluation: {},
   };
 
+  constructor() {
+    CastNotAbrupt(InitializeHostDefinedRealm(this));
+  }
+
   // TODO - can we store strictness of executing production here?
 
   getRunningContext(): ExecutionContext {
@@ -30,8 +35,16 @@ export class VM {
     return this.executionStack.at(-1)!;
   }
 
+  getRealm(): RealmRecord|undefined {
+    return this.executionStack.at(-1)?.Realm;
+  }
+
   evaluateScript(script: string, filename?: string): CR<Val> {
-    const result = this.operate('Evaluation', parseScript(script));
+    const record = ParseScript(script, this.getRealm(), undefined);
+    if (Array.isArray(record)) {
+      throw record[0]; // TODO - handle failure better
+    }
+    const result = ScriptEvaluation(this, record);
     return IsAbrupt(result) ? result : EMPTY.is(result) ? undefined :
       GetValue(this, result);
   }
@@ -48,7 +61,7 @@ export class VM {
 
   install(plugin: Plugin): void {
     const pushSyntaxOp = <const O extends keyof SyntaxOp>(op: O) =>
-      <const N extends NodeTypes>(nodeTypes: N[], fn: SyntaxOpFn<O, N>) => {
+      <const N extends NodeType>(nodeTypes: N[], fn: SyntaxOpFn<O, N>) => {
         const ops: SyntaxOpNodeMap<O> = this.syntaxOperations[op];
         for (const nt of nodeTypes) {
           (ops[nt] || (ops[nt] = [] as any[])).push(fn);
@@ -74,15 +87,15 @@ type SyntaxOpFn<O extends keyof SyntaxOp, N extends keyof NodeMap> =
     ($: VM, node: NodeMap[N],
      recurse: (n: Node) => SyntaxOp[O]) => SyntaxOp[O]|NOT_APPLICABLE;
 type SyntaxOpNodeMap<O extends keyof SyntaxOp> = {
-  [N in NodeTypes]?: Array<SyntaxOpFn<O, N>>
+  [N in NodeType]?: Array<SyntaxOpFn<O, N>>
 };
 type SyntaxOpMap = {
   [O in keyof SyntaxOp]: SyntaxOpNodeMap<O>
 };
 
 type SyntaxSPI = {
-  [O in keyof SyntaxOp as `on${O}`]: <N extends NodeTypes>(nodeTypes: N[],
-                                                           fn: SyntaxOpFn<O, N>) => void
+  [O in keyof SyntaxOp as `on${O}`]: <N extends NodeType>(nodeTypes: N[],
+                                                          fn: SyntaxOpFn<O, N>) => void
 }
 
 type DepsType<Name> = Name extends `%${string}` ? `%${string}%`[] : string[];

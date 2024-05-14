@@ -241,3 +241,58 @@ export function MakePrivateReference($: VM, baseValue: Val, privateIdentifier: s
     ThisValue: EMPTY,
   });
 }
+
+/**
+ * Unwraps a reference record into a value.
+ *
+ * Note that this is not strictly included in the spec, but we need
+ * it here because we cannot distingish the
+ * `IdentifierReference : Identifier` syntax pattern, since ESTree
+ * just treats all identifers in their own separate way, regardless
+ * of whether they're lvalues or rvalues.
+ *
+ * ---
+ *
+ * 13.1.3 Runtime Semantics: Evaluation
+ *
+ * IdentifierReference : Identifier
+ * 1. Return ? ResolveBinding(StringValue of Identifier).
+ *
+ * NOTE 1: The result of evaluating an IdentifierReference is always a
+ * value of type Reference.
+ *
+ * NOTE 2: In non-strict code, the keyword yield may be used as an
+ * identifier. Evaluating the IdentifierReference resolves the binding
+ * of yield as if it was an Identifier. Early Error restriction
+ * ensures that such an evaluation only can occur for non-strict code.
+ *
+ * ---
+ *
+ * 13.3.2.1 Runtime Semantics: Evaluation
+ *
+ * MemberExpression : MemberExpression [ Expression ]
+ * 1. Let baseReference be ? Evaluation of MemberExpression.
+ * 2. Let baseValue be ? GetValue(baseReference).
+ * 3. If the source text matched by this MemberExpression is strict
+ *    mode code, let strict be true; else let strict be false.
+ * 4. Return ? EvaluatePropertyAccessWithExpressionKey(baseValue,
+ *    Expression, strict).
+ *
+ * MemberExpression : MemberExpression . IdentifierName
+ * 1. Let baseReference be ? Evaluation of MemberExpression.
+ * 2. Let baseValue be ? GetValue(baseReference).
+ * 3. If the source text matched by this MemberExpression is strict
+ *    mode code, let strict be true; else let strict be false.
+ * 4. Return EvaluatePropertyAccessWithIdentifierKey(baseValue,
+ *    IdentifierName, strict).
+ *
+ * MemberExpression : MemberExpression . PrivateIdentifier
+ * 1. Let baseReference be ? Evaluation of MemberExpression.
+ * 2. Let baseValue be ? GetValue(baseReference).
+ * 3. Let fieldNameString be the StringValue of PrivateIdentifier.
+ * 4. Return MakePrivateReference(baseValue, fieldNameString).
+ */
+// export function RValue<T>(ref: ReferenceRecord|T): CR<Val>|T {
+//   return ref instanceof ReferenceRecord ? ResolveBinding($, ref.
+//   }
+// }
