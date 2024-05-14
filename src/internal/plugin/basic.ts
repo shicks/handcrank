@@ -30,16 +30,20 @@ export const basic: Plugin = (spi: PluginSPI) => {
     return ResolveThisBinding($);
   });
   spi.onEvaluation(['Identifier'], ($: VM, n: Identifier) => {
+    debugger;
     return ResolveBinding($, n.name);
   });
 
-  spi.define('%ObjectPrototype%', [], () => {
-    return new OrdinaryObject(null);
-  });
+  // Global environment
+  spi.define('undefined', [], () => undefined);
 
-  spi.define('%Object%', [], () => {
-    return new ObjectConstructor();
-  });
+  // spi.define('%ObjectPrototype%', [], () => {
+  //   return new OrdinaryObject(null);
+  // });
+
+  // spi.define('%Object%', [], () => {
+  //   return new ObjectConstructor();
+  // });
 
 
 

@@ -7,9 +7,27 @@ import { GetValue, ReferenceRecord } from './reference_record';
 import { PropertyDescriptor } from './property_descriptor';
 import { InitializeHostDefinedRealm, RealmRecord } from './realm_record';
 import { ParseScript, ScriptEvaluation } from './script_record';
+import * as ESTree from 'estree';
 
 interface SyntaxOp {
   Evaluation: CR<Val|ReferenceRecord|EMPTY>;
+}
+
+interface ParseOpts {
+  range?: boolean;
+  loc?: boolean;
+  tolerand?: boolean;
+  comment?: boolean;
+}
+interface Esprima {
+  parseScript(str: string, opts?: ParseOpts, delegate?: (n: Node) => void): any;
+  parseModule(str: string, opts?: ParseOpts, delegate?: (n: Node) => void): any;
+}
+function emptyLoc(): ESTree.SourceLocation {
+  return {
+    start: {line: 0, column: 0},
+    end: {line: 0, column: 0},
+  };
 }
 
 export class VM {
@@ -24,8 +42,12 @@ export class VM {
     Evaluation: {},
   };
 
-  constructor() {
-    CastNotAbrupt(InitializeHostDefinedRealm(this));
+  constructor(private readonly esprima?: Esprima) {}
+
+  initialize() {
+    if (!this.executionStack.length) {
+      CastNotAbrupt(InitializeHostDefinedRealm(this));
+    }
   }
 
   // TODO - can we store strictness of executing production here?
@@ -39,7 +61,30 @@ export class VM {
     return this.executionStack.at(-1)?.Realm;
   }
 
-  evaluateScript(script: string, filename?: string): CR<Val> {
+  // NOTE: this helper method is typically more useful than the "recurse"
+  // function passed to the syntax operator because it additionally unwraps
+  // ReferenceRecords.  The spec does this in a production that's basically
+  // transparent to ESTree, so we don't have a good opportunity, but we do
+  // know when an rvalue is required from a child.
+  evaluateValue(node: Node): CR<Val> {
+    this.initialize()
+    const result: CR<EMPTY|Val|ReferenceRecord> = this.operate('Evaluation', node);
+    if (IsAbrupt(result)) return result;
+    if (EMPTY.is(result)) return undefined;
+    if (result instanceof ReferenceRecord) return GetValue(this, result);
+    return result;
+  }
+
+  evaluateScript(script: ESTree.Program): CR<Val>;
+  evaluateScript(script: string, filename?: string): CR<Val>;
+  evaluateScript(script: string|ESTree.Program, filename?: string): CR<Val> {
+    this.initialize()
+    if (typeof script === 'string') {
+      if (!this.esprima) throw new Error(`no parser`);
+      script = this.esprima.parseScript(script, {loc: true}, (n: Node) => {
+        if (filename) (n.loc || (n.loc = emptyLoc())).source = filename;
+      }) as ESTree.Program;
+    }
     const record = ParseScript(script, this.getRealm(), undefined);
     if (Array.isArray(record)) {
       throw record[0]; // TODO - handle failure better

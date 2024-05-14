@@ -9,6 +9,8 @@ import { PropertyDescriptor } from "./property_descriptor";
 import { Obj, PropertyKey, Val } from "./values";
 import { VM } from "./vm";
 
+declare const ToObject: any;
+
 /**
  * 7.3.1 MakeBasicObject ( internalSlotsList )
  *
@@ -45,7 +47,61 @@ export function MakeBasicObject(_$: VM, _internalSlotsList: string[]): Obj {
   throw new Error('not implemented');
 }
 
+/**
+ * 7.3.2 Get ( O, P )
+ *
+ * The abstract operation Get takes arguments O (an Object) and P (a
+ * property key) and returns either a normal completion containing an
+ * ECMAScript language value or a throw completion. It is used to
+ * retrieve the value of a specific property of an object. It performs
+ * the following steps when called:
+ *
+ * 1. Return ? O.[[Get]](P, O).
+ */
+export function Get($: VM, O: Obj, P: PropertyKey): CR<Val> {
+  return O.Get($, P, O);
+}
 
+/**
+ * 7.3.3 GetV ( V, P )
+ *
+ * The abstract operation GetV takes arguments V (an ECMAScript
+ * language value) and P (a property key) and returns either a normal
+ * completion containing an ECMAScript language value or a throw
+ * completion. It is used to retrieve the value of a specific property
+ * of an ECMAScript language value. If the value is not an object, the
+ * property lookup is performed using a wrapper object appropriate for
+ * the type of the value. It performs the following steps when called:
+ *
+ * 1. Let O be ? ToObject(V).
+ * 2. Return ? O.[[Get]](P, V).
+ */
+export function GetV($: VM, V: Val, P: PropertyKey): CR<Val> {
+  const O = ToObject($, V);
+  if (IsAbrupt(O)) return O;
+  return O.Get($, P, O);
+}
+
+/**
+ * 7.3.4 Set ( O, P, V, Throw )
+ *
+ * The abstract operation Set takes arguments O (an Object), P (a
+ * property key), V (an ECMAScript language value), and Throw (a
+ * Boolean) and returns either a normal completion containing unused
+ * or a throw completion. It is used to set the value of a specific
+ * property of an object. V is the new value for the property. It
+ * performs the following steps when called:
+ *
+ * 1. Let success be ? O.[[Set]](P, V, O).
+ * 2. If success is false and Throw is true, throw a TypeError exception.
+ * 3. Return unused.
+ */
+export function Set($: VM, O: Obj, P: PropertyKey, V: Val, Throw$: boolean): CR<UNUSED> {
+  const success = O.Set($, P, V, O);
+  if (IsAbrupt(success)) return success;
+  if (!success && Throw$) return Throw('TypeError');
+  return UNUSED;
+}
 
 /**
  * 7.3.5 CreateDataProperty ( O, P, V )
@@ -123,4 +179,22 @@ export function DefinePropertyOrThrow($: VM, O: Obj, P: PropertyKey,
   if (IsAbrupt(success)) return success;
   if (!success) return Throw('TypeError');
   return UNUSED;
+}
+
+
+
+/**
+ * 7.3.12 HasProperty ( O, P )
+ *
+ * The abstract operation HasProperty takes arguments O (an Object)
+ * and P (a property key) and returns either a normal completion
+ * containing a Boolean or a throw completion. It is used to determine
+ * whether an object has a property with the specified property
+ * key. The property may be either own or inherited. It performs the
+ * following steps when called:
+ *
+ * 1. Return ? O.[[HasProperty]](P).
+ */
+export function HasProperty($: VM, O: Obj, P: PropertyKey): CR<boolean> {
+  return O.HasProperty($, P);
 }

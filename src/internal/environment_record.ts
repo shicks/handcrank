@@ -6,12 +6,10 @@ import { VM } from './vm';
 import { ReferenceRecord } from './reference_record';
 import { ModuleRecord } from './module_record';
 import { IsDataDescriptor, PropertyDescriptor } from './property_descriptor';
+import { Get, HasProperty, Set as Set$ } from './abstract_object';
 
 declare const IsExtensible: any;
-declare const HasProperty: any;
 declare const HasOwnProperty: any;
-declare const Get: any;
-declare const Set$: any;
 declare const ToBoolean: any;
 declare const DefinePropertyOrThrow: any;
 

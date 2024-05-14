@@ -1,15 +1,13 @@
 import { RealmRecord } from './realm_record';
-import * as esprima from 'esprima';
 import * as ESTree from 'estree';
 import { VM } from './vm';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { Val } from './values';
 import { CodeExecutionContext } from './execution_context';
-import { EMPTY, UNUSED } from './enums';
+import { UNUSED } from './enums';
 import { Assert } from './assert';
 import { BoundNames, IsConstantDeclaration, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
 import { GlobalEnvironmentRecord } from './environment_record';
-import { GetValue, ReferenceRecord } from './reference_record';
 
 declare const InstantiateFunctionObject: any;
 
@@ -56,23 +54,16 @@ export class ScriptRecord {
  * the result of parsing sourceText as a Script. It performs the
  * following steps when called:
  */
-export function ParseScript(sourceText: string,
+export function ParseScript(script: ESTree.Program,
                             realm: RealmRecord|undefined,
-                            hostDefined: unknown): ScriptRecord|Error[] {
+                            hostDefined: unknown): ScriptRecord {
 
   // NOTE: An implementation may parse script source text and analyse
   // it for Early Error conditions prior to evaluation of ParseScript
   // for that script source text. However, the reporting of any errors
   // must be deferred until the point where this specification
   // actually performs ParseScript upon that source text.
-
-  try {
-    const script = esprima.parseScript(sourceText);
-    return new ScriptRecord(realm, script, hostDefined);
-  } catch (err) {
-    // TODO - will there ever be multiple errors?
-    return [err];
-  }
+  return new ScriptRecord(realm, script, hostDefined);
 }
 
 /**
@@ -99,16 +90,10 @@ export function ScriptEvaluation($: VM, scriptRecord: ScriptRecord): CR<Val> {
   $.getRunningContext().suspend();
   $.executionStack.push(scriptContext);
   const script = scriptRecord.ECMAScriptCode;
-  let result: CR<UNUSED|EMPTY|Val|ReferenceRecord> =
+  let result: CR<UNUSED|Val> =
     GlobalDeclarationInstantiation($, script, globalEnv);
   if (!IsAbrupt(result)) { // NOTE: does not rethrow!
-    result = $.operate('Evaluation', script);
-    if (!IsAbrupt(result) && EMPTY.is(result)) {
-      result = undefined;
-    }
-    if (result instanceof ReferenceRecord) {
-      result = GetValue($, result);
-    }
+    result = $.evaluateValue(script);
   }
   // 14. Suspend scriptContext and remove it from the execution context stack.
   scriptContext.suspend();

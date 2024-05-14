@@ -189,6 +189,7 @@ export function SetRealmGlobalObject(realmRec: RealmRecord,
  * 3. Return global.
  */
 export function SetDefaultGlobalBindings($: VM, realmRec: RealmRecord): CR<Obj> {
+  debugger;
   const gbl = realmRec.GlobalObject!;
   Assert(gbl);
 
