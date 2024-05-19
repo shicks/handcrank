@@ -1,12 +1,14 @@
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt, Throw } from './completion_record';
-import { Func, Obj, Val } from './val';
+import { Val } from './val';
 import { EMPTY, INITIALIZED, LEXICAL, UNINITIALIZED, UNRESOLVABLE, UNUSED } from './enums';
 import { VM } from './vm';
 import { ReferenceRecord } from './reference_record';
 import { ModuleRecord } from './module_record';
 import { IsDataDescriptor, PropertyDescriptor } from './property_descriptor';
 import { Get, HasProperty, Set as Set$ } from './abstract_object';
+import { Obj } from './obj_base';
+import { Func } from './func';
 
 declare const IsExtensible: any;
 declare const HasOwnProperty: any;

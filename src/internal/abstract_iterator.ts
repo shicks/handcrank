@@ -1,5 +1,7 @@
+import { Func } from "./func";
+import { Obj, OrdinaryObjectCreate } from "./obj";
 import { makeRecord } from "./record";
-import { Func, Obj, OrdinaryObject, Val } from "./values";
+import { Val } from "./val";
 import { VM } from "./vm";
 
 /**
@@ -49,5 +51,5 @@ export const IteratorRecord = makeRecord<IteratorRecord>();
  */
 export function CreateListIteratorRecord($: VM, list: Val[]): IteratorRecord {
   // TODO - implement!!
-  return IteratorRecord({Iterator: new OrdinaryObject(null), NextMethod: null!, Done: false});
+  return IteratorRecord({Iterator: OrdinaryObjectCreate(null), NextMethod: null!, Done: false});
 }

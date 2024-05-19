@@ -564,7 +564,7 @@ export function EvaluateBody($: VM, functionObject: Func, argumentsList: Val[],
  *    and argumentsList.
  */
 export function OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]): CR<Val> {
-  return EvaluateBody($, F, argumentsList, F.ECMAScriptCode, 
+  return EvaluateBody($, F, argumentsList, F.ECMAScriptCode);
 }
 
 /**

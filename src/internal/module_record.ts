@@ -1,5 +1,5 @@
 import { CR } from "./completion_record";
-import { Val } from "./values";
+import { Val } from "./val";
 
 export class ModuleRecord {
   // TODO - see 16.2.1.4 Abstract Module Records

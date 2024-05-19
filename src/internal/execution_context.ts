@@ -1,12 +1,14 @@
 import { Assert } from './assert';
 import { CR } from './completion_record';
 import { EnvironmentRecord, FunctionEnvironmentRecord, GetIdentifierReference } from './environment_record';
+import { Func } from './func';
 import { ModuleRecord } from './module_record';
+import { Obj } from './obj';
 import { PrivateEnvironmentRecord } from './private_environment_record';
 import { RealmRecord } from './realm_record';
 import { ReferenceRecord } from './reference_record';
 import { ScriptRecord } from './script_record';
-import { Func, Obj, Val } from './val';
+import { Val } from './val';
 import { VM } from './vm';
 
 /**

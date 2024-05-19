@@ -6,9 +6,9 @@ interface Branded {
 
 type MakeRecordFn =
   <F extends Branded>() => {
-    <T extends Omit<F, '__brand__'>>(arg: T, ...noBranded: T extends Branded ? [never] : []): F;
-    clone(arg: F): F;
-    [Symbol.hasInstance](arg: unknown): arg is F;
+    <T extends Omit<F, '__brand__'>>(arg: T, ...noBranded: T extends Branded ? [never] : []): F,
+    clone(arg: F): F,
+    [Symbol.hasInstance](arg: unknown): arg is F,
   };
 
 // NOTE: takes ownership of the object literal

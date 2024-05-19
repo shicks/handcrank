@@ -4,8 +4,9 @@ import { CR, IsAbrupt } from "./completion_record";
 import { UNUSED } from "./enums";
 import { GlobalEnvironmentRecord } from "./environment_record";
 import { ExecutionContext } from "./execution_context";
+import { Obj } from "./obj";
 import { PropertyDescriptor } from "./property_descriptor";
-import { Obj, OrdinaryObject, Val } from "./values";
+import { Val } from "./values";
 import { VM } from "./vm";
 
 declare const OrdinaryObjectCreate: any;
@@ -160,7 +161,7 @@ export function SetRealmGlobalObject(realmRec: RealmRecord,
   if (globalObj == undefined) {
     const intrinsics = realmRec.Intrinsics;
     //globalObj = OrdinaryObjectCreate(intrinsics.get('%Object.prototype%'));
-    globalObj = new OrdinaryObject(intrinsics.get('%Object.prototype%')!);
+    globalObj = OrdinaryObjectCreate(intrinsics.get('%Object.prototype%')!);
   }
   Assert(globalObj instanceof Obj);
   if (thisValue == undefined) thisValue = globalObj;
@@ -208,7 +209,7 @@ export function SetDefaultGlobalBindings($: VM, realmRec: RealmRecord): CR<Obj> 
       depList.push(map.get(dep)!);
     }
     const result = fn(...depList);
-    const desc = result instanceof PropertyDescriptor ?
+    const desc: PropertyDescriptor = result instanceof PropertyDescriptor ?
       result : PropertyDescriptor({Value: result});
     const define = DefinePropertyOrThrow($, gbl, name, desc);
     if (IsAbrupt(define)) return define;

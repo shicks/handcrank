@@ -1,6 +1,7 @@
 import { CR, IsAbrupt } from './completion_record';
 import { BOOLEAN, NUMBER, OBJECT } from './enums';
-import { Obj, Type, Val } from './val';
+import { Obj } from './obj';
+import { Type, Val } from './val';
 import { VM } from './vm';
 
 declare const StringToBigInt: any;

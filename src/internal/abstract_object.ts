@@ -5,9 +5,9 @@
 
 import { CR, IsAbrupt, Throw } from "./completion_record";
 import { UNUSED } from "./enums";
-import { OrdinaryObject } from "./obj";
+import { Obj } from "./obj_base";
 import { PropertyDescriptor } from "./property_descriptor";
-import { Obj, PropertyKey, Val } from "./values";
+import { PropertyKey, Val } from "./val";
 import { VM } from "./vm";
 
 declare const ToObject: any;
