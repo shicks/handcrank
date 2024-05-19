@@ -2,7 +2,7 @@ import { Assert } from './assert';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { UNUSED } from './enums';
 import { makeRecord, withSlots } from './record';
-import { Obj, Val } from './values';
+import { Obj, Val } from './val';
 import { VM } from './vm';
 
 declare const OrdinaryObjectCreate: any;

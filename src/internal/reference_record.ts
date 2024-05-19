@@ -3,7 +3,7 @@ import { CR, IsAbrupt, Throw } from './completion_record';
 import { EMPTY, UNRESOLVABLE, UNUSED } from './enums';
 import { EnvironmentRecord } from './environment_record';
 import { makeRecord } from './record';
-import { Val } from './values';
+import { Val } from './val';
 import { VM } from './vm';
 
 declare type PrivateName = {__privatename__: true};

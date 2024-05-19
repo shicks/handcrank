@@ -1,5 +1,5 @@
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { OrdinaryObjectCreate, type Obj, type Val } from './values';
+import { OrdinaryObjectCreate, type Obj, type Val } from './val';
 import type { ExecutionContext } from './execution_context';
 import { EMPTY, NOT_APPLICABLE } from './enums';
 import { NodeType, NodeMap, Node, Esprima, emptyLoc, SourceTextNode } from './tree';

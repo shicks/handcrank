@@ -2,7 +2,7 @@ import { RealmRecord } from './realm_record';
 import * as ESTree from 'estree';
 import { VM } from './vm';
 import { CR, IsAbrupt, Throw } from './completion_record';
-import { Val } from './values';
+import { Val } from './val';
 import { CodeExecutionContext } from './execution_context';
 import { UNUSED } from './enums';
 import { Assert } from './assert';

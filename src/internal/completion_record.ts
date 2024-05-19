@@ -1,7 +1,7 @@
 import { EMPTY } from './enums';
 import { makeRecord } from './record';
 import { Assert } from './assert';
-import { Val } from './values';
+import { Val } from './val';
 
 /**
  * 6.2.4 The Completion Record Specification Type

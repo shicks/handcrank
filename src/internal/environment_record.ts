@@ -1,6 +1,6 @@
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt, Throw } from './completion_record';
-import { Func, Obj, Val } from './values';
+import { Func, Obj, Val } from './val';
 import { EMPTY, INITIALIZED, LEXICAL, UNINITIALIZED, UNRESOLVABLE, UNUSED } from './enums';
 import { VM } from './vm';
 import { ReferenceRecord } from './reference_record';

@@ -1,10 +1,11 @@
 import { Identifier, Literal } from 'estree';
 import { Plugin, PluginSPI, VM } from '../vm';
 import { EMPTY, NOT_APPLICABLE } from '../enums';
-import { OrdinaryObject, Val } from '../values';
+import { Val } from '../val';
 import { CR, IsAbrupt } from '../completion_record';
 import { ResolveBinding, ResolveThisBinding } from '../execution_context';
 import { ReferenceRecord } from '../reference_record';
+import { OrdinaryObjectCreate } from '../obj';
 
 declare const ObjectConstructor: any;
 
@@ -38,7 +39,7 @@ export const basic: Plugin = (spi: PluginSPI) => {
   spi.define('undefined', [], () => undefined);
 
   spi.define('%ObjectPrototype%', [], () => {
-    return new OrdinaryObject(null);
+    return OrdinaryObjectCreate(null);
   });
 
   // spi.define('%Object%', [], () => {

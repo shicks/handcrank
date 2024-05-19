@@ -16,7 +16,7 @@ import Node = ESTree.Node;
 import { BoundNames, IsConstantDeclaration, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
 import { ContainsExpression, IsSimpleParameterList } from './static/functions';
 import { Obj } from './obj_base';
-import { PropertyKey, Val } from './values';
+import { PropertyKey, Val } from './val';
 import { lazySuper } from './record';
 import { OrdinaryObject } from './obj';
 import { SourceTextNode } from './tree';

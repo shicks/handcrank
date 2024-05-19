@@ -1,6 +1,6 @@
 import { Plugin, PluginSPI } from '../vm';
 import { EMPTY, NOT_APPLICABLE } from '../enums';
-import { Val } from '../values';
+import { Val } from '../val';
 import { CR, IsAbrupt } from '../completion_record';
 import { GetValue } from '../reference_record';
 import { PropertyDescriptor } from '../property_descriptor';

@@ -5,7 +5,7 @@ import { CR, IsAbrupt } from './completion_record';
 import { Obj } from './obj_base';
 import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor } from './property_descriptor';
 import { hasAnyFields, lazySuper } from './record';
-import { PropertyKey, Val } from './values';
+import { PropertyKey, Val } from './val';
 import { VM } from './vm';
 
 export { Obj };

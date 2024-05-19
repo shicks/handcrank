@@ -6,7 +6,7 @@ import { PrivateEnvironmentRecord } from './private_environment_record';
 import { RealmRecord } from './realm_record';
 import { ReferenceRecord } from './reference_record';
 import { ScriptRecord } from './script_record';
-import { Func, Obj, Val } from './values';
+import { Func, Obj, Val } from './val';
 import { VM } from './vm';
 
 /**

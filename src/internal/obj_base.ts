@@ -7,7 +7,7 @@ import type { PropertyDescriptor } from './property_descriptor';
 import type { RealmRecord } from './realm_record';
 import { withSlots } from './record';
 import type { ScriptRecord } from './script_record';
-import type { PropertyKey, Val } from './values';
+import type { PropertyKey, Val } from './val';
 import type { VM } from './vm';
 import type * as ESTree from 'estree';
 
