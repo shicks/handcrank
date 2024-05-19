@@ -1,11 +1,11 @@
 import { Assert } from './assert';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { UNUSED } from './enums';
-import { makeRecord } from './record';
+import { makeRecord, withSlots } from './record';
 import { Obj, Val } from './values';
 import { VM } from './vm';
 
-declare const OrdinaryCreateObject: any;
+declare const OrdinaryObjectCreate: any;
 declare const OBJECT_PROTOTYPE: any;
 declare const CreateDataPropertyOrThrow: any;
 declare const HasProperty: any;
@@ -48,7 +48,14 @@ export interface PropertyDescriptor {
   Get?: Obj|undefined;
   Set?: Obj|undefined;
 }
-export const PropertyDescriptor = makeRecord<PropertyDescriptor>();
+export const PropertyDescriptor = withSlots(makeRecord<PropertyDescriptor>(), {
+  Enumerable: true,
+  Configurable: true,
+  Writable: true,
+  Value: true,
+  Get: true,
+  Set: true,
+});
 
 /**
  * 6.2.6.1 IsAccessorDescriptor ( Desc )
@@ -61,17 +68,8 @@ export function IsAccessorDescriptor(Desc: PropertyDescriptor|undefined): boolea
   return Boolean(Desc && (Desc.Get || Desc.Set));
 }
 
-const VALUE_PROP = (() => {
-  const Value = {} as Val;
-  const p = PropertyDescriptor({Value});
-  for (const k in p) {
-    if (p[k as keyof PropertyDescriptor] === Value) return k;
-  }
-  throw new Error(`bad PropertyDescriptor implementation`);
-})();
-
 export function HasValueField(Desc: PropertyDescriptor): boolean {
-  return VALUE_PROP in Desc;
+  return PropertyDescriptor.Value in Desc;
 }
 
 /**
@@ -105,7 +103,7 @@ export function IsGenericDescriptor(Desc: PropertyDescriptor|undefined): boolean
  */
 export function FromPropertyDescriptor($: VM, Desc: PropertyDescriptor|undefined): Obj|undefined {
   if (Desc == null) return Desc;
-  const obj = OrdinaryCreateObject($, OBJECT_PROTOTYPE); // ???? $.Get('Object.prototype') ???
+  const obj = OrdinaryObjectCreate($, OBJECT_PROTOTYPE); // ???? $.Get('Object.prototype') ???
   Assert(obj.IsExtensible() && obj.IsOrdinary() && obj.OwnPropertyKeys().length === 0);
   if (Desc.Value != null) {
     Assert(!IsAbrupt(CreateDataPropertyOrThrow($, obj, 'value', Desc.Value)));

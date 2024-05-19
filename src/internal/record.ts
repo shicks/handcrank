@@ -7,6 +7,7 @@ interface Branded {
 type MakeRecordFn =
   <F extends Branded>() => {
     <T extends Omit<F, '__brand__'>>(arg: T, ...noBranded: T extends Branded ? [never] : []): F;
+    clone(arg: F): F;
     [Symbol.hasInstance](arg: unknown): arg is F;
   };
 
@@ -18,80 +19,67 @@ export const makeRecord: MakeRecordFn = <F extends {__brand__: string|symbol}>()
     instances.add(obj);
     return obj;
   };
+  Object.defineProperties(fn, {clone: {value(arg: F) { return fn({...(arg as any)}); }}});
   Object.defineProperty(fn, Symbol.hasInstance,
                         {value: (arg: any) => instances.has(arg)});
   // TODO - any other static methods?
   return fn as any;
 };
 
-export function unbrand<F extends Branded>(arg: F): Omit<F, '__brand__'> {
-  return arg;
+type FactoryOrCtor<R> = ((...args: any[]) => R)|(abstract new (...args: any[]) => R);
+type Slots<F> = F extends FactoryOrCtor<infer R> ? {[K in keyof R]?: unknown} : never;
+
+// export function withSlots<F extends FactoryOrCtor<any>, S extends {[K in keyof R]?: unknown}, F extends FactoryOrCtor<R>>(fn: F, slots: S): F & {[K in keyof S]: K} {
+export function withSlots<F extends FactoryOrCtor<any>, S extends Slots<F>>(fn: F, slots: S): F & {[K in keyof S]: K} {
+  for (const key in slots) {
+    if (Object.hasOwn(slots, key)) (fn as any)[key] = key;
+  }
+  return fn as any;
 }
+
+/**
+ * Returns whether the slot is present - note that the return type is
+ * over-narrowed if the optional type includes `undefined`, since
+ * TypeScript cannot distinguish `{x?: T|undefined}` from `{x?: T}`.
+ */
+export function hasSlot<T extends {}, F extends keyof T>(obj: T, slot: F): obj is T&{[K in F]-?: T[K]} {
+  return slot in obj;
+}
+
+
+// export function unbrand<F extends Branded>(arg: F): Omit<F, '__brand__'> {
+//   return arg;
+// }
 
 export function hasAnyFields(rec: object): boolean {
   for (const _ in rec) return true;
   return false;
 }
 
-// There are a few alternative ways to do this.  For instance, a
-// "dumber" version that only relies on static inheritance
-//
-// ```ts
-// class Rec {
-//   protected constructor() {}
-//   static of<T extends typeof Rec>(this: T, obj: T['prototype']): T['prototype'] {
-//     const result: any = new (this as unknown as {new(): T})();
-//     for (const key in obj) {
-//       result[key] = obj[key];
-//     }
+// /** Makes a function cached lazily. */
+// export function memoize<F>(fn: () => F): () => F {
+//   let out = () => {
+//     const result = fn();
+//     out = () => result;
 //     return result;
-//   }
+//   };
+//   return () => out();
 // }
-//
-// export class ReferenceRecord extends Rec {
-//   readonly Base!: string;
-//   readonly Index!: number;
-//   readonly Strict!: boolean;
-// }
-//
-// const r = ReferenceRecord.of({Base: 'x', Index: 1, Strict: true});
-// ```
-//
-// or a slightly inverted version that calls the function before
-// defining the type
-//
-// ```ts
-// type AllReq<T> = {[K in keyof T]-?: T[K]};
-// type OptOf<T> = {[K in keyof T]-?: {} extends Pick<T, K> ? K : never}[keyof T];
-// type FillOpt<T> = {[K in OptOf<T>]-?: T[K]};
-// type Rest<T> = OptOf<T> extends never ? [] : [FillOpt<T>];
-//
-// // NOTE: takes ownership of the object literal
-// function makeRecord<F>(name: string, ...rest: Rest<F>): ((arg: F) => AllReq<F>) {
-//   const sym = Symbol(name);
-//   const defs: Array<[string|symbol, unknown]> = [[sym, true]];
-//   for (const k in rest[0] || {}) {
-//     defs.push([k, (rest[0] as any)[k]]);
-//   }
-//   function brand(obj: any) {
-//     for (const [k, v] of defs) {
-//       if (!(k in obj)) obj[k] = v;
-//     }
-//     return obj;
-//   }
-//   Object.defineProperty(brand, Symbol.hasInstance, {value: (arg: any) => arg && arg[sym]});
-//   return brand;
-// }
-//
-// const ReferenceRecord = makeRecord<{
-//   Base: string,
-//   readonly Index: number,
-//   readonly Strict?: boolean,
-// }>('ReferenceRecord', {
-//   Strict: false,
-// });
-// type ReferenceRecord = ReturnType<typeof ReferenceRecord>;
-// ```
-//
-// The benefit to our current `interface extends` approach is that
-// LSP keeps the name opaque.
+
+/**
+ * Allows subclassing a class that may not yet be fully initialized.
+ * The super class is evaluated lazily on the first instantiation.
+ * Note that static methods are NOT copied over since they would not
+ * be available before the first instantiation.
+ */
+export function lazySuper<F, A extends unknown[]>(fn: () => abstract new(...args: A) => F): abstract new(...args: A) => F {
+  let ctor: abstract new(...args: A) => F;
+  function cls() {
+    if (!ctor) {
+      ctor = fn();
+      Object.setPrototypeOf(cls.prototype, ctor.prototype);
+    }
+    return Reflect.construct(ctor, arguments, new.target);
+  }
+  return cls as any;
+}

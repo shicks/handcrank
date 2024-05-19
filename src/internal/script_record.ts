@@ -83,6 +83,7 @@ export function ScriptEvaluation($: VM, scriptRecord: ScriptRecord): CR<Val> {
     scriptRecord /* ScriptOrModule */,
     null /* Function */,
     scriptRecord.Realm /* Realm */,
+    null /* PrivateEnvironmentRecord */,
     globalEnv /* LexicalEnvironment */,
     globalEnv /* VariableEnvironment */,
     // 8. Set the PrivateEnvironment of scriptContext to null.

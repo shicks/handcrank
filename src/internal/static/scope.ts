@@ -21,7 +21,7 @@ import { Node } from '../tree';
  * string is never accessible to ECMAScript code or to the module
  * linking algorithm.
  */
-export function BoundNames(node: Node, names: Set<string> = new Set()): Set<string> {
+export function BoundNames(node: Node, names: string[] = []): string[] {
   function visit(node: Node|undefined|null) {
     switch (node?.type) {
       case 'ArrayPattern':
@@ -40,14 +40,14 @@ export function BoundNames(node: Node, names: Set<string> = new Set()): Set<stri
         visit(node.left);
         return;
       case 'Identifier':
-        names.add(node.name);
+        names.push(node.name);
         return;
       case 'VariableDeclaration':
         node.declarations.forEach(visit);
         return;
 
       case 'ExportDefaultDeclaration':
-        names.add('*default*');
+        names.push('*default*');
         // fall-through
       case 'ExportNamedDeclaration':
         // NOTE: type checker complains about MaybeNamedClassDecl but it's fine
@@ -67,7 +67,7 @@ export function BoundNames(node: Node, names: Set<string> = new Set()): Set<stri
       case 'FunctionDeclaration':
       case 'VariableDeclarator':
         if (node.id == null) {
-          names.add('*default*');
+          names.push('*default*');
         } else {
           visit(node.id);
         }
@@ -123,8 +123,8 @@ export function IsConstantDeclaration(node: Node): boolean {
  * that it treats top-level functions as `var` instead of `let`.
  * Block-scoped functions are always treated as `let`.
  */
-export function LexicallyDeclaredNames(node: Node, topLevel: boolean): Set<string> {
-  const names = new Set<string>();
+export function LexicallyDeclaredNames(node: Node, topLevel: boolean): string[] {
+  const names: string[] = [];
   visitLexicallyScopedDecls(node, topLevel, (n) => BoundNames(n, names));
   return names;
 }
@@ -166,8 +166,8 @@ export function LexicallyScopedDeclarations(node: Node, topLevel: boolean): Node
  * NOTE: At the top level of a function or script, inner function
  * declarations are treated like var declarations.
  */
-export function VarDeclaredNames(node: Node, topLevel: boolean): Set<string> {
-  const names = new Set<string>();
+export function VarDeclaredNames(node: Node, topLevel: boolean): string[] {
+  const names: string[] = [];
   visitVarScopedDecls(node, topLevel, (n) => BoundNames(n, names));
   return names;
 }
@@ -297,4 +297,24 @@ function visitLexicallyScopedDecls(node: Node, topLevel: boolean, visitor: Visit
     }
   }
   visit(node, topLevel);
+}
+
+/**
+ * 16.1.2 Static Semantics: IsStrict
+ *
+ * The syntax-directed operation IsStrict takes no arguments and
+ * returns a Boolean. It is defined piecewise over the following
+ * productions:
+ *
+ * Script : ScriptBodyopt
+ * 1. If ScriptBody is present and the Directive Prologue of
+ * ScriptBody contains a Use Strict Directive, return true; otherwise,
+ * return false.
+ */
+export function markStrictScopes(n: Node, strict: boolean): void {
+  // TODO - modules are always strict
+  //      - recognize {type: 'Directive', directive: 'use strict'}
+  //      - function bodies (rest/inits), programs, class bodies, etc
+
+
 }

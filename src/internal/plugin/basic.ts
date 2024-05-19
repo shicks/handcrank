@@ -37,9 +37,9 @@ export const basic: Plugin = (spi: PluginSPI) => {
   // Global environment
   spi.define('undefined', [], () => undefined);
 
-  // spi.define('%ObjectPrototype%', [], () => {
-  //   return new OrdinaryObject(null);
-  // });
+  spi.define('%ObjectPrototype%', [], () => {
+    return new OrdinaryObject(null);
+  });
 
   // spi.define('%Object%', [], () => {
   //   return new ObjectConstructor();

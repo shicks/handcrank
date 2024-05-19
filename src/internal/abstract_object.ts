@@ -5,6 +5,7 @@
 
 import { CR, IsAbrupt, Throw } from "./completion_record";
 import { UNUSED } from "./enums";
+import { OrdinaryObject } from "./obj";
 import { PropertyDescriptor } from "./property_descriptor";
 import { Obj, PropertyKey, Val } from "./values";
 import { VM } from "./vm";
@@ -23,12 +24,12 @@ declare const ToObject: any;
  * when called:
  *
  * 1. Let obj be a newly created object with an internal slot for each name in internalSlotsList.
- * 2. Set obj\'s essential internal methods to the default ordinary
+ * 2. Set obj's essential internal methods to the default ordinary
  *    object definitions specified in 10.1.
- * 3. Assert: If the caller will not be overriding both obj\'s
+ * 3. Assert: If the caller will not be overriding both obj's
  *    [[GetPrototypeOf]] and [[SetPrototypeOf]] essential internal
  *    methods, then internalSlotsList contains [[Prototype]].
- * 4. Assert: If the caller will not be overriding all of obj\'s
+ * 4. Assert: If the caller will not be overriding all of obj's
  *    [[SetPrototypeOf]], [[IsExtensible]], and [[PreventExtensions]]
  *    essential internal methods, then internalSlotsList contains
  *    [[Extensible]].
@@ -38,14 +39,18 @@ declare const ToObject: any;
  * NOTE: Within this specification, exotic objects are created in
  * abstract operations such as ArrayCreate and BoundFunctionCreate by
  * first calling MakeBasicObject to obtain a basic, foundational
- * object, and then overriding some or all of that object\'s internal
+ * object, and then overriding some or all of that object's internal
  * methods. In order to encapsulate exotic object creation, the
- * object\'s essential internal methods are never modified outside
+ * object's essential internal methods are never modified outside
  * those operations.
  */
-export function MakeBasicObject(_$: VM, _internalSlotsList: string[]): Obj {
-  throw new Error('not implemented');
-}
+// export function MakeBasicObject(_$: VM, internalSlotsList: Array<keyof Obj>): Obj {
+//   const obj = new OrdinaryObject();
+//   for (const slot of internalSlotsList) {
+//     obj[slot] ??= undefined;
+//   }
+//   Assert(
+// }
 
 /**
  * 7.3.2 Get ( O, P )

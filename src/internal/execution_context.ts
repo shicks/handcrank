@@ -2,6 +2,7 @@ import { Assert } from './assert';
 import { CR } from './completion_record';
 import { EnvironmentRecord, FunctionEnvironmentRecord, GetIdentifierReference } from './environment_record';
 import { ModuleRecord } from './module_record';
+import { PrivateEnvironmentRecord } from './private_environment_record';
 import { RealmRecord } from './realm_record';
 import { ReferenceRecord } from './reference_record';
 import { ScriptRecord } from './script_record';
@@ -76,20 +77,26 @@ export class ExecutionContext {
   //      - if so, then maybe the ctor params below are pulled out for code only
 
   isStrict: boolean = false;
+  isRunning: boolean = false;
+
+  LexicalEnvironment: EnvironmentRecord|undefined;
+  VariableEnvironment: EnvironmentRecord|undefined;
 
   constructor(
     readonly ScriptOrModule: ScriptRecord|ModuleRecord|null,
     readonly Function: Func|null,
     readonly Realm: RealmRecord,
-    //PrivateEnvironment?: PrivateEnvironmentRecord;
+    readonly PrivateEnvironment: PrivateEnvironmentRecord|null,
     //Generator?: Gen;
   ) { }
 
   suspend(): void {
+    this.isRunning = false;
     // TODO ???
   }
 
   resume(): void {
+    this.isRunning = true;
     // TODO ???
   }
 }
@@ -128,9 +135,10 @@ export class CodeExecutionContext extends ExecutionContext {
     ScriptOrModule: ScriptRecord|ModuleRecord|null,
     Function: Func|null,
     Realm: RealmRecord,
+    PrivateEnvironment: PrivateEnvironmentRecord|null,
     readonly LexicalEnvironment: EnvironmentRecord,
     readonly VariableEnvironment: EnvironmentRecord,
-  ) { super(ScriptOrModule, Function, Realm); }
+  ) { super(ScriptOrModule, Function, Realm, PrivateEnvironment); }
 }
 
 export function GetLexicalEnvironment($: VM): EnvironmentRecord|undefined {

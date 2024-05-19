@@ -22,7 +22,7 @@ export interface Abrupt {
   /** The type of completion that occurred. */
   readonly Type: CompletionType;
   /** The value that was produced. */
-  readonly Value: unknown;
+  readonly Value: Val;
   /** The target label for directed control transfers. */
   readonly Target: string|EMPTY;
 }

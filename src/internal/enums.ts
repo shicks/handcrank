@@ -27,15 +27,23 @@ export interface UNUSED extends EnumSym<'unused'> {}
 export const EMPTY: EMPTY = new EnumSym('empty');
 export interface EMPTY extends EnumSym<'empty'> {}
 
-// Used by FunctionEnvironmentRecord
+// Used by FunctionEnvironmentRecord [[ThisBindingStatus]] and [[ThisMode]]
 export const LEXICAL: LEXICAL = new EnumSym('lexical');
 export interface LEXICAL extends EnumSym<'lexical'> {}
 
-// Used by FunctionEnvironmentRecord
+// Used by FunctionEnvironmentRecord [[ThisMode]]
+export const STRICT: STRICT = new EnumSym('strict');
+export interface STRICT extends EnumSym<'strict'> {}
+
+// Used by FunctionEnvironmentRecord [[ThisMode]]
+export const GLOBAL: GLOBAL = new EnumSym('global');
+export interface GLOBAL extends EnumSym<'global'> {}
+
+// Used by FunctionEnvironmentRecord [[ThisBindingStatus]]
 export const INITIALIZED: INITIALIZED = new EnumSym('initialized');
 export interface INITIALIZED extends EnumSym<'initialized'> {}
 
-// Used by FunctionEnvironmentRecord
+// Used by FunctionEnvironmentRecord [[ThisBindingStatus]]
 export const UNINITIALIZED: UNINITIALIZED = new EnumSym('uninitialized');
 export interface UNINITIALIZED extends EnumSym<'uninitialized'> {}
 
@@ -140,3 +148,21 @@ export interface BIGINT extends EnumSym<'bigint'> {}
  */
 export const OBJECT: OBJECT = new EnumSym('object');
 export interface OBJECT extends EnumSym<'object'> {}
+
+// Parameter type for 10.2.3 OrdinaryFunctionCreate
+export const LEXICAL_THIS: LEXICAL_THIS = new EnumSym('lexical-this');
+export interface LEXICAL_THIS extends EnumSym<'lexical-this'> {}
+
+// Parameter type for 10.2.3 OrdinaryFunctionCreate
+export const NON_LEXICAL_THIS: NON_LEXICAL_THIS = new EnumSym('non-lexical-this');
+export interface NON_LEXICAL_THIS extends EnumSym<'non-lexical-this'> {}
+
+
+/**
+ * ???
+ */
+export const BASE: BASE = new EnumSym('base');
+export interface BASE extends EnumSym<'base'> {}
+
+export const DERIVED: DERIVED = new EnumSym('derived');
+export interface DERIVED extends EnumSym<'derived'> {}

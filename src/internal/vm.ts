@@ -1,8 +1,8 @@
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import type { Obj, Val } from './values';
+import { OrdinaryObjectCreate, type Obj, type Val } from './values';
 import type { ExecutionContext } from './execution_context';
 import { EMPTY, NOT_APPLICABLE } from './enums';
-import { NodeType, NodeMap, Node } from './tree';
+import { NodeType, NodeMap, Node, Esprima, emptyLoc, SourceTextNode } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
 import { PropertyDescriptor } from './property_descriptor';
 import { InitializeHostDefinedRealm, RealmRecord } from './realm_record';
@@ -13,22 +13,6 @@ interface SyntaxOp {
   Evaluation: CR<Val|ReferenceRecord|EMPTY>;
 }
 
-interface ParseOpts {
-  range?: boolean;
-  loc?: boolean;
-  tolerand?: boolean;
-  comment?: boolean;
-}
-interface Esprima {
-  parseScript(str: string, opts?: ParseOpts, delegate?: (n: Node) => void): any;
-  parseModule(str: string, opts?: ParseOpts, delegate?: (n: Node) => void): any;
-}
-function emptyLoc(): ESTree.SourceLocation {
-  return {
-    start: {line: 0, column: 0},
-    end: {line: 0, column: 0},
-  };
-}
 
 export class VM {
 
@@ -50,7 +34,23 @@ export class VM {
     }
   }
 
+  newError(_name: string): Obj {
+    // TODO - make this work
+    return OrdinaryObjectCreate(null, []);
+  }
+
   // TODO - can we store strictness of executing production here?
+
+  enterContext(context: ExecutionContext) {
+    // TODO - resume? suspend previous?
+    this.executionStack.push(context);
+    context.resume();
+  }
+
+  popContext() {
+    this.executionStack.pop()!.suspend();
+    this.getRunningContext().resume();
+  }
 
   getRunningContext(): ExecutionContext {
     // TODO - what if stack empty?!?
@@ -59,6 +59,10 @@ export class VM {
 
   getRealm(): RealmRecord|undefined {
     return this.executionStack.at(-1)?.Realm;
+  }
+
+  getIntrinsic(name: string): Obj {
+    return this.getRealm()!.Intrinsics.get(name)!;
   }
 
   // NOTE: this helper method is typically more useful than the "recurse"
@@ -80,9 +84,31 @@ export class VM {
   evaluateScript(script: string|ESTree.Program, filename?: string): CR<Val> {
     this.initialize()
     if (typeof script === 'string') {
+      const source = script;
       if (!this.esprima) throw new Error(`no parser`);
-      script = this.esprima.parseScript(script, {loc: true}, (n: Node) => {
+      type Metadata = {start: {offset: number}, end: {offset: number}};
+      script = this.esprima.parseScript(source, {loc: true}, (n: Node, meta: Metadata) => {
         if (filename) (n.loc || (n.loc = emptyLoc())).source = filename;
+        if (n.range) {
+          switch (n.type) {
+            case 'FunctionExpression':
+            case 'FunctionDeclaration':
+            case 'MethodDefinition':
+            case 'ClassDeclaration':
+            case 'ClassExpression':
+            case 'ArrowFunctionExpression':
+              (n as SourceTextNode).sourceText =
+                source.substring(meta.start.offset, meta.end.offset);
+              break;
+            case 'Property':
+              if (n.value.type === 'FunctionExpression') {
+                (n.value as SourceTextNode).sourceText =
+                  source.substring(meta.start.offset, meta.end.offset);
+              }
+              break;
+          }
+        }
+        delete n.range;
       }) as ESTree.Program;
     }
     const record = ParseScript(script, this.getRealm(), undefined);
