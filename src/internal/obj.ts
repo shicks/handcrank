@@ -18,7 +18,7 @@ type ClassFieldDefinitionRecord = any;
 type PrivateElement = any;
 declare const Call: any;
 
-abstract class Obj extends Slots(slot => ({
+export abstract class Obj extends Slots(slot => ({
   // Standard slots for all objects
   Prototype: slot<Obj|null>,
   Extensible: slot<boolean>,
@@ -49,7 +49,9 @@ abstract class Obj extends Slots(slot => ({
 
   // Slot for exotic mapped arguments object
   ParameterMap: slot<Obj|undefined>,
+
 })) {
+
   // Implementation details not in spec
   abstract OwnProps: Map<PropertyKey, PropertyDescriptor>;
 
@@ -66,19 +68,6 @@ abstract class Obj extends Slots(slot => ({
   abstract Delete($: VM, P: PropertyKey): CR<boolean>;
   abstract OwnPropertyKeys(_$: VM): CR<PropertyKey[]>;
 }
-
-export class PropertyDescriptor1 extends Slots(slot => ({
-  Enumerable: slot<boolean>,
-  Configurable: slot<boolean>,
-  Writable: slot<boolean>,
-  Value: slot<boolean>,
-  Get: slot<Obj|undefined>,
-  Set: slot<Obj|undefined>,
-}), 'PropertyDescriptor') {}
-
-const pp: PropertyDescriptor1 = {}; // as PropertyDescriptor1;
-const p = new PropertyDescriptor1(pp);
-const [] = [p, pp];
 
 /**
  * 10.1 Ordinary Object Internal Methods and Internal Slots
@@ -399,7 +388,7 @@ export function OrdinaryPreventExtensions(O:Obj): true {
 export function OrdinaryGetOwnProperty(O: Obj, P: PropertyKey):
     PropertyDescriptor|undefined {
   const X = O.OwnProps.get(P);
-  return X && PropertyDescriptor({...O.OwnProps.get(P)} as any);
+  return X && new PropertyDescriptor(O.OwnProps.get(P));
 }
 
 /**
@@ -474,7 +463,7 @@ export function ValidateAndApplyPropertyDescriptor(
       //        [[Configurable]] attributes are set to the value of the
       //        corresponding field in Desc if Desc has that field, or to
       //        the attribute's default value otherwise.
-      O.OwnProps.set(P, PropertyDescriptor({
+      O.OwnProps.set(P, new PropertyDescriptor({
         Get: Desc.Get,
         Set: Desc.Set,
         Enumerable: Desc.Enumerable ?? false,
@@ -488,7 +477,7 @@ export function ValidateAndApplyPropertyDescriptor(
       //        [[Configurable]] attributes are set to the value of the
       //        corresponding field in Desc if Desc has that field, or to
       //        the attribute's default value otherwise.
-      O.OwnProps.set(P, PropertyDescriptor({
+      O.OwnProps.set(P, new PropertyDescriptor({
         Value: Desc.Value,
         Writable: Desc.Writable ?? false,
         Enumerable: Desc.Enumerable ?? false,
@@ -563,7 +552,7 @@ export function ValidateAndApplyPropertyDescriptor(
       //          set to the value of the corresponding field in Desc if Desc
       //          has that field, or to the attribute's default value
       //          otherwise.
-      O.OwnProps.set(P, PropertyDescriptor({
+      O.OwnProps.set(P, new PropertyDescriptor({
         Configurable: configurable,
         Enumerable: enumerable,
         Get: Desc.Get,
@@ -590,7 +579,7 @@ export function ValidateAndApplyPropertyDescriptor(
       //          attributes are set to the value of the corresponding field
       //          in Desc if Desc has that field, or to the attribute's
       //          default value otherwise.
-      O.OwnProps.set(P, PropertyDescriptor({
+      O.OwnProps.set(P, new PropertyDescriptor({
         Configurable: configurable,
         Enumerable: enumerable,
         Value: Desc.Value,
@@ -603,7 +592,7 @@ export function ValidateAndApplyPropertyDescriptor(
     //       i. For each field of Desc, set the corresponding attribute
     //           of the property named P of object O to the value of the
     //           field.
-    const p = PropertyDescriptor.clone(current);
+    const p = new PropertyDescriptor(current);
     if (HasValueField(Desc)) p.Value = Desc.Value;
     if (Desc.Writable != undefined) p.Writable = Desc.Writable;
     if (Desc.Enumerable != undefined) p.Enumerable = Desc.Enumerable;
@@ -725,11 +714,11 @@ export function OrdinarySetWithOwnDescriptor(
     //       i. Set ownDesc to the PropertyDescriptor { [[Value]]:
     //          undefined, [[Writable]]: true, [[Enumerable]]: true,
     //          [[Configurable]]: true }.
-    ownDesc = PropertyDescriptor({
+    ownDesc = new PropertyDescriptor({
       Value: undefined,
       Writable: true,
       Enumerable: true,
-      Configurabe: true,
+      Configurable: true,
     });
   }
   // 2. If IsDataDescriptor(ownDesc) is true, then
@@ -749,7 +738,7 @@ export function OrdinarySetWithOwnDescriptor(
       //     ii. If existingDescriptor.[[Writable]] is false, return false.
       if (!existingDescriptor.Writable) return false;
       //     iii. Let valueDesc be the PropertyDescriptor { [[Value]]: V }.
-      const valueDesc = PropertyDescriptor({Value: V});
+      const valueDesc = new PropertyDescriptor({Value: V});
       //     iv. Return ? Receiver.[[DefineOwnProperty]](P, valueDesc).
       return Receiver.DefineOwnProperty($, P, valueDesc);
     }

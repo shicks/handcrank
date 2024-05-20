@@ -26,35 +26,36 @@ declare const ResolvePrivateIdentifier: any;
  * A Reference Record is a resolved name or property binding; its
  * fields are defined by Table 8.
  */
-export interface ReferenceRecord {
-  __brand__: 'ReferenceRecord';
-  /**
-   * The value or Environment Record which holds the binding. A
-   * [[Base]] of unresolvable indicates that the binding could not
-   * be resolved.
-   */
-  readonly Base: Val|EnvironmentRecord|UNRESOLVABLE;
-  /**
-   * The name of the binding. Always a String if [[Base]] value is
-   * an Environment Record.
-   */
-  readonly ReferencedName: string|symbol|PrivateName;
-  /**
-   * true if the Reference Record originated in strict mode code,
-   * false otherwise.
-   */
-  readonly Strict: boolean;
-  /**
-   * If not empty, the Reference Record represents a property
-   * binding that was expressed using the super keyword; it is
-   * called a Super Reference Record and its [[Base]] value will
-   * never be an Environment Record. In that case, the
-   * [[ThisValue]] field holds the this value at the time the
-   * Reference Record was created.
-   */
-  readonly ThisValue: Val|EMPTY;
+export class ReferenceRecord {
+  __brand__!: 'ReferenceRecord';
+  constructor(
+    /**
+     * The value or Environment Record which holds the binding. A
+     * [[Base]] of unresolvable indicates that the binding could not
+     * be resolved.
+     */
+    readonly Base: Val|EnvironmentRecord|UNRESOLVABLE,
+    /**
+     * The name of the binding. Always a String if [[Base]] value is
+     * an Environment Record.
+     */
+    readonly ReferencedName: string|symbol|PrivateName,
+    /**
+     * true if the Reference Record originated in strict mode code,
+     * false otherwise.
+     */
+    readonly Strict: boolean,
+    /**
+     * If not empty, the Reference Record represents a property
+     * binding that was expressed using the super keyword; it is
+     * called a Super Reference Record and its [[Base]] value will
+     * never be an Environment Record. In that case, the
+     * [[ThisValue]] field holds the this value at the time the
+     * Reference Record was created.
+     */
+    readonly ThisValue: Val|EMPTY,
+  ) {}
 }
-export const ReferenceRecord = makeRecord<ReferenceRecord>();
 
 interface ObjectReferenceRecord extends ReferenceRecord {
   readonly Base: Val|UNRESOLVABLE;
@@ -234,12 +235,7 @@ export function MakePrivateReference($: VM, baseValue: Val, privateIdentifier: s
   const privEnv = null!; // TODO - the running execution context\'s PrivateEnvironment.
   Assert(privEnv != null);
   const privateName = ResolvePrivateIdentifier($, privEnv, privateIdentifier);
-  return ReferenceRecord({
-    Base: baseValue,
-    ReferencedName: privateName,
-    Strict: true,
-    ThisValue: EMPTY,
-  });
+  return new ReferenceRecord(baseValue, privateName, true, EMPTY);
 }
 
 /**

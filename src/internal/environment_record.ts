@@ -1343,23 +1343,29 @@ export class ModuleEnvironmentRecord extends DeclarativeEnvironmentRecord {
  */
 export function GetIdentifierReference($: VM, env: EnvironmentRecord|null,
                                        name: string, strict: boolean): CR<ReferenceRecord> {
+  // 1. If env is null, then
   if (env == null) {
-    return ReferenceRecord({
-      Base: UNRESOLVABLE,
-      ReferencedName: name,
-      Strict: strict,
-      ThisValue: EMPTY,
-    });
+    //   a. Return the Reference Record {
+    //        [[Base]]: unresolvable,
+    //        [[ReferencedName]]: name,
+    //        [[Strict]]: strict,
+    //        [[ThisValue]]: empty }.
+    return new ReferenceRecord(UNRESOLVABLE, name, strict, EMPTY);
   }
+  // 2. Let exists be ? env.HasBinding(name).
   const exists = env.HasBinding($, name);
   if (IsAbrupt(exists)) return exists;
+  // 3. If exists is true, then
   if (exists) {
-    return ReferenceRecord({
-      Base: env,
-      ReferencedName: name,
-      Strict: strict,
-      ThisValue: EMPTY,
-    });
+    //   a. Return the Reference Record {
+    //        [[Base]]: env,
+    //        [[ReferencedName]]: name,
+    //        [[Strict]]: strict,
+    //        [[ThisValue]]: empty }.
+    return new ReferenceRecord(env, name, strict, EMPTY);
   }
+  // 4. Else,
+  //     a. Let outer be env.[[OuterEnv]].
+  //     b. Return ? GetIdentifierReference(outer, name, strict).
   return GetIdentifierReference($, env.OuterEnv, name, strict);
 }

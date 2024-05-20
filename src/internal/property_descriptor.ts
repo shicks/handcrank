@@ -2,7 +2,7 @@ import { Assert } from './assert';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { UNUSED } from './enums';
 import { Obj } from './obj';
-import { makeRecord, withSlots } from './record';
+import { Slots } from './record';
 import { Val } from './val';
 import { VM } from './vm';
 
@@ -40,24 +40,23 @@ declare const IsCallable: any;
  * accessor Property Descriptor or a data Property Descriptor and that
  * has all of the corresponding fields defined in Table 3.
  */
-export interface PropertyDescriptor {
-  __brand__: 'PropertyDescriptor';
-  Enumerable?: boolean;
-  Configurable?: boolean;
-  Writable?: boolean
-  Value?: Val;
-  Get?: Obj|undefined;
-  Set?: Obj|undefined;
+export class PropertyDescriptor extends Slots(slot => ({
+  Enumerable: slot<boolean>,
+  Configurable: slot<boolean>,
+  Writable: slot<boolean>,
+  Value: slot<Val>,
+  Get: slot<Obj|undefined>,
+  Set: slot<Obj|undefined>,
+}), 'PropertyDescriptor') {}
+
+interface DataDescriptor extends PropertyDescriptor {
+  Get?: undefined;
+  Set?: undefined;
 }
-export const PropertyDescriptor = withSlots(makeRecord<PropertyDescriptor>(), {
-  Enumerable: true,
-  Configurable: true,
-  Writable: true,
-  Value: true,
-  Get: true,
-  Set: true,
-});
-export const IsPropertyDescriptor = PropertyDescriptor[Symbol.hasInstance];
+interface AccessorDescriptor extends PropertyDescriptor {
+  Writable?: undefined;
+  Value?: undefined;
+}
 
 /**
  * 6.2.6.1 IsAccessorDescriptor ( Desc )
@@ -66,7 +65,7 @@ export const IsPropertyDescriptor = PropertyDescriptor[Symbol.hasInstance];
  * Property Descriptor or undefined) and returns a Boolean. It
  * performs the following steps when called:
  */
-export function IsAccessorDescriptor(Desc: PropertyDescriptor|undefined): boolean {
+export function IsAccessorDescriptor(Desc: PropertyDescriptor|undefined): Desc is AccessorDescriptor {
   return Boolean(Desc && (Desc.Get || Desc.Set));
 }
 
@@ -81,7 +80,7 @@ export function HasValueField(Desc: PropertyDescriptor): boolean {
  * Property Descriptor or undefined) and returns a Boolean. It
  * performs the following steps when called:
  */
-export function IsDataDescriptor(Desc: PropertyDescriptor|undefined): boolean {
+export function IsDataDescriptor(Desc: PropertyDescriptor|undefined): Desc is DataDescriptor {
   return Boolean(Desc && (HasValueField(Desc) || Desc.Writable != null));
 }
 
@@ -138,7 +137,7 @@ export function FromPropertyDescriptor($: VM, Desc: PropertyDescriptor|undefined
  */
 export function ToPropertyDescriptor($: VM, obj: Val): CR<PropertyDescriptor> {
   if (!(obj instanceof Obj)) return Throw('TypeError');
-  const desc = PropertyDescriptor({});
+  const desc = new PropertyDescriptor();
   const hasEnumerable = HasProperty($, obj, 'enumerable');
   if (IsAbrupt(hasEnumerable)) return hasEnumerable;
   if (hasEnumerable) {
