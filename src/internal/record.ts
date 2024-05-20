@@ -26,16 +26,77 @@ export const makeRecord: MakeRecordFn = <F extends {__brand__: string|symbol}>()
   return fn as any;
 };
 
-type FactoryOrCtor<R> = ((...args: any[]) => R)|(abstract new (...args: any[]) => R);
-type Slots<F> = F extends FactoryOrCtor<infer R> ? {[K in keyof R]?: unknown} : never;
 
-// export function withSlots<F extends FactoryOrCtor<any>, S extends {[K in keyof R]?: unknown}, F extends FactoryOrCtor<R>>(fn: F, slots: S): F & {[K in keyof S]: K} {
-export function withSlots<F extends FactoryOrCtor<any>, S extends Slots<F>>(fn: F, slots: S): F & {[K in keyof S]: K} {
+/**
+ * Superclass for a class that accepts slots.  All possible slots should be
+ * declared here, as in
+ * ```ts
+ * class Obj extends Slots($ => ({
+ *   SlotName: $<SlotType>,
+ *   // ...
+ * })) {
+ *   // class body
+ * }
+ * ```
+ * This defines both an optional instance property for each slot, as well as
+ * a static constant string (keyof Obj) property on the constructor, which can
+ * be used to query slot presence via `Obj.SlotName in obj`.  Subclasses that
+ * concretely declare a given slot should override the property, and may want
+ * to explicitly initialize it with `undefined!` (if needed) to ensure the slot
+ * query works correctly.
+ */
+type Field<in out T> = (arg: T) => T;
+type ClassOf<T extends Record<string, Field<any>>> =
+  {[K in keyof T]?: T[K] extends Field<infer U> ? U : never};
+export function Slots<T extends Record<string, Field<any>>, const B>(
+  fn: ($: <U>(arg: U) => U) => T,
+  _brand?: B,
+): {[K in keyof T]: K} & {new(init?: ClassOf<T>): ClassOf<T> & {__brand__: B}} {
+  const ctor = function(this: ClassOf<T>, init: ClassOf<T>) {
+    if (init) {
+      for (const key in init) {
+        if (fields.has(key)) this[key] = init[key];
+      }
+    }
+  } as any;
+  const $ = <U,>(x: U) => x;
+  const fields = new Set<keyof T>();
+  const spec = fn($);
+  for (const key in spec) {
+    if (spec[key] === $) {
+      fields.add(key);
+      ctor[key] = key;
+    }
+  }
+  return ctor;
+}
+
+
+// TODO - delete below this line????
+
+
+type FactoryOrCtor<R> = ((...args: any[]) => R)|(abstract new (...args: any[]) => R);
+type Slots<R> = {readonly [K in keyof R]?: unknown};
+
+// type OptionalKeys<T> = {[K in keyof T]-?: T extends {[K1 in K]-?: T[K]} ? never : K}[keyof T];
+// type Slots<R> =
+//   {readonly [K in OptionalKeys<R>]-?: unknown} &
+//   {readonly [K in Exclude<keyof R, OptionalKeys<R>>]?: unknown};
+
+/**
+ * Adds static properties for each slot, in a way that's robust to
+ * property renaming.
+ */
+export function withSlots<R, F extends FactoryOrCtor<R>, S extends Slots<R>>(
+  fn: F,
+  slots: S,
+): F & {[K in keyof S]: K} {
   for (const key in slots) {
     if (Object.hasOwn(slots, key)) (fn as any)[key] = key;
   }
   return fn as any;
 }
+
 
 /**
  * Returns whether the slot is present - note that the return type is

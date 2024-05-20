@@ -1,13 +1,13 @@
-import { DefinePropertyOrThrow } from "./abstract_object";
-import { Assert } from "./assert";
-import { CR, IsAbrupt } from "./completion_record";
-import { UNUSED } from "./enums";
-import { GlobalEnvironmentRecord } from "./environment_record";
-import { ExecutionContext } from "./execution_context";
-import { Obj } from "./obj";
-import { PropertyDescriptor } from "./property_descriptor";
-import { Val } from "./values";
-import { VM } from "./vm";
+import { DefinePropertyOrThrow } from './abstract_object';
+import { Assert } from './assert';
+import { CR, IsAbrupt } from './completion_record';
+import { UNUSED } from './enums';
+import { GlobalEnvironmentRecord } from './environment_record';
+import { ExecutionContext } from './execution_context';
+import { Obj } from './obj';
+import { IsPropertyDescriptor, PropertyDescriptor } from './property_descriptor';
+import { Val } from './val';
+import { VM } from './vm';
 
 declare const OrdinaryObjectCreate: any;
 
@@ -209,7 +209,7 @@ export function SetDefaultGlobalBindings($: VM, realmRec: RealmRecord): CR<Obj> 
       depList.push(map.get(dep)!);
     }
     const result = fn(...depList);
-    const desc: PropertyDescriptor = result instanceof PropertyDescriptor ?
+    const desc: PropertyDescriptor = IsPropertyDescriptor(result) ?
       result : PropertyDescriptor({Value: result});
     const define = DefinePropertyOrThrow($, gbl, name, desc);
     if (IsAbrupt(define)) return define;
@@ -246,7 +246,7 @@ export function InitializeHostDefinedRealm($: VM): CR<UNUSED> {
   // 3. Set the Function of newContext to null.
   // 4. Set the Realm of newContext to realm.
   // 5. Set the ScriptOrModule of newContext to null.
-  const newContext = new ExecutionContext(null, null, realm);
+  const newContext = new ExecutionContext(null, null, realm, null);
   // 6. Push newContext onto the execution context stack; newContext
   //    is now the running execution context.
   $.executionStack.push(newContext);

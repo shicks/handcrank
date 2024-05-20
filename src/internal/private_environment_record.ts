@@ -1,8 +1,8 @@
 export class PrivateEnvironmentRecord {
-  private _unused!: never;
+  _unused!: never;
 }
 
 export class PrivateName {
-  private _1!: never;
+  _1!: never;
   Description!: string;
 }

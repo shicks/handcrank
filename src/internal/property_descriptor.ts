@@ -57,6 +57,7 @@ export const PropertyDescriptor = withSlots(makeRecord<PropertyDescriptor>(), {
   Get: true,
   Set: true,
 });
+export const IsPropertyDescriptor = PropertyDescriptor[Symbol.hasInstance];
 
 /**
  * 6.2.6.1 IsAccessorDescriptor ( Desc )

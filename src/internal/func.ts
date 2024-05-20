@@ -63,7 +63,7 @@ export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) i
    * that the function was closed over. Used as the outer environment
    * when evaluating the code of the function.
    */
-  override Environment: EnvironmentRecord;
+  declare Environment: EnvironmentRecord;
 
   /**
    * [[PrivateEnvironment]], a PrivateEnvironment Record or null - The
@@ -72,38 +72,38 @@ export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) i
    * within a class. Used as the outer PrivateEnvironment for inner
    * classes when evaluating the code of the function.
    */
-  override PrivateEnvironment: PrivateEnvironmentRecord;
+  declare PrivateEnvironment: PrivateEnvironmentRecord;
 
   /**
    * [[FormalParameters]], a Parse Node - The root parse node of the
    * source text that defines the function's formal parameter list.
    */
-  override FormalParameters: ESTree.Pattern[];
+  declare FormalParameters: ESTree.Pattern[];
 
   /**
    * [[ECMAScriptCode]], a Parse Node - The root parse node of the
    * source text that defines the function's body.
    */
-  override ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression;
+  declare ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression;
 
   /**
    * [[ConstructorKind]], base or derived - Whether or not the function
    * is a derived class constructor.
    */
-  override ConstructorKind: BASE|DERIVED;
+  declare ConstructorKind: BASE|DERIVED;
 
   /**
    * [[Realm]], a Realm Record - The realm in which the function was
    * created and which provides any intrinsic objects that are accessed
    * when evaluating the function.
    */
-  override Realm: RealmRecord;
+  declare Realm: RealmRecord;
 
   /**
    * [[ScriptOrModule]], a Script Record or a Module Record - The script
    * or module in which the function was created.
    */
-  override ScriptOrModule: ScriptRecord|ModuleRecord;
+  declare ScriptOrModule: ScriptRecord|ModuleRecord;
 
   /**
    * [[ThisMode]], lexical, strict, or global - Defines how this
@@ -115,40 +115,40 @@ export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) i
    * interpreted as a reference to the global object, and any other this
    * value is first passed to ToObject.
    */
-  override ThisMode: LEXICAL|STRICT|GLOBAL;
+  declare ThisMode: LEXICAL|STRICT|GLOBAL;
 
   /**
    * [[Strict]], a Boolean - true if this is a strict function, false if
    * this is a non-strict function.
    */
-  override Strict: boolean;
+  declare Strict: boolean;
 
   /**
    * [[HomeObject]], an Object - If the function uses super, this is the
    * object whose [[GetPrototypeOf]] provides the object where super
    * property lookups begin.
    */
-  override HomeObject: Obj|undefined; // |undefined?
+  declare HomeObject: Obj|undefined; // |undefined?
 
   /**
    * [[SourceText]], a sequence of Unicode code points - The source text
    * that defines the function.
    */
-  override SourceText: string;
+  declare SourceText: string;
 
   /**
    * [[Fields]], a List of ClassFieldDefinition Records - If the
    * function is a class, this is a list of Records representing the
    * non-static fields and corresponding initializers of the class.
    */
-  override Fields: ClassFieldDefinitionRecord[]; // TODO - Map?
+  declare Fields: ClassFieldDefinitionRecord[]; // TODO - Map?
 
   /**
    * [[PrivateMethods]], a List of PrivateElements - If the function is
    * a class, this is a list representing the non-static private methods
    * and accessors of the class.
    */
-  override PrivateMethods: PrivateElement[]; // TODO - Map?
+  declare PrivateMethods: PrivateElement[]; // TODO - Map?
 
   /**
    * [[ClassFieldInitializerName]], a String, a Symbol, a Private Name,
@@ -156,14 +156,14 @@ export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) i
    * field, the name to use for NamedEvaluation of the field; empty
    * otherwise.
    */
-  override ClassFieldInitializerName: string|symbol|PrivateName|EMPTY;
+  declare ClassFieldInitializerName: string|symbol|PrivateName|EMPTY;
 
   /**
    * [[IsClassConstructor]], a Boolean - Indicates whether the function
    * is a class constructor. (If true, invoking the function's [[Call]]
    * will immediately throw a TypeError exception.)
    */
-  override IsClassConstructor: boolean;
+  declare IsClassConstructor: boolean;
 
   constructor(functionPrototype: Obj,
               sourceText: string,
@@ -242,7 +242,7 @@ export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) i
 
 export class BuiltinFunction extends OrdinaryFunction {
   constructor(public InitialName: string) {
-    super(null!);
+    super();
   }
 }
 

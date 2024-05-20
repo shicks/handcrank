@@ -8,7 +8,8 @@ import { PropertyDescriptor } from './property_descriptor';
 import { InitializeHostDefinedRealm, RealmRecord } from './realm_record';
 import { ParseScript, ScriptEvaluation } from './script_record';
 import * as ESTree from 'estree';
-import { Obj, OrdinaryObjectCreate } from './obj';
+import { OrdinaryObjectCreate } from './obj';
+import { Obj } from './obj_base';
 
 interface SyntaxOp {
   Evaluation: CR<Val|ReferenceRecord|EMPTY>;

@@ -2,15 +2,83 @@ import { IsExtensible, IsPropertyKey, SameValue } from './abstract_compare';
 import { CreateDataProperty } from './abstract_object';
 import { Assert } from './assert';
 import { CR, IsAbrupt } from './completion_record';
-import { Obj } from './obj_base';
 import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor } from './property_descriptor';
-import { hasAnyFields } from './record';
+import { Slots, hasAnyFields } from './record';
 import { PropertyKey, Val } from './val';
 import { VM } from './vm';
+import * as ESTree from 'estree';
+import { EnvironmentRecord } from './environment_record';
+import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
+import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, STRICT } from './enums';
+import { RealmRecord } from './realm_record';
+import { ScriptRecord } from './script_record';
+import { ModuleRecord } from './module_record';
 
-export { Obj };
-
+type ClassFieldDefinitionRecord = any;
+type PrivateElement = any;
 declare const Call: any;
+
+abstract class Obj extends Slots(slot => ({
+  // Standard slots for all objects
+  Prototype: slot<Obj|null>,
+  Extensible: slot<boolean>,
+
+  // Slots for function objects
+  Environment: slot<EnvironmentRecord>,
+  PrivateEnvironment: slot<PrivateEnvironmentRecord>,
+  FormalParameters: slot<ESTree.Pattern[]>,
+  ECMAScriptCode: slot<ESTree.BlockStatement|ESTree.Expression>,
+  ConstructorKind: slot<BASE|DERIVED>,
+  Realm: slot<RealmRecord>,
+  ScriptOrModule: slot<ScriptRecord|ModuleRecord>,
+  ThisMode: slot<LEXICAL|STRICT|GLOBAL>,
+  Strict: slot<boolean>,
+  HomeObject: slot<Obj|undefined>, // |undefined?
+  SourceText: slot<string>,
+  Fields: slot<ClassFieldDefinitionRecord[]>, // TODO - Map?
+  PrivateMethods: slot<PrivateElement[]>, // TODO - Map?
+  ClassFieldInitializerName: slot<string|symbol|PrivateName|EMPTY>,
+  IsClassConstructor: slot<boolean>,
+
+  // Methods for function objects
+  Call: slot<($: VM, thisArgument: Val, argumentsList: Val[]) => CR<Val>>,
+  Construct: slot<($: VM, argumentsList: Val[], newTarget: Obj) => CR<Obj>>,
+
+  // Slot for builtin function object
+  InitialName: slot<string>,
+
+  // Slot for exotic mapped arguments object
+  ParameterMap: slot<Obj|undefined>,
+})) {
+  // Implementation details not in spec
+  abstract OwnProps: Map<PropertyKey, PropertyDescriptor>;
+
+  // Required internal methods for all objects
+  abstract GetPrototypeOf(_$: VM): CR<Obj|null>;
+  abstract SetPrototypeOf(_$: VM, V: Obj|null): CR<boolean>;
+  abstract IsExtensible(_$: VM): CR<boolean>;
+  abstract PreventExtensions(_$: VM): CR<boolean>;
+  abstract GetOwnProperty(_$: VM, P: PropertyKey): CR<PropertyDescriptor|undefined>;
+  abstract DefineOwnProperty($: VM, P: PropertyKey, Desc: PropertyDescriptor): CR<boolean>;
+  abstract HasProperty($: VM, P: PropertyKey): CR<boolean>;
+  abstract Get($: VM, P: PropertyKey, Receiver: Val): CR<Val>;
+  abstract Set($: VM, P: PropertyKey, V: Val, Receiver: Val): CR<boolean>;
+  abstract Delete($: VM, P: PropertyKey): CR<boolean>;
+  abstract OwnPropertyKeys(_$: VM): CR<PropertyKey[]>;
+}
+
+export class PropertyDescriptor1 extends Slots(slot => ({
+  Enumerable: slot<boolean>,
+  Configurable: slot<boolean>,
+  Writable: slot<boolean>,
+  Value: slot<boolean>,
+  Get: slot<Obj|undefined>,
+  Set: slot<Obj|undefined>,
+}), 'PropertyDescriptor') {}
+
+const pp: PropertyDescriptor1 = {}; // as PropertyDescriptor1;
+const p = new PropertyDescriptor1(pp);
+const [] = [p, pp];
 
 /**
  * 10.1 Ordinary Object Internal Methods and Internal Slots
