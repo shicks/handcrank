@@ -2,7 +2,6 @@ import { Assert } from './assert';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { EMPTY, UNRESOLVABLE, UNUSED } from './enums';
 import { EnvironmentRecord } from './environment_record';
-import { makeRecord } from './record';
 import { Val } from './val';
 import { VM } from './vm';
 

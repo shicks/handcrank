@@ -1,6 +1,5 @@
 import { Func } from "./func";
 import { Obj, OrdinaryObjectCreate } from "./obj";
-import { makeRecord } from "./record";
 import { Val } from "./val";
 import { VM } from "./vm";
 
@@ -20,13 +19,13 @@ import { VM } from "./vm";
  *
  * [[Done]], a Boolean - Whether the iterator has been closed.
  */
-export interface IteratorRecord {
-  __brand__: 'IteratorRecord';
-  Iterator: Obj;
-  NextMethod: Func;
-  Done: boolean;
+export class IteratorRecord {
+  constructor(
+    readonly Iterator: Obj,
+    readonly NextMethod: Func,
+    readonly Done: boolean,
+  ) {}
 }
-export const IteratorRecord = makeRecord<IteratorRecord>();
 
 /**
  * 7.4.12 CreateListIteratorRecord ( list )
@@ -51,5 +50,6 @@ export const IteratorRecord = makeRecord<IteratorRecord>();
  */
 export function CreateListIteratorRecord($: VM, list: Val[]): IteratorRecord {
   // TODO - implement!!
-  return IteratorRecord({Iterator: OrdinaryObjectCreate(null), NextMethod: null!, Done: false});
+  if (1 < 2) throw new Error('not implemented');
+  return new IteratorRecord(OrdinaryObjectCreate(null), null!, false);
 }

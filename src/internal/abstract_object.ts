@@ -5,7 +5,7 @@
 
 import { CR, IsAbrupt, Throw } from "./completion_record";
 import { UNUSED } from "./enums";
-import { Obj } from "./obj_base";
+import { Obj } from "./obj";
 import { PropertyDescriptor } from "./property_descriptor";
 import { PropertyKey, Val } from "./val";
 import { VM } from "./vm";
@@ -128,7 +128,7 @@ export function Set($: VM, O: Obj, P: PropertyKey, V: Val, Throw$: boolean): CR<
  * if O is not extensible, [[DefineOwnProperty]] will return false.
  */
 export function CreateDataProperty($: VM, O: Obj, P: PropertyKey, V: Val): CR<boolean> {
-  const newDesc = PropertyDescriptor({
+  const newDesc = new PropertyDescriptor({
     Value: V,
     Writable: true,
     Enumerable: true,

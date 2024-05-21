@@ -8,13 +8,22 @@ import { PropertyDescriptor } from './property_descriptor';
 import { InitializeHostDefinedRealm, RealmRecord } from './realm_record';
 import { ParseScript, ScriptEvaluation } from './script_record';
 import * as ESTree from 'estree';
-import { OrdinaryObjectCreate } from './obj';
-import { Obj } from './obj_base';
+import { Obj, OrdinaryObjectCreate } from './obj';
+
+
+export type EvalGen<T> = Generator<undefined, T, undefined>;
 
 interface SyntaxOp {
-  Evaluation: CR<Val|ReferenceRecord|EMPTY>;
+  Evaluation: EvalGen<CR<Val|ReferenceRecord|EMPTY>>;
 }
 
+export function run<T>(gen: EvalGen<T>) {
+  let result;
+  do {
+    result = gen.next();
+  } while (!result.done);
+  return result.value;
+}
 
 export class VM {
 
@@ -72,18 +81,18 @@ export class VM {
   // ReferenceRecords.  The spec does this in a production that's basically
   // transparent to ESTree, so we don't have a good opportunity, but we do
   // know when an rvalue is required from a child.
-  evaluateValue(node: Node): CR<Val> {
+  * evaluateValue(node: Node): EvalGen<CR<Val>> {
     this.initialize()
-    const result: CR<EMPTY|Val|ReferenceRecord> = this.operate('Evaluation', node);
+    const result: CR<EMPTY|Val|ReferenceRecord> = yield* this.operate('Evaluation', node);
     if (IsAbrupt(result)) return result;
     if (EMPTY.is(result)) return undefined;
     if (result instanceof ReferenceRecord) return GetValue(this, result);
     return result;
   }
 
-  evaluateScript(script: ESTree.Program): CR<Val>;
-  evaluateScript(script: string, filename?: string): CR<Val>;
-  evaluateScript(script: string|ESTree.Program, filename?: string): CR<Val> {
+  evaluateScript(script: ESTree.Program): EvalGen<CR<Val>>;
+  evaluateScript(script: string, filename?: string): EvalGen<CR<Val>>;
+  * evaluateScript(script: string|ESTree.Program, filename?: string): EvalGen<CR<Val>> {
     this.initialize()
     if (typeof script === 'string') {
       const source = script;
@@ -117,7 +126,7 @@ export class VM {
     if (Array.isArray(record)) {
       throw record[0]; // TODO - handle failure better
     }
-    const result = ScriptEvaluation(this, record);
+    const result = yield* ScriptEvaluation(this, record);
     return IsAbrupt(result) ? result : EMPTY.is(result) ? undefined :
       GetValue(this, result);
   }

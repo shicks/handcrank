@@ -7,8 +7,8 @@ import { ReferenceRecord } from './reference_record';
 import { ModuleRecord } from './module_record';
 import { IsDataDescriptor, PropertyDescriptor } from './property_descriptor';
 import { Get, HasProperty, Set as Set$ } from './abstract_object';
-import { Obj } from './obj_base';
 import { Func } from './func';
+import { Obj } from './obj';
 
 declare const IsExtensible: any;
 declare const HasOwnProperty: any;
@@ -482,7 +482,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
     // does, the semantics of DefinePropertyOrThrow may result in an
     // existing binding being replaced or shadowed or cause an abrupt
     // completion to be returned.
-    const result = DefinePropertyOrThrow($, bindingObject, N, PropertyDescriptor({
+    const result = DefinePropertyOrThrow($, bindingObject, N, new PropertyDescriptor({
       Value: undefined,
       Writable: true,
       Enumerable: true,
@@ -1179,8 +1179,8 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
     const existingProp = globalObject.GetOwnProperty($, N);
     if (IsAbrupt(existingProp)) return existingProp;
     const desc = (existingProp === undefined || existingProp.Configurable) ?
-        PropertyDescriptor({Value: V, Writable: true, Enumerable: true, Configurable: D}) :
-        PropertyDescriptor({Value: V});
+        new PropertyDescriptor({Value: V, Writable: true, Enumerable: true, Configurable: D}) :
+        new PropertyDescriptor({Value: V});
     {
       const result = DefinePropertyOrThrow($, globalObject, N, desc);
       if (IsAbrupt(result)) return result;

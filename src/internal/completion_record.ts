@@ -1,5 +1,4 @@
 import { EMPTY } from './enums';
-import { makeRecord } from './record';
 import { Assert } from './assert';
 import { Val } from './val';
 
@@ -17,16 +16,16 @@ export type CR<T> = T|Abrupt;
  * Abrupt completion refers to any Completion Record with a [[Type]]
  * value other than normal.
  */
-export interface Abrupt {
-  readonly __brand__: 'Abrupt';
-  /** The type of completion that occurred. */
-  readonly Type: CompletionType;
-  /** The value that was produced. */
-  readonly Value: Val;
-  /** The target label for directed control transfers. */
-  readonly Target: string|EMPTY;
+export class Abrupt {
+  constructor(
+    /** The type of completion that occurred. */
+    readonly Type: CompletionType,
+    /** The value that was produced. */
+    readonly Value: Val,
+    /** The target label for directed control transfers. */
+    readonly Target: string|EMPTY,
+  ) {}
 }
-export const Abrupt = makeRecord<Abrupt>();
 
 export enum CompletionType {
   /**
@@ -89,7 +88,7 @@ export function NormalCompletion<T>(value: T): CR<T> {
  * performs the following steps when called:
  */
 export function ThrowCompletion(value: Val): CR<never> {
-  return Abrupt({Type: CompletionType.Throw, Value: value, Target: EMPTY});
+  return new Abrupt(CompletionType.Throw, value, EMPTY);
 }
 
 // NOTE: This is a convenience for throwing an error
@@ -106,10 +105,15 @@ export function Throw(name: string, msg?: string): Abrupt {
  * Record) and returns a Completion Record. It performs the following
  * steps when called:
  */
-export function UpdateEmpty<T, U>(completionRecord: CR<T|EMPTY>, value: U): CR<T|U> {
+export function UpdateEmpty<T, U extends Val>(
+  completionRecord: CR<T|EMPTY>,
+  value: U,
+): CR<T|U> {
   const crValue = IsAbrupt(completionRecord) ? completionRecord.Value : completionRecord;
   if (crValue !== EMPTY) return completionRecord as CR<T>;
   Assert(IsAbrupt(completionRecord)); // NOTE: this is not in the spec.
   Assert(completionRecord.Type !== 'return' && completionRecord.Type !== 'throw');
-  return IsAbrupt(completionRecord) ? Abrupt({...completionRecord, Value: value} as any) : value;
+  return IsAbrupt(completionRecord) ?
+      new Abrupt(completionRecord.Type, value, completionRecord.Target) :
+      value;
 }

@@ -1,6 +1,6 @@
 import { RealmRecord } from './realm_record';
 import * as ESTree from 'estree';
-import { VM } from './vm';
+import { EvalGen, VM } from './vm';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { Val } from './val';
 import { CodeExecutionContext } from './execution_context';
@@ -74,7 +74,7 @@ export function ParseScript(script: ESTree.Program,
  * an ECMAScript language value or an abrupt completion. It performs
  * the following steps when called:
  */
-export function ScriptEvaluation($: VM, scriptRecord: ScriptRecord): CR<Val> {
+export function* ScriptEvaluation($: VM, scriptRecord: ScriptRecord): EvalGen<CR<Val>> {
 
   const globalEnv = scriptRecord.Realm?.GlobalEnv;
   if (!globalEnv) throw new Error('no global env!');
@@ -94,7 +94,7 @@ export function ScriptEvaluation($: VM, scriptRecord: ScriptRecord): CR<Val> {
   let result: CR<UNUSED|Val> =
     GlobalDeclarationInstantiation($, script, globalEnv);
   if (!IsAbrupt(result)) { // NOTE: does not rethrow!
-    result = $.evaluateValue(script);
+    result = yield* $.evaluateValue(script);
   }
   // 14. Suspend scriptContext and remove it from the execution context stack.
   scriptContext.suspend();

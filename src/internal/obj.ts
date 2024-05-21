@@ -6,13 +6,13 @@ import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescrip
 import { Slots, hasAnyFields } from './record';
 import { PropertyKey, Val } from './val';
 import { VM } from './vm';
-import * as ESTree from 'estree';
 import { EnvironmentRecord } from './environment_record';
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, STRICT } from './enums';
 import { RealmRecord } from './realm_record';
 import { ScriptRecord } from './script_record';
 import { ModuleRecord } from './module_record';
+import * as ESTree from 'estree';
 
 type ClassFieldDefinitionRecord = any;
 type PrivateElement = any;
@@ -40,10 +40,6 @@ export abstract class Obj extends Slots(slot => ({
   ClassFieldInitializerName: slot<string|symbol|PrivateName|EMPTY>,
   IsClassConstructor: slot<boolean>,
 
-  // Methods for function objects
-  Call: slot<($: VM, thisArgument: Val, argumentsList: Val[]) => CR<Val>>,
-  Construct: slot<($: VM, argumentsList: Val[], newTarget: Obj) => CR<Obj>>,
-
   // Slot for builtin function object
   InitialName: slot<string>,
 
@@ -67,6 +63,11 @@ export abstract class Obj extends Slots(slot => ({
   abstract Set($: VM, P: PropertyKey, V: Val, Receiver: Val): CR<boolean>;
   abstract Delete($: VM, P: PropertyKey): CR<boolean>;
   abstract OwnPropertyKeys(_$: VM): CR<PropertyKey[]>;
+
+  // NOTE: we do not define Func methods here, but instead use
+  // a separate subclass.  This makes it a little more awkward
+  // to use slot existence for branding, but instance should
+  // be fine.
 }
 
 /**

@@ -17,6 +17,9 @@
  * concretely declare a given slot should override the property, and may want
  * to explicitly initialize it with `undefined!` (if needed) to ensure the slot
  * query works correctly.
+ *
+ * NOTE: we do not add function properties to the prototype because they don't
+ * play nicely with overridden prototype methods on subclasses.
  */
 type Field<in out T> = (arg: T) => T;
 type ClassOf<T extends Record<string, Field<any>>> =
@@ -49,4 +52,22 @@ export function hasAnyFields(arg: {}) {
   if (!arg) return false;
   for (const _ in arg) return true;
   return false;
+}
+
+/**
+ * Allows subclassing a class that may not yet be fully initialized.
+ * The super class is evaluated lazily on the first instantiation.
+ * Note that static methods are NOT copied over since they would not
+ * be available before the first instantiation.
+ */
+export function lazySuper<F, A extends unknown[]>(fn: () => abstract new(...args: A) => F): abstract new(...args: A) => F {
+  let ctor: abstract new(...args: A) => F;
+  function cls() {
+    if (!ctor) {
+      ctor = fn();
+      Object.setPrototypeOf(cls.prototype, ctor.prototype);
+    }
+    return Reflect.construct(ctor, arguments, new.target);
+  }
+  return cls as any;
 }

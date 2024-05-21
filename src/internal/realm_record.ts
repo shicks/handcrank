@@ -5,7 +5,7 @@ import { UNUSED } from './enums';
 import { GlobalEnvironmentRecord } from './environment_record';
 import { ExecutionContext } from './execution_context';
 import { Obj } from './obj';
-import { IsPropertyDescriptor, PropertyDescriptor } from './property_descriptor';
+import { PropertyDescriptor } from './property_descriptor';
 import { Val } from './val';
 import { VM } from './vm';
 
@@ -209,8 +209,8 @@ export function SetDefaultGlobalBindings($: VM, realmRec: RealmRecord): CR<Obj> 
       depList.push(map.get(dep)!);
     }
     const result = fn(...depList);
-    const desc: PropertyDescriptor = IsPropertyDescriptor(result) ?
-      result : PropertyDescriptor({Value: result});
+    const desc: PropertyDescriptor = result instanceof PropertyDescriptor ?
+      result : new PropertyDescriptor({Value: result});
     const define = DefinePropertyOrThrow($, gbl, name, desc);
     if (IsAbrupt(define)) return define;
     needed.delete(name);

@@ -1,5 +1,5 @@
 import { CR, CastNotAbrupt, IsAbrupt, ThrowCompletion } from './completion_record';
-import { VM } from './vm';
+import { EvalGen, VM } from './vm';
 import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, STRICT, UNINITIALIZED, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
 import { PropertyDescriptor } from './property_descriptor';
@@ -12,19 +12,27 @@ import { ModuleRecord } from './module_record';
 import { CodeExecutionContext, ExecutionContext } from './execution_context';
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 
-import Node = ESTree.Node;
 import { BoundNames, IsConstantDeclaration, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
 import { ContainsExpression, IsSimpleParameterList } from './static/functions';
-import { Obj } from './obj_base';
+import { Obj } from './obj';
 import { PropertyKey, Val } from './val';
 import { lazySuper } from './record';
 import { OrdinaryObject } from './obj';
 import { SourceTextNode } from './tree';
 import { CreateListIteratorRecord } from './abstract_iterator';
 
+type Node = ESTree.Node;
+
 type PrivateElement = never;
 type ClassFieldDefinitionRecord = never;
 
+declare const MakeConstructor: (...args: any[]) => void;
+declare const IsStrictMode: (...args: any[]) => boolean;
+declare const ToObject: (...args: any[]) => Obj;
+declare const IteratorBindingInitialization: (...args: any[]) => Obj;
+declare const CreateDataPropertyOrThrow: (...args: any[]) => Obj;
+
+// New interface with various required properties
 export interface Func extends Obj {
   Environment: EnvironmentRecord;
   PrivateEnvironment: PrivateEnvironmentRecord;
@@ -46,13 +54,19 @@ export interface Func extends Obj {
   Prototype: Obj;
   Extensible: boolean;
   OwnProps: Map<PropertyKey, PropertyDescriptor>;
-  Call($: VM, thisArgument: Val, argumentsList: Val[]): CR<Val>;
-  Construct($: VM, argumentsList: Val[], newTarget: Obj): CR<Obj>;
+  Call($: VM, thisArgument: Val, argumentsList: Val[]): EvalGen<CR<Val>>;
+  Construct($: VM, argumentsList: Val[], newTarget: Obj): EvalGen<CR<Obj>>;
 }
+
+export function IsFunc(arg: unknown): arg is Func {
+  return arg instanceof Obj &&
+    (typeof (arg as Func).Call === 'function' ||
+      typeof (arg as Func).Construct === 'function');
+}
+
+// TODO - maybe remove this?
 export function Func() { throw new Error('do not call'); }
-Object.defineProperty(Func, Symbol.hasInstance, {value(arg: unknown): arg is Func {
-  return arg instanceof Obj && Boolean(arg.Call || arg.Construct);
-}});
+Object.defineProperty(Func, Symbol.hasInstance, {value: IsFunc});
 
 // Basic function
 export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) implements Func {
@@ -216,7 +230,7 @@ export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) i
    * stack in step 7 it must not be destroyed if it is suspended and
    * retained for later resumption by an accessible Generator.
    */
-  override Call($: VM, thisArgument: Val, argumentsList: Val[]): CR<Val> {
+  *Call($: VM, thisArgument: Val, argumentsList: Val[]): EvalGen<CR<Val>> {
     //const callerContext = $.getRunningContext();
     const calleeContext = PrepareForOrdinaryCall($, this, undefined);
     Assert(calleeContext === $.getRunningContext());
@@ -235,14 +249,16 @@ export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) i
     return undefined;
   }
 
-  override Construct($: VM, argumentsList: Val[], newTarget: Obj): CR<Obj> {
+  *Construct($: VM, argumentsList: Val[], newTarget: Obj): EvalGen<CR<Obj>> {
     throw 'not implemented';
   }
 }
 
 export class BuiltinFunction extends OrdinaryFunction {
   constructor(public InitialName: string) {
-    super();
+    super(null!, null!, null!, null!, null!, null!, null!);
+    throw '';
+    //super();
   }
 }
 
@@ -279,7 +295,7 @@ export class BuiltinFunction extends OrdinaryFunction {
  * 1. Return InstantiateAsyncFunctionObject of
  *    AsyncFunctionDeclaration with arguments env and privateEnv.
  */
-export function InstantiateFunctionObject($: VM, env: EnvironmentRecord, privateEnv: PrivateEnvironmentRecord|null, node: ESTree.Node): CR<Func> {
+export function InstantiateFunctionObject($: VM, env: EnvironmentRecord, privateEnv: PrivateEnvironmentRecord|null, node: ESTree.Node): Func {
   Assert(node.type === 'FunctionDeclaration'
     || node.type === 'FunctionExpression'
     || node.type === 'ArrowFunctionExpression');
@@ -328,7 +344,7 @@ export function InstantiateOrdinaryFunctionObject(
   node: ESTree.FunctionDeclaration|ESTree.FunctionExpression|ESTree.ArrowFunctionExpression,
   env: EnvironmentRecord,
   privateEnv: PrivateEnvironmentRecord|null,
-): CR<Func> {
+): Func {
   const F = OrdinaryFunctionCreate($, $.getIntrinsic('%Function.prototype%'),
                                    (node as SourceTextNode).sourceText || '(no source)',
                                    node.params, node.body,
@@ -389,7 +405,7 @@ export function OrdinaryFunctionCreate($: VM, functionPrototype: Obj,
   // 21. Let len be the ExpectedArgumentCount of ParameterList.
   // 22. Perform SetFunctionLength(F, len).
   // 23. Return F.
-
+  throw '';
 }
 
 /**
@@ -527,8 +543,10 @@ export function OrdinaryCallBindThis($: VM, F: Func, calleeContext: ExecutionCon
  * 2. Return ? EvaluateClassStaticBlockBody of ClassStaticBlockBody
  *    with argument functionObject.
  */
-export function EvaluateBody($: VM, functionObject: Func, argumentsList: Val[],
-                             node: ESTree.BlockStatement|ESTree.Expression): CR<Val> {
+export function* EvaluateBody(
+  $: VM, functionObject: Func, argumentsList: Val[],
+  node: ESTree.BlockStatement|ESTree.Expression
+): EvalGen<CR<Val>> {
   // TODO - check for generator and/or async, which will probably be different
   // subtypes of Function.
   if (functionObject instanceof OrdinaryFunction && functionObject.ECMAScriptCode) {
@@ -547,9 +565,10 @@ export function EvaluateBody($: VM, functionObject: Func, argumentsList: Val[],
     // 2. Return ? Evaluation of FunctionStatementList.
     const err = FunctionDeclarationInstantiation($, functionObject, argumentsList);
     if (IsAbrupt(err)) return err;
-    return $.evaluateValue(node);
+    return yield* $.evaluateValue(node);
   }
-    
+  // TODO - other types?
+  throw '';
 }
 /**
  * 10.2.1.4 OrdinaryCallEvaluateBody ( F, argumentsList )
@@ -563,8 +582,8 @@ export function EvaluateBody($: VM, functionObject: Func, argumentsList: Val[],
  * 1. Return ? EvaluateBody of F.[[ECMAScriptCode]] with arguments F
  *    and argumentsList.
  */
-export function OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]): CR<Val> {
-  return EvaluateBody($, F, argumentsList, F.ECMAScriptCode);
+export function* OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]): EvalGen<CR<Val>> {
+  return yield* EvaluateBody($, F, argumentsList, F.ECMAScriptCode);
 }
 
 /**
@@ -612,7 +631,7 @@ export function SetFunctionName($: VM, F: Func,
   if (F instanceof BuiltinFunction) {
     F.InitialName = name;
   }
-  CastNotAbrupt(DefinePropertyOrThrow($, F, 'name', PropertyDescriptor({
+  CastNotAbrupt(DefinePropertyOrThrow($, F, 'name', new PropertyDescriptor({
     Value: name, Writable: false, Enumerable: false, Configurable: true})));
   return UNUSED;
 }
@@ -913,7 +932,7 @@ export function CreateUnmappedArgumentsObject($: VM, argumentsList: Val[]): Obj 
   // 4. Perform ! DefinePropertyOrThrow(obj, "length",
   //      PropertyDescriptor { [[Value]]: 𝔽(len), [[Writable]]: true,
   //                           [[Enumerable]]: false, [[Configurable]]: true }).
-  CastNotAbrupt(DefinePropertyOrThrow($, obj, 'length', PropertyDescriptor({
+  CastNotAbrupt(DefinePropertyOrThrow($, obj, 'length', new PropertyDescriptor({
     Value: len, Writable: true, Enumerable: false, Configurable: true})));
   // 5. Let index be 0.
   // 6. Repeat, while index < len,
@@ -927,13 +946,13 @@ export function CreateUnmappedArgumentsObject($: VM, argumentsList: Val[]): Obj 
   // 7. Perform ! DefinePropertyOrThrow(obj, @@iterator,
   //      PropertyDescriptor { [[Value]]: %Array.prototype.values%, [[Writable]]: true,
   //                           [[Enumerable]]: false, [[Configurable]]: true }).
-  CastNotAbrupt(DefinePropertyOrThrow($, obj, Symbol.iterator, PropertyDescriptor({
+  CastNotAbrupt(DefinePropertyOrThrow($, obj, Symbol.iterator, new PropertyDescriptor({
     Value: $.getIntrinsic('%Array.prototype.values%'),
     Writable: true, Enumerable: false, Configurable: true})));
   // 8. Perform ! DefinePropertyOrThrow(obj, "callee",
   //      PropertyDescriptor { [[Get]]: %ThrowTypeError%, [[Set]]: %ThrowTypeError%,
   //                           [[Enumerable]]: false, [[Configurable]]: false }).
-  CastNotAbrupt(DefinePropertyOrThrow($, obj, 'callee', PropertyDescriptor({
+  CastNotAbrupt(DefinePropertyOrThrow($, obj, 'callee', new PropertyDescriptor({
     Get: $.getIntrinsic('ThrowTypeError'),
     Set: $.getIntrinsic('ThrowTypeError'),
     Enumerable: false, Configurable: false,

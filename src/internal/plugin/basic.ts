@@ -11,28 +11,31 @@ declare const ObjectConstructor: any;
 
 export const basic: Plugin = (spi: PluginSPI) => {
   // Basic structure of running programs and expressions
-  spi.onEvaluation(['Program'], (_, n, evaluate): CR<Val|ReferenceRecord|EMPTY> => {
-    let result: CR<Val|ReferenceRecord|EMPTY> = EMPTY;
-    for (const child of n.body) {
-      result = evaluate(child);
-      if (IsAbrupt(result)) return result;
-    }
-    return result;
-  });
+  spi.onEvaluation(['Program'], (_, n, evaluate) =>
+    function*() {
+      let result: CR<Val|ReferenceRecord|EMPTY> = EMPTY;
+      for (const child of n.body) {
+        result = yield* evaluate(child);
+        if (IsAbrupt(result)) return result;
+      }
+      return result;
+    }());
   spi.onEvaluation(['ExpressionStatement'],
                    (_, n, evaluate) => evaluate(n.expression));
 
   // Primary elements
   spi.onEvaluation(['Literal'], (_, n: Literal) => {
+    n;
+    n.value;
     if (n.value instanceof RegExp) return NOT_APPLICABLE;
-    return n.value;
+    const v = n.value;
+    return function*() { return v; }();
   });
   spi.onEvaluation(['ThisExpression'], ($: VM) => {
-    return ResolveThisBinding($);
+    return function*() { return ResolveThisBinding($); }();
   });
   spi.onEvaluation(['Identifier'], ($: VM, n: Identifier) => {
-    debugger;
-    return ResolveBinding($, n.name);
+    return function*() { return ResolveBinding($, n.name); }();
   });
 
   // Global environment
