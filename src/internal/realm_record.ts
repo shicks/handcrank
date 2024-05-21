@@ -4,12 +4,10 @@ import { CR, IsAbrupt } from './completion_record';
 import { UNUSED } from './enums';
 import { GlobalEnvironmentRecord } from './environment_record';
 import { ExecutionContext } from './execution_context';
-import { Obj } from './obj';
+import { Obj, OrdinaryObjectCreate } from './obj';
 import { PropertyDescriptor } from './property_descriptor';
 import { Val } from './val';
 import { VM } from './vm';
-
-declare const OrdinaryObjectCreate: any;
 
 /**
  * 9.3 Realms

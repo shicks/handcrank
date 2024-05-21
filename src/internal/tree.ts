@@ -1,4 +1,4 @@
-import { Node, Program, SourceLocation } from 'estree';
+import type { Node, Program, SourceLocation } from 'estree';
 
 type TypeToNode<T> = T extends {type: string} ? (arg: {[K in T['type']]: T}) => void : never;
 type Intersection = TypeToNode<Node> extends (arg: infer T) => void ? T : never;
