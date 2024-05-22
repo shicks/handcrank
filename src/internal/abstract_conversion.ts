@@ -14,18 +14,17 @@
  * from other types.
  */
 
-import { Get } from "./abstract_object";
-import { CR, CastNotAbrupt, IsAbrupt, Throw } from "./completion_record";
-import { NUMBER, STRING } from "./enums";
-import { Obj } from "./obj";
-import { PropertyKey, Val } from "./val";
-import { VM } from "./vm";
+import { IsCallable } from './abstract_compare';
+import { Get } from './abstract_object';
+import { CR, CastNotAbrupt, IsAbrupt, Throw } from './completion_record';
+import { NUMBER, STRING } from './enums';
+import { Obj } from './obj';
+import { PropertyKey, Val } from './val';
+import { VM } from './vm';
 
 
 function GetMethod(...args: any[]) { return undefined; }
 declare const Call: any;
-declare const IsCallable: any;
-declare const ToString: any;
 
 /**
  * 7.1.1 ToPrimitive ( input [ , preferredType ] )
@@ -108,6 +107,141 @@ function OrdinaryToPrimitive($: VM, O: Obj, hint: STRING|NUMBER): CR<Val> {
   return Throw('TypeError');
 }
 
+/**
+ * 7.1.2 ToBoolean ( argument )
+ *
+ * The abstract operation ToBoolean takes argument argument (an
+ * ECMAScript language value) and returns a Boolean. It converts
+ * argument to a value of type Boolean. It performs the following
+ * steps when called:
+ *
+ * 1. If argument is a Boolean, return argument.
+ * 2. If argument is one of undefined, null, +0𝔽, -0𝔽, NaN, 0ℤ, or the empty String, return false.
+ * 3. NOTE: This step is replaced in section B.3.6.1.
+ * 4. Return true.
+ */
+export function ToBoolean(argument: Val): boolean {
+  // NOTE: all falsy values are already primitives
+  return Boolean(argument);
+}
+
+/**
+ * 7.1.3 ToNumeric ( value )
+ *
+ * The abstract operation ToNumeric takes argument value (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing either a Number or a BigInt, or a throw completion. It
+ * returns value converted to a Number or a BigInt. It performs the
+ * following steps when called:
+ *
+ * 1. Let primValue be ? ToPrimitive(value, number).
+ * 2. If primValue is a BigInt, return primValue.
+ * 3. Return ? ToNumber(primValue).
+ */
+export function ToNumeric($: VM, value: Val): CR<number|bigint> {
+  const primValue = ToPrimitive($, value, NUMBER);
+  if (IsAbrupt(primValue)) return primValue;
+  if (typeof primValue === 'bigint') return primValue;
+  return ToNumber($, primValue);
+}
+
+/**
+ * 7.1.4 ToNumber ( argument )
+ *
+ * The abstract operation ToNumber takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing a Number or a throw completion. It converts argument to
+ * a value of type Number. It performs the following steps when
+ * called:
+ *
+ * 1. If argument is a Number, return argument.
+ * 2. If argument is either a Symbol or a BigInt, throw a TypeError exception.
+ * 3. If argument is undefined, return NaN.
+ * 4. If argument is either null or false, return +0𝔽.
+ * 5. If argument is true, return 1𝔽.
+ * 6. If argument is a String, return StringToNumber(argument).
+ * 7. Assert: argument is an Object.
+ * 8. Let primValue be ? ToPrimitive(argument, number).
+ * 10. Return ? ToNumber(primValue).
+ * 9. Assert: primValue is not an Object.
+ */
+export function ToNumber($: VM, argument: Val): CR<number> {
+  if (argument instanceof Obj) {
+    const primValue = ToPrimitive(argument, NUMBER);
+    Assert(!(primValue instanceof Obj));
+    return ToNumber($, primValue);
+  } else if (typeof argument === 'symbol' || typeof argument === 'bigint') {
+    return Throw('TypeError');
+  }
+  return Number(argument);
+}
+
+/**
+ * 7.1.17 ToString ( argument )
+ *
+ * The abstract operation ToString takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing a String or a throw completion. It converts argument to
+ * a value of type String. It performs the following steps when
+ * called:
+ *
+ * 1. If argument is a String, return argument.
+ * 2. If argument is a Symbol, throw a TypeError exception.
+ * 3. If argument is undefined, return "undefined".
+ * 4. If argument is null, return "null".
+ * 5. If argument is true, return "true".
+ * 6. If argument is false, return "false".
+ * 7. If argument is a Number, return Number::toString(argument, 10).
+ * 8. If argument is a BigInt, return BigInt::toString(argument, 10).
+ * 9. Assert: argument is an Object.
+ * 10. Let primValue be ? ToPrimitive(argument, string).
+ * 11. Assert: primValue is not an Object.
+ * 12. Return ? ToString(primValue).
+ */ 
+export function ToString($: VM, argument: Val): CR<string> {
+  if (argument instanceof Obj) {
+    const primValue = ToPrimitive($, argument);
+    if (IsAbrupt(primValue)) return primValue;
+    Assert(!(primValue instanceof Obj));
+    return ToString($, primValue);
+  } else if (typeof argument === 'symbol') {
+    return Throw('TypeError');
+  }
+  return String(argument);  
+}
+
+/**
+ * 7.1.18 ToObject ( argument )
+ *
+ * The abstract operation ToObject takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing an Object or a throw completion. It converts argument to
+ * a value of type Object according to Table 13:
+ *
+ * Table 13: ToObject Conversions
+ * Undefined: Throw a TypeError exception.
+ * Null:      Throw a TypeError exception.
+ * Boolean:   Return a new Boolean object whose [[BooleanData]] internal
+ *            slot is set to argument. See 20.3 for a description of Boolean
+ *            objects.
+ * Number:    Return a new Number object whose [[NumberData]] internal
+ *            slot is set to argument. See 21.1 for a description of Number
+ *            objects.
+ * String:    Return a new String object whose [[StringData]] internal
+ *            slot is set to argument. See 22.1 for a description of String
+ *            objects.
+ * Symbol:    Return a new Symbol object whose [[SymbolData]] internal
+ *            slot is set to argument. See 20.4 for a description of Symbol
+ *            objects.
+ * BigInt:    Return a new BigInt object whose [[BigIntData]] internal
+ *            slot is set to argument. See 21.2 for a description of BigInt
+ *            objects.
+ * Object:    Return argument.
+ */
+export function ToObject($: VM, argument: Val): CR<Obj> {
+  if (argument instanceof Obj) return argument;
+  throw new Error('not implemented');
+}
 
 /**
  * 7.1.19 ToPropertyKey ( argument )
@@ -129,3 +263,36 @@ export function ToPropertyKey($: VM, argument: Val): CR<PropertyKey> {
   if (typeof key === 'symbol') return key;
   return CastNotAbrupt(ToString(key));
 }
+
+/**
+7.1.20 ToLength ( argument )
+
+The abstract operation ToLength takes argument argument (an ECMAScript language value) and returns either a normal completion containing an integral Number or a throw completion. It clamps argument to an integral Number suitable for use as the length of an array-like object. It performs the following steps when called:
+
+1. 1. Let len be ? ToIntegerOrInfinity(argument).
+2. 2. If len ≤ 0, return +0𝔽.
+3. 3. Return 𝔽(min(len, 253 - 1)).
+7.1.21 CanonicalNumericIndexString ( argument )
+
+The abstract operation CanonicalNumericIndexString takes argument argument (a String) and returns a Number or undefined. If argument is either "-0" or exactly matches the result of ToString(n) for some Number value n, it returns the respective Number value. Otherwise, it returns undefined. It performs the following steps when called:
+
+1. 1. If argument is "-0", return -0𝔽.
+2. 2. Let n be ! ToNumber(argument).
+3. 3. If ! ToString(n) is argument, return n.
+4. 4. Return undefined.
+
+A canonical numeric string is any String value for which the CanonicalNumericIndexString abstract operation does not return undefined.
+
+7.1.22 ToIndex ( value )
+
+The abstract operation ToIndex takes argument value (an ECMAScript language value) and returns either a normal completion containing a non-negative integer or a throw completion. It converts value to a non-negative integer if the corresponding decimal representation, as a String, is an integer index. It performs the following steps when called:
+
+1. 1. If value is undefined, then
+a. a. Return 0.
+2. 2. Else,
+a. a. Let integer be ? ToIntegerOrInfinity(value).
+b. b. Let clamped be ! ToLength(𝔽(integer)).
+c. c. If SameValue(𝔽(integer), clamped) is false, throw a RangeError exception.
+d. d. Assert: 0 ≤ integer ≤ 253 - 1.
+e. e. Return integer.
+/**/

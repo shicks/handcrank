@@ -6,6 +6,9 @@ import { ResolveBinding, ResolveThisBinding } from '../execution_context';
 import { ReferenceRecord } from '../reference_record';
 import { OrdinaryObjectCreate } from '../obj';
 import { ObjectConstructor } from '../func';
+import { StrictNode } from '../tree';
+import { ToPropertyDescriptor } from '../property_descriptor';
+import { ToPropertyKey } from '../abstract_conversion';
 
 // type Plugin<ExtraIntrinsics = never> = {[K in Intrinsics|Globals]: Intrinsics|($: VM) => Generator<Intrinsic, K extends `%${string}%` ? Obj : Val|PropertyDescriptor, Obj>} & {Evaluate?(on: fn): ...};
 // export const basic: Plugin = {
@@ -46,6 +49,30 @@ export const basic: Plugin = {
     });
     on('ThisExpression', () => just(ResolveThisBinding($)));
     on('Identifier', (n) => just(ResolveBinding($, n.name)));
+    on('ArrayExpression', (n) => {throw'13.2.4.2'});
+    on('ObjectExpression', (n) => {throw'13.2.5.4'});
+    //on('Literal', when(n.value instanceof RegExp) (n) => {throw'13.2.7.3'});
+    on('TemplateLiteral', (n) => {throw'13.2.8.6'});
+    /** 13.3.2.1 MemberExpression */
+    on('MemberExpression', function*(n, evaluate) {
+      const baseValue = yield* $.evaluateValue(n.object);
+      if (IsAbrupt(baseValue)) return baseValue;
+      const strict = (n as StrictNode).strict || false;
+      let propertyKey;
+      if (n.computed) {
+        // 13.3.3 EvaluatePropertyAccessWithExpressionKey ( baseValue, expression, strict )
+        const propertyNameValue = yield* $.evaluateValue(n.property);
+        if (IsAbrupt(propertyNameValue)) return propertyNameValue;
+        propertyKey = ToPropertyKey($, propertyNameValue);
+        if (IsAbrupt(propertyKey)) return propertyKey;
+      } else if (n.property.type === 'Identifier') {
+        propertyKey = String(n.property.name);
+      } else {
+        // ????
+        throw new Error(`Bad non-computed property: ${n.property.type}`);
+      }
+      return new ReferenceRecord(baseValue, propertyKey, strict, EMPTY);
+    });
   },
 
   Intrinsics: {

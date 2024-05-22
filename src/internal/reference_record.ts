@@ -1,13 +1,13 @@
+import { ToObject } from './abstract_conversion';
 import { Assert } from './assert';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { EMPTY, UNRESOLVABLE, UNUSED } from './enums';
 import { EnvironmentRecord } from './environment_record';
-import { Val } from './val';
+import { PropertyKey, Val } from './val';
 import { VM } from './vm';
 
 declare type PrivateName = {__privatename__: true};
 declare const PrivateName: any;
-declare const ToObject: any;
 declare const PrivateGet: any;
 declare const GetGlobalObject: any;
 declare const Set: any;
@@ -128,6 +128,7 @@ export function IsSuperReference(V: ReferenceRecord): V is SuperReferenceRecord 
  * following steps when called:
  */
 export function IsPrivateReference(V: ReferenceRecord): V is PrivateReferenceRecord {
+  if (typeof PrivateName !== 'function') return false;
   return V.ReferencedName instanceof PrivateName;
 }
 interface PrivateReferenceRecord extends ReferenceRecord {
@@ -152,7 +153,7 @@ export function GetValue($: VM, V: ReferenceRecord|Val): CR<Val> {
     if (IsPrivateReference(V)) {
       return PrivateGet(baseObj, V.ReferencedName);
     }
-    return baseObj.Get(V.ReferencedName, GetThisValue($, V));
+    return baseObj.Get($, V.ReferencedName as PropertyKey, GetThisValue($, V));
   }
   Assert(IsEnvironmentReference(V));
   return V.Base.GetBindingValue($, V.ReferencedName, V.Strict);
@@ -176,7 +177,7 @@ export function PutValue($: VM, V: ReferenceRecord|Val, W: Val): CR<UNUSED> {
     if (IsAbrupt(result)) return result;
     return UNUSED;
   } else if (IsPropertyReference(V)) {
-    const baseObj = ToObject(V.Base);
+    const baseObj = ToObject($, V.Base);
     if (IsAbrupt(baseObj)) return baseObj;
     if (IsPrivateReference(V)) {
       return PrivateSet($, baseObj, V.ReferencedName, W);

@@ -1,5 +1,6 @@
 import { CR, IsAbrupt } from './completion_record';
 import { BOOLEAN, NUMBER, OBJECT } from './enums';
+import { Func } from './func';
 import { Obj } from './obj';
 import { Type, Val } from './val';
 import { VM } from './vm';
@@ -7,6 +8,42 @@ import { VM } from './vm';
 declare const StringToBigInt: any;
 declare const ToPrimitive: any;
 declare const ToNumeric: any;
+
+/**
+ * 7.2.3 IsCallable ( argument )
+ *
+ * The abstract operation IsCallable takes argument argument (an
+ * ECMAScript language value) and returns a Boolean. It determines if
+ * argument is a callable function with a [[Call]] internal method. It
+ * performs the following steps when called:
+ *
+ * 1. If argument is not an Object, return false.
+ * 2. If argument has a [[Call]] internal method, return true.
+ * 3. Return false.
+ */
+export function IsCallable(argument: Val): boolean {
+  if (!(argument instanceof Obj)) return false;
+  if ((argument as Func).Call) return true;
+  return false;
+}
+
+/**
+ * 7.2.4 IsConstructor ( argument )
+ *
+ * The abstract operation IsConstructor takes argument argument (an
+ * ECMAScript language value) and returns a Boolean. It determines if
+ * argument is a function object with a [[Construct]] internal
+ * method. It performs the following steps when called:
+ *
+ * 1. If argument is not an Object, return false.
+ * 2. If argument has a [[Construct]] internal method, return true.
+ * 3. Return false.
+ */
+export function IsConstructor(argument: Val): boolean {
+  if (!(argument instanceof Obj)) return false;
+  if ((argument as Func).Construct) return true;
+  return false;
+}
 
 /**
  * 7.2.5 IsExtensible ( O )
