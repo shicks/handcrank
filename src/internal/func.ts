@@ -11,13 +11,11 @@ import { ScriptRecord } from './script_record';
 import { ModuleRecord } from './module_record';
 import { CodeExecutionContext, ExecutionContext } from './execution_context';
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
-
 import { BoundNames, IsConstantDeclaration, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
 import { ContainsExpression, IsSimpleParameterList } from './static/functions';
-import { Obj } from './obj';
+import { Obj, OrdinaryObjectCreate, OrdinaryObject } from './obj';
 import { PropertyKey, Val } from './val';
 import { lazySuper } from './record';
-import { OrdinaryObject } from './obj';
 import { SourceTextNode } from './tree';
 import { CreateListIteratorRecord } from './abstract_iterator';
 
@@ -34,28 +32,29 @@ declare const CreateDataPropertyOrThrow: (...args: any[]) => Obj;
 
 // New interface with various required properties
 export interface Func extends Obj {
-  Environment: EnvironmentRecord;
-  PrivateEnvironment: PrivateEnvironmentRecord;
-  FormalParameters: ESTree.Pattern[];
-  ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression;
-  ConstructorKind: BASE|DERIVED;
-  Realm: RealmRecord;
-  ScriptOrModule: ScriptRecord|ModuleRecord;
-  ThisMode: LEXICAL|STRICT|GLOBAL;
-  Strict: boolean;
-  HomeObject: Obj|undefined;
-  SourceText: string;
-  Fields: ClassFieldDefinitionRecord[]; // TODO - Map?
-  PrivateMethods: PrivateElement[]; // TODO - Map?
-  ClassFieldInitializerName: string|symbol|PrivateName|EMPTY;
-  IsClassConstructor: boolean;
+  // Environment: EnvironmentRecord;
+  // PrivateEnvironment: PrivateEnvironmentRecord;
+  // FormalParameters: ESTree.Pattern[];
+  // ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression;
+  // ConstructorKind: BASE|DERIVED;
+  // Realm: RealmRecord;
+  // ScriptOrModule: ScriptRecord|ModuleRecord;
+  // ThisMode: LEXICAL|STRICT|GLOBAL;
+  // Strict: boolean;
+  // HomeObject: Obj|undefined;
+  // SourceText: string;
+  // Fields: ClassFieldDefinitionRecord[]; // TODO - Map?
+  // PrivateMethods: PrivateElement[]; // TODO - Map?
+  // ClassFieldInitializerName: string|symbol|PrivateName|EMPTY;
+  // IsClassConstructor: boolean;
 
   // (from OrdinaryObjectCreate)
   Prototype: Obj;
   Extensible: boolean;
   OwnProps: Map<PropertyKey, PropertyDescriptor>;
-  Call($: VM, thisArgument: Val, argumentsList: Val[]): EvalGen<CR<Val>>;
-  Construct($: VM, argumentsList: Val[], newTarget: Obj): EvalGen<CR<Obj>>;
+
+  Call?($: VM, thisArgument: Val, argumentsList: Val[]): EvalGen<CR<Val>>;
+  Construct?($: VM, argumentsList: Val[], newTarget: Obj): EvalGen<CR<Obj>>;
 }
 
 export function IsFunc(arg: unknown): arg is Func {
@@ -254,14 +253,6 @@ export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) i
   }
 }
 
-export class BuiltinFunction extends OrdinaryFunction {
-  constructor(public InitialName: string) {
-    super(null!, null!, null!, null!, null!, null!, null!);
-    throw '';
-    //super();
-  }
-}
-
 
 /**
  * 8.6.1 Runtime Semantics: InstantiateFunctionObject
@@ -433,6 +424,9 @@ export function OrdinaryFunctionCreate($: VM, functionPrototype: Obj,
 export function PrepareForOrdinaryCall($: VM, F: Func, newTarget: Obj|undefined) {
   const callerContext = $.getRunningContext();
   const localEnv = new FunctionEnvironmentRecord(F, newTarget);
+  Assert(F.ScriptOrModule);
+  Assert(F.Realm);
+  Assert(F.PrivateEnvironment);
   const calleeContext = new CodeExecutionContext(
       F.ScriptOrModule, F, F.Realm, F.PrivateEnvironment, localEnv, localEnv);
   if (callerContext.isRunning) callerContext.suspend();
@@ -478,6 +472,7 @@ export function OrdinaryCallBindThis($: VM, F: Func, calleeContext: ExecutionCon
   if (thisMode === STRICT) {
     thisValue = thisArgument;
   } else if (thisArgument == null) {
+    Assert(calleeRealm);
     const globalEnv = calleeRealm.GlobalEnv;
     Assert(globalEnv instanceof GlobalEnvironmentRecord);
     thisValue = globalEnv.GlobalThisValue;
@@ -583,6 +578,7 @@ export function* EvaluateBody(
  *    and argumentsList.
  */
 export function* OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]): EvalGen<CR<Val>> {
+  Assert(F.ECMAScriptCode);
   return yield* EvaluateBody($, F, argumentsList, F.ECMAScriptCode);
 }
 
@@ -636,6 +632,29 @@ export function SetFunctionName($: VM, F: Func,
   return UNUSED;
 }
 
+/**
+ * 10.2.10 SetFunctionLength ( F, length )
+ *
+ * The abstract operation SetFunctionLength takes arguments F (a
+ * function object) and length (a non-negative integer or +∞) and
+ * returns unused. It adds a "length" property to F. It performs the
+ * following steps when called:
+ *
+ * 1. Assert: F is an extensible object that does not have a "length"
+ *    own property.
+ * 2. Perform ! DefinePropertyOrThrow(F, "length", PropertyDescriptor {
+ *    [[Value]]: 𝔽(length), [[Writable]]: false, [[Enumerable]]: false,
+ *    [[Configurable]]: true }).
+ * 3. Return unused.
+ */
+export function SetFunctionLength($: VM, F: Func, length: number): UNUSED {
+  Assert(F.Extensible);
+  Assert(!F.OwnProps.has('length'));
+  CastNotAbrupt(DefinePropertyOrThrow($, F, 'length', new PropertyDescriptor({
+    Value: length, Writable: false, Enumerable: false, Configurable: true,
+  })));
+  return UNUSED;
+}
 
 /**
  * 10.2.11 FunctionDeclarationInstantiation ( func, argumentsList )
@@ -665,12 +684,14 @@ export function FunctionDeclarationInstantiation($: VM, func: Func, argumentsLis
   const calleeContext = $.getRunningContext();
   // 2. Let code be func.[[ECMAScriptCode]].
   const code = func.ECMAScriptCode;
+  Assert(code != null);
   // 3. Let strict be func.[[Strict]].
   const strict = func.Strict;
   // 4. Let formals be func.[[FormalParameters]].
   const formals = func.FormalParameters;
   // 5. Let parameterNames be the BoundNames of formals.
   const parameterNames = [];
+  Assert(formals);
   for (const formal of formals) {
     parameterNames.push(...BoundNames(formal));
   }
@@ -914,6 +935,199 @@ export function FunctionDeclarationInstantiation($: VM, func: Func, argumentsLis
   // implementations of ECMAScript that predate ECMAScript 2015.
 }
 
+
+/**
+ * 10.3 Built-in Function Objects
+ *
+ * The built-in function objects defined in this specification may be
+ * implemented as either ECMAScript function objects (10.2) whose
+ * behaviour is provided using ECMAScript code or as function objects
+ * whose behaviour is provided in some other manner. In either case,
+ * the effect of calling such functions must conform to their
+ * specifications. An implementation may also provide additional
+ * built-in function objects that are not defined in this
+ * specification.
+ *
+ * If a built-in function object is implemented as an ECMAScript
+ * function object, it must have all the internal slots described in
+ * 10.2 ([[Prototype]], [[Extensible]], and the slots listed in Table
+ * 30), and [[InitialName]]. The value of the [[InitialName]] internal
+ * slot is a String value that is the initial name of the function. It
+ * is used by 20.2.3.5.
+ *
+ * Built-in function objects must have the ordinary object behaviour
+ * specified in 10.1. All such function objects have [[Prototype]],
+ * [[Extensible]], [[Realm]], and [[InitialName]] internal slots, with
+ * the same meanings as above.
+ *
+ * Unless otherwise specified every built-in function object has the
+ * %Function.prototype% object as the initial value of its
+ * [[Prototype]] internal slot.
+ *
+ * The behaviour specified for each built-in function via algorithm
+ * steps or other means is the specification of the function body
+ * behaviour for both [[Call]] and [[Construct]] invocations of the
+ * function. However, [[Construct]] invocation is not supported by all
+ * built-in functions. For each built-in function, when invoked with
+ * [[Call]], the [[Call]] thisArgument provides the this value, the
+ * [[Call]] argumentsList provides the named parameters, and the
+ * NewTarget value is undefined. When invoked with [[Construct]], the
+ * this value is uninitialized, the [[Construct]] argumentsList
+ * provides the named parameters, and the [[Construct]] newTarget
+ * parameter provides the NewTarget value. If the built-in function is
+ * implemented as an ECMAScript function object then this specified
+ * behaviour must be implemented by the ECMAScript code that is the
+ * body of the function. Built-in functions that are ECMAScript
+ * function objects must be strict functions. If a built-in
+ * constructor has any [[Call]] behaviour other than throwing a
+ * TypeError exception, an ECMAScript implementation of the function
+ * must be done in a manner that does not cause the function's
+ * [[IsClassConstructor]] internal slot to have the value true.
+ *
+ * Built-in function objects that are not identified as constructors
+ * do not implement the [[Construct]] internal method unless otherwise
+ * specified in the description of a particular function. When a
+ * built-in constructor is called as part of a new expression the
+ * argumentsList parameter of the invoked [[Construct]] internal
+ * method provides the values for the built-in constructor's named
+ * parameters.
+ *
+ * Built-in functions that are not constructors do not have a
+ * "prototype" property unless otherwise specified in the description
+ * of a particular function.
+ *
+ * If a built-in function object is not implemented as an ECMAScript
+ * function it must provide [[Call]] and [[Construct]] internal
+ * methods that conform to the following definitions:
+ */
+export abstract class BuiltinFunction extends OrdinaryObject implements Func {
+
+  Prototype: Obj;
+  Realm: RealmRecord;
+  InitialName!: string;
+
+  /**
+   * 10.3.3 CreateBuiltinFunction (
+   *     behaviour, length, name, additionalInternalSlotsList
+   *     [ , realm [ , prototype [ , prefix ] ] ] )
+   *
+   * The abstract operation CreateBuiltinFunction takes arguments
+   * behaviour (an Abstract Closure, a set of algorithm steps, or some
+   * other definition of a function's behaviour provided in this
+   * specification), length (a non-negative integer or +∞), name (a
+   * property key or a Private Name), and additionalInternalSlotsList (a
+   * List of names of internal slots) and optional arguments realm (a
+   * Realm Record), prototype (an Object or null), and prefix (a String)
+   * and returns a function object. additionalInternalSlotsList contains
+   * the names of additional internal slots that must be defined as part
+   * of the object. This operation creates a built-in function
+   * object. It performs the following steps when called:
+   *
+   * 1. If realm is not present, set realm to the current Realm Record.
+   * 2. If prototype is not present, set prototype to
+   *    realm.[[Intrinsics]].[[%Function.prototype%]].
+   * 3. Let internalSlotsList be a List containing the names of all the
+   *    internal slots that 10.3 requires for the built-in function object
+   *    that is about to be created.
+   * 4. Append to internalSlotsList the elements of additionalInternalSlotsList.
+   * 5. Let func be a new built-in function object that, when called,
+   *    performs the action described by behaviour using the provided
+   *    arguments as the values of the corresponding parameters specified
+   *    by behaviour. The new function object has internal slots whose
+   *    names are the elements of internalSlotsList, and an [[InitialName]]
+   *    internal slot.
+   * 6. Set func.[[Prototype]] to prototype.
+   * 7. Set func.[[Extensible]] to true.
+   * 8. Set func.[[Realm]] to realm.
+   * 9. Set func.[[InitialName]] to null.
+   * 10. Perform SetFunctionLength(func, length).
+   * 11. If prefix is not present, then
+   *     a. Perform SetFunctionName(func, name).
+   * 12. Else,
+   *     a. Perform SetFunctionName(func, name, prefix).
+   * 13. Return func.
+   *
+   * Each built-in function defined in this specification is created by
+   * calling the CreateBuiltinFunction abstract operation.
+   */
+  constructor($: VM, length: number, name: string,
+              realm: RealmRecord|undefined, prototype: Obj,
+              prefix?: string) {
+    super();
+    // NOTE: require %FunctionPrototype% as explicit dep
+    this.Prototype = prototype;
+    if (!realm) realm = $.getRealm();
+    Assert(realm != null);
+    this.Realm = realm;
+    SetFunctionLength($, this, length);
+    SetFunctionName($, this, name, prefix);
+  }
+
+  /**
+   * 10.3.1 [[Call]] ( thisArgument, argumentsList )
+   *
+   * The [[Call]] internal method of a built-in function object F takes
+   * arguments thisArgument (an ECMAScript language value) and
+   * argumentsList (a List of ECMAScript language values) and returns
+   * either a normal completion containing an ECMAScript language value
+   * or a throw completion. It performs the following steps when called:
+   *
+   * 1. Let callerContext be the running execution context.
+   * 2. If callerContext is not already suspended, suspend callerContext.
+   * 3. Let calleeContext be a new execution context.
+   * 4. Set the Function of calleeContext to F.
+   * 5. Let calleeRealm be F.[[Realm]].
+   * 6. Set the Realm of calleeContext to calleeRealm.
+   * 7. Set the ScriptOrModule of calleeContext to null.
+   * 8. Perform any necessary implementation-defined initialization of calleeContext.
+   * 9. Push calleeContext onto the execution context stack;
+   *    calleeContext is now the running execution context.
+   * 10. Let result be the Completion Record that is the result of
+   *     evaluating F in a manner that conforms to the specification of
+   *     F. thisArgument is the this value, argumentsList provides the named
+   *     parameters, and the NewTarget value is undefined.
+   * 11. Remove calleeContext from the execution context stack and
+   *     restore callerContext as the running execution context.
+   * 12. Return ? result.
+   *
+   * NOTE: When calleeContext is removed from the execution context
+   * stack it must not be destroyed if it has been suspended and
+   * retained by an accessible Generator for later resumption.
+   */
+  *Call($: VM, thisArgument: Val, argumentsList: Val[]): EvalGen<CR<Val>> {
+    throw 'NotImplemented';
+  }
+
+  /**
+   * 10.3.2 [[Construct]] ( argumentsList, newTarget )
+   *
+   * The [[Construct]] internal method of a built-in function object F
+   * (when the method is present) takes arguments argumentsList (a List
+   * of ECMAScript language values) and newTarget (a constructor) and
+   * returns either a normal completion containing an Object or a throw
+   * completion. The steps performed are the same as [[Call]] (see
+   * 10.3.1) except that step 10 is replaced by:
+   *
+   * 10. Let result be the Completion Record that is the result of
+   *     evaluating F in a manner that conforms to the specification of
+   *     F. The this value is uninitialized, argumentsList provides the named
+   *     parameters, and newTarget provides the NewTarget value.
+   */
+  *Construct($: VM, argumentsList: Val[], newTarget: Obj): EvalGen<CR<Obj>> {
+    throw 'NotImplemented';
+  }
+}
+
+export class ObjectConstructor extends BuiltinFunction { // extends BuiltinClass ??
+  constructor($: VM, prototype: Obj) {
+    // TODO - need $, among others... - change to generator so we can pass stuff
+    super($, 1, 'Object', undefined, prototype);
+  }
+
+  override *Call($: VM) {
+    return OrdinaryObjectCreate(this.Prototype);
+  }
+}
 
 /**
  * 10.4.4.6 CreateUnmappedArgumentsObject ( argumentsList )

@@ -1,62 +1,61 @@
-import { Identifier, Literal } from 'estree';
-import { Plugin, PluginSPI, VM } from '../vm';
+import { Plugin, just } from '../vm';
 import { EMPTY, NOT_APPLICABLE } from '../enums';
 import { Val } from '../val';
 import { CR, IsAbrupt } from '../completion_record';
 import { ResolveBinding, ResolveThisBinding } from '../execution_context';
 import { ReferenceRecord } from '../reference_record';
 import { OrdinaryObjectCreate } from '../obj';
+import { ObjectConstructor } from '../func';
 
-declare const ObjectConstructor: any;
+// type Plugin<ExtraIntrinsics = never> = {[K in Intrinsics|Globals]: Intrinsics|($: VM) => Generator<Intrinsic, K extends `%${string}%` ? Obj : Val|PropertyDescriptor, Obj>} & {Evaluate?(on: fn): ...};
+// export const basic: Plugin = {
+//   *'undefined'() { return undefined; },
+//   *'null'() { return null; },
+//   *'Object'() {
+//     const ctor = OrdinaryFunctionCreate(yield '%ObjectPrototype%');
+//     return ctor;
+//   },
+//   *'%ObjectPrototype%' { return ... },
+//   *'Object.Prototype' { return yield '%ObjectPrototype%' },
+//      // ^ NOTE: considered part of `Object`
+//   Evaluate(on) {
+//     on(['Program'], n => n, function*($, n: Program, evaluate) {
+//       return 
+//     });
 
-export const basic: Plugin = (spi: PluginSPI) => {
-  // Basic structure of running programs and expressions
-  spi.onEvaluation(['Program'], (_, n, evaluate) =>
-    function*() {
+//       )
+//   },
+// };
+
+
+export const basic: Plugin = {
+  Evaluation($, on) {
+    on('Program', function*(n, evaluate) {
       let result: CR<Val|ReferenceRecord|EMPTY> = EMPTY;
       for (const child of n.body) {
         result = yield* evaluate(child);
         if (IsAbrupt(result)) return result;
       }
       return result;
-    }());
-  spi.onEvaluation(['ExpressionStatement'],
-                   (_, n, evaluate) => evaluate(n.expression));
+    });
+    on('ExpressionStatement', (n, evaluate) => evaluate(n.expression));
+    // Primary elements
+    on('Literal', (n) => {
+      if (n.value instanceof RegExp) return NOT_APPLICABLE;
+      return just(n.value);
+    });
+    on('ThisExpression', () => just(ResolveThisBinding($)));
+    on('Identifier', (n) => just(ResolveBinding($, n.name)));
+  },
 
-  // Primary elements
-  spi.onEvaluation(['Literal'], (_, n: Literal) => {
-    n;
-    n.value;
-    if (n.value instanceof RegExp) return NOT_APPLICABLE;
-    const v = n.value;
-    return function*() { return v; }();
-  });
-  spi.onEvaluation(['ThisExpression'], ($: VM) => {
-    return function*() { return ResolveThisBinding($); }();
-  });
-  spi.onEvaluation(['Identifier'], ($: VM, n: Identifier) => {
-    return function*() { return ResolveBinding($, n.name); }();
-  });
+  Intrinsics: {
+    *'%ObjectPrototype%'() { return OrdinaryObjectCreate(null); },
+    *'%Object%'($) { return new ObjectConstructor($, yield '%ObjectPrototype%'); },
+  },
 
-  // Global environment
-  spi.define('undefined', [], () => undefined);
-
-  spi.define('%ObjectPrototype%', [], () => {
-    return OrdinaryObjectCreate(null);
-  });
-
-  // spi.define('%Object%', [], () => {
-  //   return new ObjectConstructor();
-  // });
-
-
-
-
-
-
-
-
-
+  Globals: {
+    *'undefined'() { return undefined; },
+    *'Object'() { return yield '%Object%'; },
+    *'Object.prototype'() { return yield '%ObjectPrototype%'; },
+  }
 };
-
-// TODO - regex as a separate thing...

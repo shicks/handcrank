@@ -673,6 +673,7 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
      */
     readonly NewTarget: Obj|undefined,
   ) {
+    Assert(FunctionObject.Environment);
     super(FunctionObject.Environment);
     this.ThisBindingStatus = LEXICAL.is(FunctionObject.ThisMode) ? LEXICAL : UNINITIALIZED;
   }    

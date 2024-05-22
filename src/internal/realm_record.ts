@@ -64,11 +64,9 @@ export class RealmRecord {
   // of CreateRealm?
 }
 
-export function CreateRealm($: VM): RealmRecord {
-  const realmRec = new RealmRecord();
-  CreateIntrinsics($, realmRec);
-  return realmRec;
-}
+// export function CreateRealm($: VM): RealmRecord {
+// NOTE: this is inlined in InitializeHostDefinedRealm
+// }
 
 /**
  * 9.3.2 CreateIntrinsics ( realmRec )
@@ -103,30 +101,24 @@ export function CreateIntrinsics($: VM, realmRec: RealmRecord): UNUSED {
   //        -> could be registered with VM
 
   const intrinsics = new Map<string, Obj>();
-  const needed = new Set<string>($.intrinsics.keys());
-  function build(name: string) {
-    const [deps, fn] = $.intrinsics.get(name)!;
-    const depList: Obj[] = [];
-    for (const dep of deps) {
-      if (!intrinsics.has(dep)) return;
-      depList.push(intrinsics.get(dep)!);
+  const building = new Set<string>();
+  function build(name: string): Obj {
+    if (building.has(name)) throw new Error(`Could not initialize intrinsic: ${name}`);
+    const gen = $.intrinsics.get(name)!;
+    if (!gen) throw new Error(`No provider for intrinsic: ${name}`);
+    const iter = gen($);
+    let result = iter.next();
+    while (!result.done) {
+      result = iter.next(build(result.value));
     }
-    const obj = fn(...depList);
-    intrinsics.set(name, obj);
-    needed.delete(name);
-    for (const follow of $.rdeps.get(name) || []) {
-      if (needed.has(follow)) build(follow);
-    }
+    intrinsics.set(name, result.value);
+    return result.value;
   }
-  for (const name of needed) {
+  for (const name of $.intrinsics.keys()) {
     build(name);
   }
 
-  // TODO - if size is nonzero, report
-  if (needed.size) {
-    throw new Error(`Could not initialize intrinsics: ${[...needed].join(', ')}`);
-  }
-
+  // TODO - should we assign this earlier?
   realmRec.Intrinsics = intrinsics;
 
   // TODO -
@@ -195,38 +187,36 @@ export function SetDefaultGlobalBindings($: VM, realmRec: RealmRecord): CR<Obj> 
   // NOTE: at this point, the intrinsics should already be done.
   // We now need to go through the defines for global objects, which
   // may depend on intrinsics.
-  const vals = new Map<string, Val>();
-  const needed = new Set<string>($.globals.keys());
+  const built = new Map<string, Val>();
+  function build(name: string): CR<Val> {
+    if (built.has(name)) return built.get(name);
+    // Check for a qualified name
+    const lastDot = name.lastIndexOf('.');
+    const owner = lastDot < 0 ? gbl : build(name.substring(0, lastDot));
+    if (!(owner instanceof Obj)) throw new Error(`not an object: ${name}`);
+    const prop = name.substring(lastDot + 1);
 
-  function build(name: string): CR<UNUSED> {
-    const [deps, fn] = $.globals.get(name)!;
-    const depList: Val[] = [];
-    for (const dep of deps) {
-      const map = dep.startsWith('%') ? realmRec.Intrinsics : vals;
-      if (!map.has(dep)) return UNUSED; // try again later
-      depList.push(map.get(dep)!);
+    const gen = $.globals.get(name)!;
+    if (!gen) throw new Error(`No provider for global: ${name}`);
+    const iter = gen($);
+    let result = iter.next();
+    while (!result.done) {
+      const intrinsic = realmRec.Intrinsics.get(result.value);
+      if (!intrinsic) throw new Error(`No intrinsic: ${result.value}`);
+      result = iter.next(intrinsic);
     }
-    const result = fn(...depList);
-    const desc: PropertyDescriptor = result instanceof PropertyDescriptor ?
-      result : new PropertyDescriptor({Value: result});
-    const define = DefinePropertyOrThrow($, gbl, name, desc);
+    const desc: PropertyDescriptor = result.value instanceof PropertyDescriptor ?
+      result.value : new PropertyDescriptor({Value: result.value});
+    const define = DefinePropertyOrThrow($, owner, prop, desc);
     if (IsAbrupt(define)) return define;
-    needed.delete(name);
-    for (const follow of $.rdeps.get(name) || []) {
-      if (needed.has(follow)) build(follow);
-    }
-    return UNUSED;
+    built.set(name, desc.Value);
+    return desc.Value;
   }
-  for (const name of needed) {
+
+  for (const name of $.globals.keys()) {
     const result = build(name);
     if (IsAbrupt(result)) return result;
   }
-
-  // TODO - if size is nonzero, report
-  if (needed.size) {
-    throw new Error(`Could not initialize global binding: ${[...needed].join(', ')}`);
-  }
-
   return gbl;
 }
 
@@ -238,8 +228,8 @@ export function SetDefaultGlobalBindings($: VM, realmRec: RealmRecord): CR<Obj> 
  * or a throw completion. It performs the following steps when called:
  */
 export function InitializeHostDefinedRealm($: VM): CR<UNUSED> {
-  // 1. Let realm be CreateRealm().
-  const realm = CreateRealm($);
+  // 1. Let realm be CreateRealm(). [NOTE: we create intrinsics later]
+  const realm = new RealmRecord();
   // 2. Let newContext be a new execution context.
   // 3. Set the Function of newContext to null.
   // 4. Set the Realm of newContext to realm.
@@ -248,6 +238,7 @@ export function InitializeHostDefinedRealm($: VM): CR<UNUSED> {
   // 6. Push newContext onto the execution context stack; newContext
   //    is now the running execution context.
   $.executionStack.push(newContext);
+  CreateIntrinsics($, realm);
   // 7. If the host requires use of an exotic object to serve as
   //    realm's global object, let global be such an object created in a
   //    host-defined manner. Otherwise, let global be undefined,

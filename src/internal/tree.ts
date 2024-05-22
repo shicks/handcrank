@@ -1,11 +1,14 @@
 import type { Node, Program, SourceLocation } from 'estree';
 
-type TypeToNode<T> = T extends {type: string} ? (arg: {[K in T['type']]: T}) => void : never;
-type Intersection = TypeToNode<Node> extends (arg: infer T) => void ? T : never;
+export {Node, Program};
+
+type TypeToNodeI<T> = T extends {type: string} ? (arg: {[K in T['type']]: T}) => void : never;
+type Intersection = TypeToNodeI<Node> extends (arg: infer T) => void ? T : never;
+type NodesWith<K, T> = T extends {type: K} ? T : never;
 
 export type NodeType = keyof Intersection;
-export type NodeMap = {[K in NodeType]: Intersection[K]};
-export {Node, Program};
+// export type NodeMapI = {[K in NodeType]: Intersection[K]};
+export type NodeMap = {[K in NodeType]: NodesWith<K, Node>};
 
 export interface SourceTextNode {
   sourceText?: string;
