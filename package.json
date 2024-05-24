@@ -23,6 +23,8 @@
   },
   "dependencies": {
     "@types/estree": "^1.0.5",
+    "acorn": "^8.11.3",
+    "acorn-walk": "^8.3.2",
     "bun": "^1.1.8",
     "esprima-next": "^6.0.3"
   }

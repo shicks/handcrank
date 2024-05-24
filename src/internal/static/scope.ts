@@ -1,6 +1,6 @@
 /** @fileoverview 8.2 Scope Analysis */
 
-import { Node } from '../tree';
+import { Node, ParentNode } from '../tree';
 
 /**
  * 8.2.1 Static Semantics: BoundNames
@@ -123,9 +123,9 @@ export function IsConstantDeclaration(node: Node): boolean {
  * that it treats top-level functions as `var` instead of `let`.
  * Block-scoped functions are always treated as `let`.
  */
-export function LexicallyDeclaredNames(node: Node, topLevel: boolean): string[] {
+export function LexicallyDeclaredNames(node: Node): string[] {
   const names: string[] = [];
-  visitLexicallyScopedDecls(node, topLevel, (n) => BoundNames(n, names));
+  visitLexicallyScopedDecls(node, (n) => BoundNames(n, names));
   return names;
 }
 
@@ -142,9 +142,9 @@ export function LexicallyDeclaredNames(node: Node, topLevel: boolean): string[] 
  * The syntax-directed operation TopLevelLexicallyScopedDeclarations
  * takes no arguments and returns a List of Parse Nodes.
  */
-export function LexicallyScopedDeclarations(node: Node, topLevel: boolean): Node[] {
+export function LexicallyScopedDeclarations(node: Node): Node[] {
   const nodes: Node[] = [];
-  visitLexicallyScopedDecls(node, topLevel, (n) => nodes.push(n));
+  visitLexicallyScopedDecls(node, (n) => nodes.push(n));
   return nodes;
 }
 
@@ -166,9 +166,9 @@ export function LexicallyScopedDeclarations(node: Node, topLevel: boolean): Node
  * NOTE: At the top level of a function or script, inner function
  * declarations are treated like var declarations.
  */
-export function VarDeclaredNames(node: Node, topLevel: boolean): string[] {
+export function VarDeclaredNames(node: Node): string[] {
   const names: string[] = [];
-  visitVarScopedDecls(node, topLevel, (n) => BoundNames(n, names));
+  visitVarScopedDecls(node, (n) => BoundNames(n, names));
   return names;
 }
 
@@ -185,22 +185,48 @@ export function VarDeclaredNames(node: Node, topLevel: boolean): string[] {
  * The syntax-directed operation TopLevelVarScopedDeclarations takes
  * no arguments and returns a List of Parse Nodes.
  */
-export function VarScopedDeclarations(node: Node, topLevel: boolean): Node[] {
+export function VarScopedDeclarations(node: Node): Node[] {
   const nodes: Node[] = [];
-  visitVarScopedDecls(node, topLevel, (n) => nodes.push(n));
+  visitVarScopedDecls(node, (n) => nodes.push(n));
   return nodes;
+}
+
+const TOP_LEVEL_DECLS = new Set<string|undefined>([
+  'FunctionDeclaration',
+  'FunctionExpression',
+  'ClassBody',
+  'ClassDeclaration',
+  'ClassExpression',
+  'Program',
+]);
+export function IsTopLevel(node?: Node): boolean {
+  const parent = (node as ParentNode).parent;
+  if (TOP_LEVEL_DECLS.has(node?.type)) return true;
+  switch (node?.type) {
+    case 'StaticBlock':
+    case 'BlockStatement':
+      return TOP_LEVEL_DECLS.has(parent?.type);
+    case 'IfStatement':
+    case 'ForStatement':
+    case 'ForInStatement':
+    case 'ForOfStatement':
+    case 'DoWhileStatement':
+    case 'WhileStatement':
+    case 'TryStatement':
+    case 'WithStatement':
+      return false;
+  }
+  return IsTopLevel(parent);
 }
 
 type Visitor = (node: Node) => void;
 
-function visitVarScopedDecls(node: Node, topLevel: boolean, visitor: Visitor): void {
-  const visitTopLevel = (node: Node|undefined|null) => visit(node, true);
-  const visitNested = (node: Node|undefined|null) => visit(node, false);
-  function visit(node: Node|undefined|null, topLevel: boolean) {
+function visitVarScopedDecls(node: Node, visitor: Visitor): void {
+  function visit(node: Node|undefined|null) {
     switch (node?.type) {
       case 'FunctionDeclaration':
         // NOTE: top-level functions are treatd as var.
-        if (topLevel) visitor(node);
+        if (IsTopLevel(node)) visitor(node);
         return;
       case 'VariableDeclaration':
         // NOTE: `var` is not lexically declared.
@@ -208,53 +234,51 @@ function visitVarScopedDecls(node: Node, topLevel: boolean, visitor: Visitor): v
         return;
       case 'LabeledStatement':
         // NOTE: verified behavior w/ `var f; label: function f() {}`
-        visit(node.body, topLevel);
+        visit(node.body);
         return;
       case 'SwitchCase':
-        node.consequent.forEach(visitNested);
+        node.consequent.forEach(visit);
         return;
       case 'SwitchStatement':
-        node.cases.forEach(visitNested);
+        node.cases.forEach(visit);
         return;
 
       case 'StaticBlock':
       case 'Program':
-        node.body.forEach(visitTopLevel);
+        node.body.forEach(visit);
         return;
 
       case 'IfStatement':
-        visitNested(node.consequent);
-        visitNested(node.alternate);
+        visit(node.consequent);
+        visit(node.alternate);
         return;
       case 'ForStatement':
-        visitNested(node.init);
-        visitNested(node.body);
+        visit(node.init);
+        visit(node.body);
         return;
       case 'ForInStatement':
       case 'ForOfStatement':
-        visitNested(node.left);
-        visitNested(node.body);
+        visit(node.left);
+        visit(node.body);
         return;
       case 'DoWhileStatement':
       case 'WhileStatement':
-        visitNested(node.body);
+        visit(node.body);
         return;
       case 'TryStatement':
-        visitNested(node.block);
-        visitNested(node.handler?.body);
-        visitNested(node.finalizer);
+        visit(node.block);
+        visit(node.handler?.body);
+        visit(node.finalizer);
         return;
       case 'WithStatement':
-        visitNested(node.body);
+        visit(node.body);
     }
   }
-  visit(node, topLevel);
+  visit(node);
 }
 
-function visitLexicallyScopedDecls(node: Node, topLevel: boolean, visitor: Visitor): void {
-  const visitTopLevel = (node: Node|undefined|null) => visit(node, true);
-  const visitNested = (node: Node|undefined|null) => visit(node, false);
-  function visit(node: Node|undefined|null, topLevel: boolean) {
+function visitLexicallyScopedDecls(node: Node, visitor: Visitor): void {
+  function visit(node: Node|undefined|null) {
     switch (node?.type) {
       case 'VariableDeclaration':
         // NOTE: `var` is not lexically declared.
@@ -262,7 +286,7 @@ function visitLexicallyScopedDecls(node: Node, topLevel: boolean, visitor: Visit
         return;
       case 'FunctionDeclaration':
         // NOTE: top-level functions are treatd as var.
-        if (!topLevel) visitor(node);
+        if (!IsTopLevel(node)) visitor(node);
         return;
       case 'ClassDeclaration':
         visitor(node);
@@ -270,51 +294,31 @@ function visitLexicallyScopedDecls(node: Node, topLevel: boolean, visitor: Visit
 
       case 'LabeledStatement':
         // NOTE: verified behavior w/ `var f; label: function f() {}`
-        visit(node.body, topLevel);
+        visit(node.body);
         return;
       case 'SwitchCase':
-        node.consequent.forEach(visitNested);
+        node.consequent.forEach(visit);
         return;
 
       case 'StaticBlock':
       case 'Program':
-        node.body.forEach(visitTopLevel);
+        node.body.forEach(visit);
         return;
 
       case 'ExportDefaultDeclaration':
       case 'ExportNamedDeclaration':
-        visitNested(node.declaration as Node);
+        visit(node.declaration as Node);
         return;
 
       case 'ImportDeclaration':
-        node.specifiers.forEach(visitNested);
+        node.specifiers.forEach(visit);
         return;
       case 'ImportDefaultSpecifier':
       case 'ImportNamespaceSpecifier':
       case 'ImportSpecifier':
-        visitNested(node.local);
+        visit(node.local);
         return;
     }
   }
-  visit(node, topLevel);
-}
-
-/**
- * 16.1.2 Static Semantics: IsStrict
- *
- * The syntax-directed operation IsStrict takes no arguments and
- * returns a Boolean. It is defined piecewise over the following
- * productions:
- *
- * Script : ScriptBodyopt
- * 1. If ScriptBody is present and the Directive Prologue of
- * ScriptBody contains a Use Strict Directive, return true; otherwise,
- * return false.
- */
-export function markStrictScopes(n: Node, strict: boolean): void {
-  // TODO - modules are always strict
-  //      - recognize {type: 'Directive', directive: 'use strict'}
-  //      - function bodies (rest/inits), programs, class bodies, etc
-
-
+  visit(node);
 }

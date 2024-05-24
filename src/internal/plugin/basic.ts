@@ -7,8 +7,8 @@ import { ReferenceRecord } from '../reference_record';
 import { OrdinaryObjectCreate } from '../obj';
 import { ObjectConstructor } from '../func';
 import { StrictNode } from '../tree';
-import { ToPropertyDescriptor } from '../property_descriptor';
 import { ToPropertyKey } from '../abstract_conversion';
+import { Evaluation_BlockStatement } from '../statements';
 
 // type Plugin<ExtraIntrinsics = never> = {[K in Intrinsics|Globals]: Intrinsics|($: VM) => Generator<Intrinsic, K extends `%${string}%` ? Obj : Val|PropertyDescriptor, Obj>} & {Evaluate?(on: fn): ...};
 // export const basic: Plugin = {
@@ -59,6 +59,9 @@ export const basic: Plugin = {
       if (IsAbrupt(baseValue)) return baseValue;
       const strict = (n as StrictNode).strict || false;
       let propertyKey;
+
+      // TODO - handle super, imports, and calls?  (CallExpression productions)
+
       if (n.computed) {
         // 13.3.3 EvaluatePropertyAccessWithExpressionKey ( baseValue, expression, strict )
         const propertyNameValue = yield* $.evaluateValue(n.property);
@@ -68,10 +71,21 @@ export const basic: Plugin = {
       } else if (n.property.type === 'Identifier') {
         propertyKey = String(n.property.name);
       } else {
+        // NOTE: PrivateIdentifier is a valid type here
+        //    MemberExpression : MemberExpression . PrivateIdentifier
         // ????
         throw new Error(`Bad non-computed property: ${n.property.type}`);
       }
       return new ReferenceRecord(baseValue, propertyKey, strict, EMPTY);
+    });
+    on('BlockStatement', (n) => Evaluation_BlockStatement($, n));
+    on('VariableDeclaration', function*(n, evaluate) {
+      throw '';
+      // 14.2.3 
+      // 14.3.1 Let and Const Declarations
+      // 14.3.2 Variable Statement
+
+      // NOTE: need to figure out let/const?
     });
   },
 

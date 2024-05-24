@@ -16,6 +16,7 @@
 
 import { IsCallable } from './abstract_compare';
 import { Get } from './abstract_object';
+import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt, Throw } from './completion_record';
 import { NUMBER, STRING } from './enums';
 import { Obj } from './obj';
@@ -23,7 +24,7 @@ import { PropertyKey, Val } from './val';
 import { VM } from './vm';
 
 
-function GetMethod(...args: any[]) { return undefined; }
+function GetMethod(..._args: any[]) { return undefined; }
 declare const Call: any;
 
 /**
@@ -167,7 +168,8 @@ export function ToNumeric($: VM, value: Val): CR<number|bigint> {
  */
 export function ToNumber($: VM, argument: Val): CR<number> {
   if (argument instanceof Obj) {
-    const primValue = ToPrimitive(argument, NUMBER);
+    const primValue = ToPrimitive($, argument, NUMBER);
+    if (IsAbrupt(primValue)) return primValue;
     Assert(!(primValue instanceof Obj));
     return ToNumber($, primValue);
   } else if (typeof argument === 'symbol' || typeof argument === 'bigint') {
@@ -261,7 +263,7 @@ export function ToPropertyKey($: VM, argument: Val): CR<PropertyKey> {
   const key = ToPrimitive($, argument, STRING);
   if (IsAbrupt(key)) return key;
   if (typeof key === 'symbol') return key;
-  return CastNotAbrupt(ToString(key));
+  return CastNotAbrupt(ToString($, key));
 }
 
 /**

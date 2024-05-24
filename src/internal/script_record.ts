@@ -148,9 +148,9 @@ export function GlobalDeclarationInstantiation(
   env: GlobalEnvironmentRecord,
 ): CR<UNUSED> {
   // 1. Let lexNames be the LexicallyDeclaredNames of script.
-  const lexNames = LexicallyDeclaredNames(script, true);
+  const lexNames = LexicallyDeclaredNames(script);
   // 2. Let varNames be the VarDeclaredNames of script.
-  const varNames = VarDeclaredNames(script, true);
+  const varNames = VarDeclaredNames(script);
   // 3. For each element name of lexNames, do
   for (const name of lexNames) {
     //   a. If env.HasVarDeclaration(name) is true, throw a SyntaxError exception.
@@ -169,7 +169,7 @@ export function GlobalDeclarationInstantiation(
     if (env.HasLexicalDeclaration($, name)) return Throw('SyntaxError');
   }
   // 5. Let varDeclarations be the VarScopedDeclarations of script.
-  const varDeclarations = VarScopedDeclarations(script, true);
+  const varDeclarations = VarScopedDeclarations(script);
 
   // 6. Let functionsToInitialize be a new empty List.
   const functionsToInitialize: ESTree.FunctionDeclaration[] = [];
@@ -231,7 +231,7 @@ export function GlobalDeclarationInstantiation(
   // 12. NOTE: Annex B.3.2.2 adds additional steps at this point.
 
   // 13. Let lexDeclarations be the LexicallyScopedDeclarations of script.
-  const lexDeclarations = LexicallyScopedDeclarations(script, true);
+  const lexDeclarations = LexicallyScopedDeclarations(script);
   // 14. Let privateEnv be null.
   let privateEnv = null;
   // 15. For each element d of lexDeclarations, do

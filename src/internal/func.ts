@@ -12,11 +12,11 @@ import { ModuleRecord } from './module_record';
 import { CodeExecutionContext, ExecutionContext } from './execution_context';
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 import { BoundNames, IsConstantDeclaration, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
-import { ContainsExpression, IsSimpleParameterList } from './static/functions';
+import { ContainsExpression, GetSourceText, IsSimpleParameterList } from './static/functions';
 import { Obj, OrdinaryObjectCreate, OrdinaryObject } from './obj';
 import { PropertyKey, Val } from './val';
 import { lazySuper } from './record';
-import { SourceTextNode } from './tree';
+import { ParentNode, Source } from './tree';
 import { CreateListIteratorRecord } from './abstract_iterator';
 
 type Node = ESTree.Node;
@@ -24,7 +24,7 @@ type Node = ESTree.Node;
 type PrivateElement = never;
 type ClassFieldDefinitionRecord = never;
 
-declare const MakeConstructor: (...args: any[]) => void;
+function MakeConstructor(...args: any[]): void {}
 declare const IsStrictMode: (...args: any[]) => boolean;
 declare const ToObject: (...args: any[]) => Obj;
 declare const IteratorBindingInitialization: (...args: any[]) => Obj;
@@ -68,7 +68,7 @@ export function Func() { throw new Error('do not call'); }
 Object.defineProperty(Func, Symbol.hasInstance, {value: IsFunc});
 
 // Basic function
-export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) implements Func {
+export class OrdinaryFunction extends lazySuper(() => OrdinaryObject) implements Func {
   override Prototype: Obj;
 
   /**
@@ -239,7 +239,7 @@ export abstract class OrdinaryFunction extends lazySuper(() => OrdinaryObject) i
       return ThrowCompletion(error);
     }
     OrdinaryCallBindThis($, this, calleeContext, thisArgument);
-    const result = OrdinaryCallEvaluateBody($, this, argumentsList);
+    const result = yield* OrdinaryCallEvaluateBody($, this, argumentsList);
     $.popContext();
     if (IsAbrupt(result)) {
       if (result.Type === 'return') return result.Value;
@@ -337,12 +337,110 @@ export function InstantiateOrdinaryFunctionObject(
   privateEnv: PrivateEnvironmentRecord|null,
 ): Func {
   const F = OrdinaryFunctionCreate($, $.getIntrinsic('%Function.prototype%'),
-                                   (node as SourceTextNode).sourceText || '(no source)',
+                                   sourceText(node) || '(no source)',
                                    node.params, node.body,
                                    NON_LEXICAL_THIS, env, privateEnv);
   SetFunctionName($, F, (node as ESTree.FunctionExpression).id?.name || 'default');
   MakeConstructor($, F);
   return F;
+}
+
+/**
+ * 15.2.5 Runtime Semantics: InstantiateOrdinaryFunctionExpression
+ *
+ * The syntax-directed operation InstantiateOrdinaryFunctionExpression
+ * takes optional argument name (a property key or a Private Name) and
+ * returns a function object. It is defined piecewise over the
+ * following productions:
+ * 
+ * FunctionExpression : function ( FormalParameters ) { FunctionBody }
+ * 1. If name is not present, set name to "".
+ * 2. Let env be the LexicalEnvironment of the running execution context.
+ * 3. Let privateEnv be the running execution context\'s PrivateEnvironment.
+ * 4. Let sourceText be the source text matched by FunctionExpression.
+ * 5. Let closure be OrdinaryFunctionCreate(%Function.prototype%,
+ *    sourceText, FormalParameters, FunctionBody, non-lexical-this, env,
+ *    privateEnv).
+ * 6. Perform SetFunctionName(closure, name).
+ * 7. Perform MakeConstructor(closure).
+ * 8. Return closure.
+ *
+ * FunctionExpression :
+ *     function BindingIdentifier ( FormalParameters ) { FunctionBody }
+ * 1. Assert: name is not present.
+ * 2. Set name to StringValue of BindingIdentifier.
+ * 3. Let outerEnv be the running execution context's LexicalEnvironment.
+ * 4. Let funcEnv be NewDeclarativeEnvironment(outerEnv).
+ * 5. Perform ! funcEnv.CreateImmutableBinding(name, false).
+ * 6. Let privateEnv be the running execution context's PrivateEnvironment.
+ * 7. Let sourceText be the source text matched by FunctionExpression.
+ * 8. Let closure be OrdinaryFunctionCreate(%Function.prototype%,
+ *    sourceText, FormalParameters, FunctionBody, non-lexical-this,
+ *    funcEnv, privateEnv).
+ * 9. Perform SetFunctionName(closure, name).
+ * 10. Perform MakeConstructor(closure).
+ * 11. Perform ! funcEnv.InitializeBinding(name, closure).
+ * 12. Return closure.
+ *
+ * NOTE: The BindingIdentifier in a FunctionExpression can be
+ * referenced from inside the FunctionExpression\'s FunctionBody to
+ * allow the function to call itself recursively. However, unlike in a
+ * FunctionDeclaration, the BindingIdentifier in a FunctionExpression
+ * cannot be referenced from and does not affect the scope enclosing
+ * the FunctionExpression.
+ */
+export function InstantiateOrdinaryFunctionExpression(
+  $: VM,
+  node: ESTree.FunctionExpression,
+  name?: PropertyKey|PrivateName,
+): Func {
+  const sourceText = GetSourceText(node);
+  const privateEnv = $.getRunningContext().PrivateEnvironment!;
+  
+  let env: EnvironmentRecord;
+  if (node.id == null) {
+    // FunctionExpression : function ( FormalParameters ) { FunctionBody }
+    if (!name) name = '';
+    env = $.getRunningContext().LexicalEnvironment!;
+  } else {
+    // FunctionExpression :
+    //     function BindingIdentifier ( FormalParameters ) { FunctionBody }
+    Assert(name == null);
+    name = node.id.name;
+    const outerEnv = $.getRunningContext().LexicalEnvironment!;
+    const funcEnv = new DeclarativeEnvironmentRecord(outerEnv);
+    CastNotAbrupt(funcEnv.CreateImmutableBinding($, name, false));
+    env = funcEnv;
+  }
+
+  // TODO - handle these functions better...!!!
+  const closure = OrdinaryFunctionCreate(
+    $,
+    $.getIntrinsic('%Function.prototype%'),
+    sourceText,
+    node.params,
+    node.body,
+    NON_LEXICAL_THIS,
+    env,
+    privateEnv,
+  );
+  SetFunctionName($, closure, name);
+  MakeConstructor(closure);
+  if (node.id != null) {
+    CastNotAbrupt(env.InitializeBinding($, name as string, closure));
+  }
+  return closure;
+}
+
+function sourceText(node: Node): string {
+  let n = node as Node&ParentNode;
+  if (n.type === 'FunctionExpression' && n.parent?.type === 'Property') {
+    n = n.parent;
+  }
+  const source = n.loc?.source as unknown as Source;
+  if (!source) return '';
+  const range = n.range || [(n as any).start, (n as any).end];
+  return source.sourceText?.substring(range[0], range[1]) || '';
 }
 
 // TODO - use range to get actual sourceText ??? is that too much ???
@@ -365,13 +463,16 @@ export function InstantiateOrdinaryFunctionObject(
  * definition of the function to be created. It performs the following
  * steps when called:
  */
-export function OrdinaryFunctionCreate($: VM, functionPrototype: Obj,
-                                       sourceText: string,
-                                       ParameterList: ESTree.Pattern[],
-                                       Body: Node,
-                                       thisMode: LEXICAL_THIS|NON_LEXICAL_THIS,
-                                       env: EnvironmentRecord,
-                                       privateEnv: PrivateEnvironmentRecord|null): Func {
+export function OrdinaryFunctionCreate(
+  $: VM,
+  functionPrototype: Obj,
+  sourceText: string,
+  ParameterList: ESTree.Pattern[],
+  Body: ESTree.BlockStatement|ESTree.Expression,
+  thisMode: LEXICAL_THIS|NON_LEXICAL_THIS,
+  env: EnvironmentRecord,
+  privateEnv: PrivateEnvironmentRecord|null,
+): Func {
   // 1. Let internalSlotsList be the internal slots listed in Table 30.
   // 2. Let F be OrdinaryObjectCreate(functionPrototype, internalSlotsList).
   // 3. Set F.[[Call]] to the definition specified in 10.2.1.
@@ -396,7 +497,20 @@ export function OrdinaryFunctionCreate($: VM, functionPrototype: Obj,
   // 21. Let len be the ExpectedArgumentCount of ParameterList.
   // 22. Perform SetFunctionLength(F, len).
   // 23. Return F.
-  throw '';
+
+  const F = new OrdinaryFunction(
+    functionPrototype,
+    sourceText,
+    ParameterList,
+    Body,
+    thisMode,
+    env,
+    privateEnv,
+  );
+
+  // TODO - length, class field initializer name?
+
+  return F;
 }
 
 /**
@@ -703,11 +817,11 @@ export function FunctionDeclarationInstantiation($: VM, func: Func, argumentsLis
   // 8. Let hasParameterExpressions be ContainsExpression of formals.
   const hasParameterExpressions = formals.some(ContainsExpression);
   // 9. Let varNames be the VarDeclaredNames of code.
-  const varNames = VarDeclaredNames(code, true);
+  const varNames = VarDeclaredNames(code);
   // 10. Let varDeclarations be the VarScopedDeclarations of code.
-  const varDeclarations = VarScopedDeclarations(code, true);
+  const varDeclarations = VarScopedDeclarations(code);
   // 11. Let lexicalNames be the LexicallyDeclaredNames of code.
-  const lexicalNames = LexicallyDeclaredNames(code, true);
+  const lexicalNames = LexicallyDeclaredNames(code);
   // 12. Let functionNames be a new empty List.
   const functionNames: string[] = [];
   // 13. Let functionsToInitialize be a new empty List.
@@ -894,7 +1008,7 @@ export function FunctionDeclarationInstantiation($: VM, func: Func, argumentsLis
   // 32. Set the LexicalEnvironment of calleeContext to lexEnv.
   calleeContext.LexicalEnvironment = lexEnv;
   // 33. Let lexDeclarations be the LexicallyScopedDeclarations of code.
-  const lexDeclarations = LexicallyScopedDeclarations(code, true);
+  const lexDeclarations = LexicallyScopedDeclarations(code);
   // 34. For each element d of lexDeclarations, do
   //     a. NOTE: A lexically declared name cannot be the same as a
   //        function/generator declaration, formal parameter, or a var

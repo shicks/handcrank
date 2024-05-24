@@ -182,7 +182,8 @@ export function PutValue($: VM, V: ReferenceRecord|Val, W: Val): CR<UNUSED> {
     if (IsPrivateReference(V)) {
       return PrivateSet($, baseObj, V.ReferencedName, W);
     }
-    const succeeded = baseObj.Set(V.ReferencedName, W, GetThisValue($, V));
+    const succeeded = baseObj.Set(
+      $, V.ReferencedName as PropertyKey, W, GetThisValue($, V));
     if (IsAbrupt(succeeded)) return succeeded;
     if (!succeeded && V.Strict) return Throw('TypeError');
     return UNUSED;

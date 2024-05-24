@@ -2,7 +2,7 @@ import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { Val } from './val';
 import { ExecutionContext } from './execution_context';
 import { EMPTY, NOT_APPLICABLE } from './enums';
-import { NodeType, NodeMap, Node, Esprima, emptyLoc, SourceTextNode } from './tree';
+import { NodeType, NodeMap, Node, Esprima, preprocess } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
 import { PropertyDescriptor } from './property_descriptor';
 import { InitializeHostDefinedRealm, RealmRecord } from './realm_record';
@@ -91,30 +91,40 @@ export class VM {
     if (typeof script === 'string') {
       const source = script;
       if (!this.esprima) throw new Error(`no parser`);
-      type Metadata = {start: {offset: number}, end: {offset: number}};
-      script = this.esprima.parseScript(source, {loc: true}, (n: Node, meta: Metadata) => {
-        if (filename) (n.loc || (n.loc = emptyLoc())).source = filename;
-        if (n.range) {
-          switch (n.type) {
-            case 'FunctionExpression':
-            case 'FunctionDeclaration':
-            case 'MethodDefinition':
-            case 'ClassDeclaration':
-            case 'ClassExpression':
-            case 'ArrowFunctionExpression':
-              (n as SourceTextNode).sourceText =
-                source.substring(meta.start.offset, meta.end.offset);
-              break;
-            case 'Property':
-              if (n.value.type === 'FunctionExpression') {
-                (n.value as SourceTextNode).sourceText =
-                  source.substring(meta.start.offset, meta.end.offset);
-              }
-              break;
-          }
-        }
-        delete n.range;
-      }) as ESTree.Program;
+      script = this.esprima.parseScript(source) as ESTree.Program;
+      preprocess(script, {sourceFile: filename, sourceText: source});
+
+      // script = this.esprima.parseScript(source, {loc: true}, (n: Node, meta: Metadata) => {
+      //   // TODO - we want the following:
+      //   //  - loc: {line, col} for each node
+      //   //  - filenames for each node
+      //   //  - sourceText for functions/classes
+      //   //  - strict for each node (or at least scopes)
+      //   // Consider providing parser wrappers for esprima, acorn, etc
+      //   // Maybe use acorn-walk always?  Could use it in the wrapper...
+      //   if (filename) (n.loc || (n.loc = emptyLoc())).source = filename;
+      //   if (n.range) {
+      //     switch (n.type) {
+      //       case 'FunctionExpression':
+      //       case 'FunctionDeclaration':
+      //       case 'MethodDefinition':
+      //       case 'ClassDeclaration':
+      //       case 'ClassExpression':
+      //       case 'ArrowFunctionExpression':
+      //         (n as SourceTextNode).sourceText =
+      //           source.substring(meta.start.offset, meta.end.offset);
+      //         break;
+      //       case 'Property':
+      //         // Parser leaves the name off the FunctionExpression range for members
+      //         if (n.value.type === 'FunctionExpression') {
+      //           (n.value as SourceTextNode).sourceText =
+      //             source.substring(meta.start.offset, meta.end.offset);
+      //         }
+      //         break;
+      //     }
+      //   }
+      //   delete n.range;
+      // }) as ESTree.Program;
     }
     const record = ParseScript(script, this.getRealm(), undefined);
     if (Array.isArray(record)) {
