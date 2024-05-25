@@ -6,14 +6,11 @@ import { VM } from './vm';
 import { ReferenceRecord } from './reference_record';
 import { ModuleRecord } from './module_record';
 import { IsDataDescriptor, PropertyDescriptor } from './property_descriptor';
-import { Get, HasProperty, Set as Set$ } from './abstract_object';
+import { DefinePropertyOrThrow, Get, HasOwnProperty, HasProperty, Set as Set$ } from './abstract_object';
 import { Func } from './func';
 import { Obj } from './obj';
-
-declare const IsExtensible: any;
-declare const HasOwnProperty: any;
-declare const ToBoolean: any;
-declare const DefinePropertyOrThrow: any;
+import { ToBoolean } from './abstract_conversion';
+import { IsExtensible } from './abstract_compare';
 
 /**
  * 6.2.7 The Environment Record Specification Type
@@ -458,7 +455,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
     if (unscopables instanceof Obj) {
       const prop = Get($, unscopables, N);
       if (IsAbrupt(prop)) return prop;
-      const blocked = ToBoolean($, prop);
+      const blocked = ToBoolean(prop);
       if (blocked) return false;
     }
     return true;
@@ -1103,7 +1100,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
     const hasProperty = HasOwnProperty($, globalObject, N);
     if (IsAbrupt(hasProperty)) return hasProperty;
     if (hasProperty === true) return true;
-    return IsExtensible(globalObject);
+    return IsExtensible($, globalObject);
   }
 
   /**
@@ -1120,7 +1117,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
     const globalObject = this.ObjectRecord.BindingObject;
     const existingProp = globalObject.GetOwnProperty($, N);
     if (IsAbrupt(existingProp)) return existingProp;
-    if (existingProp === undefined) return IsExtensible(globalObject);
+    if (existingProp === undefined) return IsExtensible($, globalObject);
     if (existingProp.Configurable) return true;
     if (IsDataDescriptor(existingProp) && existingProp.Writable && existingProp.Enumerable) {
       return true;
@@ -1144,7 +1141,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
     const globalObject = this.ObjectRecord.BindingObject;
     const hasProperty = HasOwnProperty($, globalObject, N);
     if (IsAbrupt(hasProperty)) return hasProperty;
-    const extensible = IsExtensible(globalObject);
+    const extensible = IsExtensible($, globalObject);
     if (IsAbrupt(extensible)) return extensible;
     if (!hasProperty && extensible) {
       let result = this.ObjectRecord.CreateMutableBinding($, N, D);

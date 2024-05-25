@@ -1,16 +1,16 @@
 import { ToObject } from './abstract_conversion';
+import { Set } from './abstract_object';
 import { Assert } from './assert';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { EMPTY, UNRESOLVABLE, UNUSED } from './enums';
 import { EnvironmentRecord } from './environment_record';
+import { GetGlobalObject } from './execution_context';
 import { PropertyKey, Val } from './val';
 import { VM } from './vm';
 
 declare type PrivateName = {__privatename__: true};
 declare const PrivateName: any;
 declare const PrivateGet: any;
-declare const GetGlobalObject: any;
-declare const Set: any;
 declare const PrivateSet: any;
 declare const ResolvePrivateIdentifier: any;
 
@@ -172,6 +172,7 @@ export function PutValue($: VM, V: ReferenceRecord|Val, W: Val): CR<UNUSED> {
   if (!(V instanceof ReferenceRecord)) return Throw('ReferenceError');
   if (IsUnresolvableReference(V)) {
     if (V.Strict) return Throw('ReferenceError');
+    Assert(typeof V.ReferencedName !== 'object'); // class bodies are strict.
     const globalObj = GetGlobalObject($);
     const result = Set($, globalObj, V.ReferencedName, W, false);
     if (IsAbrupt(result)) return result;

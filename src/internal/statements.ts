@@ -10,7 +10,7 @@ import { BoundNames, IsConstantDeclaration, LexicallyScopedDeclarations } from "
 import { EvalGen, VM } from "./vm";
 import { Val } from "./val";
 import { ResolveBinding } from "./execution_context";
-import { InitializeReferencedBinding } from "./reference_record";
+import { InitializeReferencedBinding, PutValue } from "./reference_record";
 import { IsAnonymousFunctionDefinition, NamedEvaluation } from "./static/functions";
 
 /**
@@ -163,7 +163,7 @@ export function* Evaluation_LexicalDeclaration($: VM, n: VariableDeclaration): E
         if (binding.init == null) {
           // LexicalBinding : BindingIdentifier
           CastNotAbrupt(InitializeReferencedBinding($, lhs, undefined));
-          return EMPTY;
+          break;
         } else {
           // LexicalBinding : BindingIdentifier Initializer
           let value;
@@ -174,6 +174,86 @@ export function* Evaluation_LexicalDeclaration($: VM, n: VariableDeclaration): E
           }
           if (IsAbrupt(value)) return value;
           CastNotAbrupt(InitializeReferencedBinding($, lhs, value));
+        }
+        break;
+      }
+      case 'ObjectPattern':
+      case 'ArrayPattern':
+      default:
+        throw new Error(`not implemented: binding to ${binding.id.type}`);
+    }
+  }
+  return EMPTY;
+}
+
+/**
+ * 14.3.2 Variable Statement
+ *
+ * NOTE: A var statement declares variables that are scoped to the
+ * running execution context's VariableEnvironment. Var variables are
+ * created when their containing Environment Record is instantiated
+ * and are initialized to undefined when created. Within the scope of
+ * any VariableEnvironment a common BindingIdentifier may appear in
+ * more than one VariableDeclaration but those declarations
+ * collectively define only one variable. A variable defined by a
+ * VariableDeclaration with an Initializer is assigned the value of
+ * its Initializer's AssignmentExpression when the
+ * VariableDeclaration is executed, not when the variable is created.
+ * 
+ * 14.3.2.1 Runtime Semantics: Evaluation
+ *
+ * VariableStatement : var VariableDeclarationList ;
+ * 1. Perform ? Evaluation of VariableDeclarationList.
+ * 2. Return empty.
+ *
+ * VariableDeclarationList : VariableDeclarationList , VariableDeclaration
+ * 1. Perform ? Evaluation of VariableDeclarationList.
+ * 2. Return ? Evaluation of VariableDeclaration.
+ *
+ * VariableDeclaration : BindingIdentifier
+ * 1. Return empty.
+ *
+ * VariableDeclaration : BindingIdentifier Initializer
+ * 1. Let bindingId be StringValue of BindingIdentifier.
+ * 2. Let lhs be ? ResolveBinding(bindingId).
+ * 3. If IsAnonymousFunctionDefinition(Initializer) is true, then
+ *     a. Let value be ? NamedEvaluation of Initializer with argument bindingId.
+ * 4. Else,
+ *     a. Let rhs be ? Evaluation of Initializer.
+ *     b. Let value be ? GetValue(rhs).
+ * 5. Perform ? PutValue(lhs, value).
+ * 6. Return empty.
+ *
+ * NOTE: If a VariableDeclaration is nested within a with statement
+ * and the BindingIdentifier in the VariableDeclaration is the same as
+ * a property name of the binding object of the with statement\'s
+ * Object Environment Record, then step 5 will assign value to the
+ * property instead of assigning to the VariableEnvironment binding of
+ * the Identifier.
+ *
+ * VariableDeclaration : BindingPattern Initializer
+ * 1. Let rhs be ? Evaluation of Initializer.
+ * 2. Let rval be ? GetValue(rhs).
+ * 3. Return ? BindingInitialization of BindingPattern with arguments rval and undefined.
+ */
+export function* Evaluation_VariableStatement($: VM, n: VariableDeclaration): EvalGen<CR<EMPTY>> {
+  for (const binding of n.declarations) {
+    switch (binding.id.type) {
+      case 'Identifier': {
+        const lhs = CastNotAbrupt(ResolveBinding($, binding.id.name));
+        if (binding.init == null) {
+          // VariableDeclaration : BindingIdentifier
+          break;
+        } else {
+          // VariableDeclaration : BindingIdentifier Initializer
+          let value;
+          if (IsAnonymousFunctionDefinition(binding.init)) {
+            value = yield* NamedEvaluation($, binding.init as FunctionExpression, binding.id.name)
+          } else {
+            value = yield* $.evaluateValue(binding.init);
+          }
+          if (IsAbrupt(value)) return value;
+          CastNotAbrupt(PutValue($, lhs, value));
         }
         break;
       }
