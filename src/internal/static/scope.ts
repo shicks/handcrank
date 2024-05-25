@@ -142,10 +142,13 @@ export function LexicallyDeclaredNames(node: Node): string[] {
  * The syntax-directed operation TopLevelLexicallyScopedDeclarations
  * takes no arguments and returns a List of Parse Nodes.
  */
-export function LexicallyScopedDeclarations(node: Node): Node[] {
-  const nodes: Node[] = [];
-  visitLexicallyScopedDecls(node, (n) => nodes.push(n));
-  return nodes;
+export function LexicallyScopedDeclarations(node: Node|Node[]): Node[] {
+  const out: Node[] = [];
+  if (!Array.isArray(node)) node = [node];
+  for (const stmt of node) {
+    visitLexicallyScopedDecls(stmt, (n) => out.push(n));
+  }
+  return out;
 }
 
 /**

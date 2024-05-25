@@ -135,6 +135,10 @@ export class VM {
       GetValue(this, result);
   }
 
+  Evaluation(n: Node): SyntaxOp['Evaluation'] {
+    return this.operate('Evaluation', n);
+  }
+
   operate<O extends keyof SyntaxOp>(op: O, n: Node): SyntaxOp[O] {
     for (const impl of this.syntaxOperations[op][n.type] || []) {
       const result = impl(n as any, (child) => this.operate(op, child));
@@ -235,3 +239,12 @@ type SyntaxHandlers = {[O in keyof SyntaxOp]: SyntaxHandlerMap<O>};
 //      - can we just install an as-needed graph so that
 //        we can just assume all prereqs exist?
 //export type Plugin = (spi: PluginSPI) => void;
+
+export function DebugString(v: Val): string {
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (typeof v === 'bigint') return `${String(v)}n`;
+  if (v instanceof Obj) {
+    return '[Object]'; // TODO
+  }
+  return String(v);
+}

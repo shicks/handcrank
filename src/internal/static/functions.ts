@@ -1,9 +1,17 @@
-import { Node } from "estree";
+import { ArrowFunctionExpression, ClassExpression, FunctionExpression, Node } from "estree";
 import { PrivateName } from "../private_environment_record";
 import { CR, IsAbrupt } from "../completion_record";
-import { Func } from "../func";
+import { Func, InstantiateOrdinaryFunctionExpression } from "../func";
 import { EvalGen, VM } from "../vm";
 import { ParentNode, Source } from "../tree";
+import { PropertyKey } from "../val";
+
+declare const ClassDefinitionEvaluation: any;
+declare const InstantiateAsyncArrowFunctionExpression: any;
+declare const InstantiateArrowFunctionExpression: any;
+declare const InstantiateAsyncGeneratorFunctionExpression: any;
+declare const InstantiateAsyncFunctionExpression: any;
+declare const InstantiateGeneratorFunctionExpression: any;
 
 // 8.4 Function Name Inference
 
@@ -86,11 +94,34 @@ export function IsAnonymousFunctionDefinition(expr: Node): boolean {
  * 3. Return value.
  */
 
-export function* NamedEvaluation($: VM, node: Node, name: PropertyKey|PrivateName): EvalGen<CR<Func>> {
-  const result = yield* $.evaluateValue(node);
-  if (IsAbrupt(result)) return result;
-  (result as Func)
-  throw new Error('not implemented');
+export function* NamedEvaluation(
+  $: VM,
+  node: FunctionExpression|ArrowFunctionExpression|ClassExpression,
+  name: PropertyKey|PrivateName,
+): EvalGen<CR<Func>> {
+  if (node.type === 'ClassExpression') {
+    const value = ClassDefinitionEvaluation($, node, undefined, name);
+    if (!IsAbrupt(value)) value.SourceText = GetSourceText(node);
+    return value;
+  } else if (node.type === 'ArrowFunctionExpression') {
+    if (node.async) { // async arrow
+      return InstantiateAsyncArrowFunctionExpression($, node, name);
+    } else { // ordinary arrow
+      return InstantiateArrowFunctionExpression($, node, name);
+    }
+  } else {
+    if (node.async) {
+      if (node.generator) { // async generator
+        return InstantiateAsyncGeneratorFunctionExpression($, node, name);
+      } else { // async function
+        return InstantiateAsyncFunctionExpression($, node, name);
+      }
+    } else if (node.generator) { // generator
+      return InstantiateGeneratorFunctionExpression($, node, name);
+    } else { // ordinary function
+      return InstantiateOrdinaryFunctionExpression($, node, name);
+    }
+  }
 }
 
 

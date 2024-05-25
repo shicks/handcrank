@@ -8,7 +8,8 @@ import { OrdinaryObjectCreate } from '../obj';
 import { ObjectConstructor } from '../func';
 import { StrictNode } from '../tree';
 import { ToPropertyKey } from '../abstract_conversion';
-import { Evaluation_BlockStatement } from '../statements';
+import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration } from '../statements';
+import { Evaluation_AssignmentExpression } from '../assignment';
 
 // type Plugin<ExtraIntrinsics = never> = {[K in Intrinsics|Globals]: Intrinsics|($: VM) => Generator<Intrinsic, K extends `%${string}%` ? Obj : Val|PropertyDescriptor, Obj>} & {Evaluate?(on: fn): ...};
 // export const basic: Plugin = {
@@ -29,6 +30,9 @@ import { Evaluation_BlockStatement } from '../statements';
 //       )
 //   },
 // };
+
+
+// TODO - put more ...something... into this?
 
 
 export const basic: Plugin = {
@@ -79,14 +83,16 @@ export const basic: Plugin = {
       return new ReferenceRecord(baseValue, propertyKey, strict, EMPTY);
     });
     on('BlockStatement', (n) => Evaluation_BlockStatement($, n));
-    on('VariableDeclaration', function*(n, evaluate) {
-      throw '';
+    on('VariableDeclaration', (n, evaluate) => {
+      if (n.kind !== 'var') {
+        return Evaluation_LexicalDeclaration($, n);
+      }
+      throw new Error('not implemented');
       // 14.2.3 
       // 14.3.1 Let and Const Declarations
       // 14.3.2 Variable Statement
-
-      // NOTE: need to figure out let/const?
     });
+    on('AssignmentExpression', (n) => Evaluation_AssignmentExpression($, n));
   },
 
   Intrinsics: {

@@ -1,6 +1,6 @@
 // 14
 
-import { BlockStatement, Node, VariableDeclaration } from "estree";
+import { BlockStatement, FunctionExpression, Node, VariableDeclaration } from "estree";
 import { Assert } from "./assert";
 import { CR, CastNotAbrupt, IsAbrupt, UpdateEmpty } from "./completion_record";
 import { EMPTY, UNUSED } from "./enums";
@@ -45,11 +45,11 @@ import { IsAnonymousFunctionDefinition, NamedEvaluation } from "./static/functio
  * eval("1;var a;")
  */
 export function* Evaluation_BlockStatement($: VM, n: BlockStatement): EvalGen<CR<Val|EMPTY>> {
-  if (!n.body.length) return EMPTY;
+ if (!n.body.length) return EMPTY;
   const context = $.getRunningContext();
   const oldEnv = context.LexicalEnvironment || null;
   const blockEnv = new DeclarativeEnvironmentRecord(oldEnv);
-  BlockDeclarationInstantiation($, n, blockEnv);
+  BlockDeclarationInstantiation($, n.body, blockEnv);
   context.LexicalEnvironment = blockEnv;
   let blockValue: CR<Val> = yield* $.evaluateValue(n.body[0]);
   try {
@@ -72,7 +72,7 @@ export function* Evaluation_BlockStatement($: VM, n: BlockStatement): EvalGen<CR
  * arguments code (a Parse Node) and env (a Declarative Environment
  * Record) and returns unused. code is the Parse Node corresponding to
  * the body of the block. env is the Environment Record in which
- * bindings are to be created.cccccbenfndbeufgkgfdrietdkbkrjggnvkuthuddbrt
+ * bindings are to be created.
 
  *
  * NOTE: When a Block or CaseBlock is evaluated a new Declarative
@@ -82,7 +82,11 @@ export function* Evaluation_BlockStatement($: VM, n: BlockStatement): EvalGen<CR
  *
  * It performs the following steps when called:
  */
-export function BlockDeclarationInstantiation($: VM, code: Node, env: EnvironmentRecord): UNUSED {
+export function BlockDeclarationInstantiation(
+  $: VM,
+  code: Node|Node[], // narrow?
+  env: EnvironmentRecord,
+): UNUSED {
   // 1. Let declarations be the LexicallyScopedDeclarations of code.
   const declarations = LexicallyScopedDeclarations(code);
   // 2. Let privateEnv be the running execution context's PrivateEnvironment.
@@ -164,15 +168,19 @@ export function* Evaluation_LexicalDeclaration($: VM, n: VariableDeclaration): E
           // LexicalBinding : BindingIdentifier Initializer
           let value;
           if (IsAnonymousFunctionDefinition(binding.init)) {
-            value = NamedEvaluation($, binding.init,)
-
-            // TODO
-
+            value = yield* NamedEvaluation($, binding.init as FunctionExpression, binding.id.name)
+          } else {
+            value = yield* $.evaluateValue(binding.init);
           }
+          if (IsAbrupt(value)) return value;
+          CastNotAbrupt(InitializeReferencedBinding($, lhs, value));
         }
+        break;
       }
       case 'ObjectPattern':
       case 'ArrayPattern':
+      default:
+        throw new Error(`not implemented: binding to ${binding.id.type}`);
     }
   }
   return EMPTY;

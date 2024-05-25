@@ -3,12 +3,16 @@
  * 7.3 Operations on Objects
  */
 
+import { IsCallable } from "./abstract_compare";
+import { Assert } from "./assert";
+import { InstanceofOperator } from "./binary_operators";
 import { CR, IsAbrupt, Throw } from "./completion_record";
 import { UNUSED } from "./enums";
+import { Func } from "./func";
 import { Obj } from "./obj";
 import { PropertyDescriptor } from "./property_descriptor";
 import { PropertyKey, Val } from "./val";
-import { VM } from "./vm";
+import { DebugString, EvalGen, VM, just } from "./vm";
 
 declare const ToObject: any;
 
@@ -186,7 +190,50 @@ export function DefinePropertyOrThrow($: VM, O: Obj, P: PropertyKey,
   return UNUSED;
 }
 
+/**
+ * 7.3.10 DeletePropertyOrThrow ( O, P )
+ *
+ * The abstract operation DeletePropertyOrThrow takes arguments O (an
+ * Object) and P (a property key) and returns either a normal
+ * completion containing unused or a throw completion. It is used to
+ * remove a specific own property of an object. It throws an exception
+ * if the property is not configurable. It performs the following
+ * steps when called:
+ * 
+ * 1. Let success be ? O.[[Delete]](P).
+ * 2. If success is false, throw a TypeError exception.
+ * 3. Return unused.
+ */
+export function DeletePropertyOrThrow($: VM, O: Obj, P: PropertyKey): CR<UNUSED> {
+  const success = O.Delete($, P);
+  if (IsAbrupt(success)) return success;
+  if (!success) return Throw('TypeError');
+  return UNUSED;
+}
 
+/**
+ * 7.3.11 GetMethod ( V, P )
+ *
+ * The abstract operation GetMethod takes arguments V (an ECMAScript
+ * language value) and P (a property key) and returns either a normal
+ * completion containing either a function object or undefined, or a
+ * throw completion. It is used to get the value of a specific
+ * property of an ECMAScript language value when the value of the
+ * property is expected to be a function. It performs the following
+ * steps when called:
+ * 
+ * 1. Let func be ? GetV(V, P).
+ * 2. If func is either undefined or null, return undefined.
+ * 3. If IsCallable(func) is false, throw a TypeError exception.
+ * 4. Return func.
+ */
+export function GetMethod($: VM, V: Val, P: PropertyKey): CR<Val> {
+  const func = GetV($, V, P);
+  if (IsAbrupt(func)) return func;
+  if (func == null) return undefined;
+  if (!IsCallable(func)) return Throw('TypeError');
+  return func;
+}
 
 /**
  * 7.3.12 HasProperty ( O, P )
@@ -202,4 +249,122 @@ export function DefinePropertyOrThrow($: VM, O: Obj, P: PropertyKey,
  */
 export function HasProperty($: VM, O: Obj, P: PropertyKey): CR<boolean> {
   return O.HasProperty($, P);
+}
+
+/**
+ * 7.3.13 HasOwnProperty ( O, P )
+ *
+ * The abstract operation HasOwnProperty takes arguments O (an Object)
+ * and P (a property key) and returns either a normal completion
+ * containing a Boolean or a throw completion. It is used to determine
+ * whether an object has an own property with the specified property
+ * key. It performs the following steps when called:
+ * 
+ * 1. Let desc be ? O.[[GetOwnProperty]](P).
+ * 2. If desc is undefined, return false.
+ * 3. Return true.
+ */
+export function HasOwnProperty($: VM, O: Obj, P: PropertyKey): CR<boolean> {
+  const desc = O.GetOwnProperty($, P);
+  if (IsAbrupt(desc)) return desc;
+  return desc != null;
+}
+
+/**
+ * 7.3.14 Call ( F, V [ , argumentsList ] )
+ * 
+ * The abstract operation Call takes arguments F (an ECMAScript
+ * language value) and V (an ECMAScript language value) and optional
+ * argument argumentsList (a List of ECMAScript language values) and
+ * returns either a normal completion containing an ECMAScript
+ * language value or a throw completion. It is used to call the
+ * [[Call]] internal method of a function object. F is the function
+ * object, V is an ECMAScript language value that is the this value of
+ * the [[Call]], and argumentsList is the value passed to the
+ * corresponding argument of the internal method. If argumentsList is
+ * not present, a new empty List is used as its value. It performs the
+ * following steps when called:
+ * 
+ * 1. If argumentsList is not present, set argumentsList to a new empty List.
+ * 2. If IsCallable(F) is false, throw a TypeError exception.
+ * 3. Return ? F.[[Call]](V, argumentsList).
+ */
+export function Call($: VM, F: Val, V: Val, argumentsList: Val[] = []): EvalGen<CR<Val>> {
+  if (!IsCallable(F)) {
+    return just(Throw('TypeError', `${DebugString(F)} is not a function`));
+  }
+  return (F as Func).Call!($, V, argumentsList);
+}
+
+/**
+ * 7.3.15 Construct ( F [ , argumentsList [ , newTarget ] ] )
+ *
+ * The abstract operation Construct takes argument F (a constructor)
+ * and optional arguments argumentsList (a List of ECMAScript language
+ * values) and newTarget (a constructor) and returns either a normal
+ * completion containing an Object or a throw completion. It is used
+ * to call the [[Construct]] internal method of a function
+ * object. argumentsList and newTarget are the values to be passed as
+ * the corresponding arguments of the internal method. If
+ * argumentsList is not present, a new empty List is used as its
+ * value. If newTarget is not present, F is used as its value. It
+ * performs the following steps when called:
+ * 
+ * 1. If newTarget is not present, set newTarget to F.
+ * 2. If argumentsList is not present, set argumentsList to a new empty List.
+ * 3. Return ? F.[[Construct]](argumentsList, newTarget).
+ *
+ * NOTE: If newTarget is not present, this operation is equivalent to:
+ * new F(...argumentsList)
+ */
+export function Construct(
+  $: VM,
+  F: Func,
+  argumentsList: Val[] = [],
+  newTarget: Func = F,
+): EvalGen<CR<Val>> {
+  return F.Construct!($, argumentsList, newTarget);
+}
+
+/**
+ * 7.3.22 OrdinaryHasInstance ( C, O )
+ *
+ * The abstract operation OrdinaryHasInstance takes arguments C (an
+ * ECMAScript language value) and O (an ECMAScript language value) and
+ * returns either a normal completion containing a Boolean or a throw
+ * completion. It implements the default algorithm for determining if
+ * O inherits from the instance object inheritance path provided by
+ * C. It performs the following steps when called:
+ *
+ * 1. If IsCallable(C) is false, return false.
+ * 2. If C has a [[BoundTargetFunction]] internal slot, then
+ *     a. Let BC be C.[[BoundTargetFunction]].
+ *     b. Return ? InstanceofOperator(O, BC).
+ * 3. If O is not an Object, return false.
+ * 4. Let P be ? Get(C, "prototype").
+ * 5. If P is not an Object, throw a TypeError exception.
+ * 6. Repeat,
+ *     a. Set O to ? O.[[GetPrototypeOf]]().
+ *     b. If O is null, return false.
+ *     c. If SameValue(P, O) is true, return true.
+ */
+export function* OrdinaryHasInstance($: VM, C: Val, O: Val): EvalGen<CR<boolean>> {
+  if (!IsCallable(C)) return false;
+  Assert(C instanceof Obj);
+  if (Obj.BoundTargetFunction in C) {
+    const BC = C.BoundTargetFunction;
+    return yield* InstanceofOperator($, O, BC);
+  }
+  if (!(O instanceof Obj)) return false;
+  const P = Get($, C, 'prototype');
+  if (IsAbrupt(P)) return P;
+  if (!(P instanceof Obj)) return Throw('TypeError');
+  while (true) {
+    Assert(O instanceof Obj);
+    const next = O.GetPrototypeOf($);
+    if (IsAbrupt(next)) return next;
+    if (next == null) return false;
+    if (P === next) return true;
+    O = next;
+  }
 }

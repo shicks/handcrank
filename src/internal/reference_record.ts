@@ -169,7 +169,7 @@ export function GetValue($: VM, V: ReferenceRecord|Val): CR<Val> {
  * when called:
  */
 export function PutValue($: VM, V: ReferenceRecord|Val, W: Val): CR<UNUSED> {
-  if (!(V instanceof ReferenceRecord)) return Throw('RefereneError');
+  if (!(V instanceof ReferenceRecord)) return Throw('ReferenceError');
   if (IsUnresolvableReference(V)) {
     if (V.Strict) return Throw('ReferenceError');
     const globalObj = GetGlobalObject($);

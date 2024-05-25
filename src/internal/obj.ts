@@ -43,6 +43,11 @@ export abstract class Obj extends Slots(slot => ({
   // Slot for builtin function object
   InitialName: slot<string>,
 
+  // Slots for bound function exotic objects
+  BoundTargetFunction: slot<Obj>,
+  BoundThis: slot<Val>,
+  BoundArguments: slot<Val[]>,
+
   // Slot for exotic mapped arguments object
   ParameterMap: slot<Obj|undefined>,
 
