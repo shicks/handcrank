@@ -45,7 +45,7 @@ import { IsAnonymousFunctionDefinition, NamedEvaluation } from "./static/functio
  * eval("1;var a;")
  */
 export function* Evaluation_BlockStatement($: VM, n: BlockStatement): EvalGen<CR<Val|EMPTY>> {
- if (!n.body.length) return EMPTY;
+  if (!n.body.length) return EMPTY;
   const context = $.getRunningContext();
   const oldEnv = context.LexicalEnvironment || null;
   const blockEnv = new DeclarativeEnvironmentRecord(oldEnv);
@@ -265,3 +265,25 @@ export function* Evaluation_VariableStatement($: VM, n: VariableDeclaration): Ev
   }
   return EMPTY;
 }
+
+/**
+ * 15.2.6 Runtime Semantics: Evaluation
+ *
+ * FunctionDeclaration : function BindingIdentifier ( FormalParameters ) { FunctionBody }
+ * 1. Return empty.
+ *
+ * NOTE 1: An alternative semantics is provided in B.3.2.
+ * 
+ * FunctionDeclaration : function ( FormalParameters ) { FunctionBody }
+ * 1. Return empty.
+ *
+ * FunctionExpression :
+ *     function BindingIdentifieropt ( FormalParameters ) { FunctionBody }
+ * 1. Return InstantiateOrdinaryFunctionExpression of FunctionExpression.
+ *
+ * NOTE 2: A "prototype" property is automatically created for every
+ * function defined using a FunctionDeclaration or FunctionExpression,
+ * to allow for the possibility that the function will be used as a
+ * constructor.
+ *
+ */

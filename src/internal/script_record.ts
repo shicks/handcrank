@@ -8,8 +8,7 @@ import { UNUSED } from './enums';
 import { Assert } from './assert';
 import { BoundNames, IsConstantDeclaration, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
 import { GlobalEnvironmentRecord } from './environment_record';
-
-declare const InstantiateFunctionObject: any;
+import { InstantiateFunctionObject } from './func';
 
 /**
  * 16.1.4 Script Records
@@ -255,7 +254,7 @@ export function GlobalDeclarationInstantiation(
     const [fn, ...rest] = BoundNames(f);
     Assert(!rest.length);
     //   b. Let fo be InstantiateFunctionObject of f with arguments env and privateEnv.
-    const fo = InstantiateFunctionObject($, f, env, privateEnv);
+    const fo = InstantiateFunctionObject($, env, privateEnv, f);
     //   c. Perform ? env.CreateGlobalFunctionBinding(fn, fo, false).
     const result = env.CreateGlobalFunctionBinding($, fn, fo, false);
     if (IsAbrupt(result)) return result;

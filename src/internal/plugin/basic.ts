@@ -1,15 +1,16 @@
 import { Plugin, just } from '../vm';
 import { EMPTY, NOT_APPLICABLE } from '../enums';
 import { Val } from '../val';
-import { CR, IsAbrupt } from '../completion_record';
+import { Abrupt, CR, CompletionType, IsAbrupt } from '../completion_record';
 import { ResolveBinding, ResolveThisBinding } from '../execution_context';
 import { ReferenceRecord } from '../reference_record';
 import { OrdinaryObjectCreate } from '../obj';
-import { ObjectConstructor } from '../func';
 import { StrictNode } from '../tree';
 import { ToPropertyKey } from '../abstract_conversion';
 import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from '../statements';
 import { Evaluation_AssignmentExpression } from '../assignment';
+import { FunctionConstructor, ObjectConstructor } from '../fundamental';
+import { Evaluation_CallExpression } from '../func';
 
 // type Plugin<ExtraIntrinsics = never> = {[K in Intrinsics|Globals]: Intrinsics|($: VM) => Generator<Intrinsic, K extends `%${string}%` ? Obj : Val|PropertyDescriptor, Obj>} & {Evaluate?(on: fn): ...};
 // export const basic: Plugin = {
@@ -58,7 +59,7 @@ export const basic: Plugin = {
     //on('Literal', when(n.value instanceof RegExp) (n) => {throw'13.2.7.3'});
     on('TemplateLiteral', (n) => {throw'13.2.8.6'});
     /** 13.3.2.1 MemberExpression */
-    on('MemberExpression', function*(n, evaluate) {
+    on('MemberExpression', function*(n) {
       const baseValue = yield* $.evaluateValue(n.object);
       if (IsAbrupt(baseValue)) return baseValue;
       const strict = (n as StrictNode).strict || false;
@@ -90,16 +91,42 @@ export const basic: Plugin = {
       return Evaluation_VariableStatement($, n);
     });
     on('AssignmentExpression', (n) => Evaluation_AssignmentExpression($, n));
+    on('FunctionDeclaration', (n) => just(EMPTY));
+    //on('FunctionExpression', (n) => Evaluate_FunctionExpression($, n));
+    on('ReturnStatement', function*(n) {
+      // 14.10.1 Runtime Semantics: Evaluation
+      //
+      // ReturnStatement : return ;
+      // 1. Return Completion Record { [[Type]]: return, [[Value]]:
+      //    undefined, [[Target]]: empty }.
+      if (!n.argument) return new Abrupt(CompletionType.Return, undefined, EMPTY);
+
+      // ReturnStatement : return Expression ;
+      // 1. Let exprRef be ? Evaluation of Expression.
+      // 2. Let exprValue be ? GetValue(exprRef).
+      // 3. If GetGeneratorKind() is async, set exprValue to ? Await(exprValue).
+      // 4. Return Completion Record { [[Type]]: return, [[Value]]:
+      //    exprValue, [[Target]]: empty }.
+      const exprValue = yield* $.evaluateValue(n.argument);
+      if (IsAbrupt(exprValue)) return exprValue;
+      //if (GetGeneratorKind() === 'async') {
+      return new Abrupt(CompletionType.Return, exprValue, EMPTY);
+    });
+    on('CallExpression', (n) => Evaluation_CallExpression($, n));
   },
 
   Intrinsics: {
-    *'%ObjectPrototype%'() { return OrdinaryObjectCreate(null); },
-    *'%Object%'($) { return new ObjectConstructor($, yield '%ObjectPrototype%'); },
+    *'%Object.prototype%'() { return OrdinaryObjectCreate(null); },
+    *'%Object%'($) { return new ObjectConstructor($, yield '%Object.prototype%'); },
+    *'%Function.prototype%'() { return OrdinaryObjectCreate(yield '%Object.prototype%'); },
+    *'%Function%'($) { return new FunctionConstructor($, yield '%Function.prototype%'); },
   },
 
   Globals: {
     *'undefined'() { return undefined; },
     *'Object'() { return yield '%Object%'; },
-    *'Object.prototype'() { return yield '%ObjectPrototype%'; },
+    *'Object.prototype'() { return yield '%Object.prototype%'; },
+    *'Function'() { return yield '%Function%'; },
+    *'Function.prototype'() { return yield '%Function.prototype%'; },
   }
 };

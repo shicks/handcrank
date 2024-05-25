@@ -325,3 +325,7 @@ function visitLexicallyScopedDecls(node: Node, visitor: Visitor): void {
   }
   visit(node);
 }
+
+export function IsStrictMode(n: Node): boolean {
+  return false;
+}

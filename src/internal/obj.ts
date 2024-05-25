@@ -25,7 +25,7 @@ export abstract class Obj extends Slots(slot => ({
 
   // Slots for function objects
   Environment: slot<EnvironmentRecord>,
-  PrivateEnvironment: slot<PrivateEnvironmentRecord>,
+  PrivateEnvironment: slot<PrivateEnvironmentRecord|null>,
   FormalParameters: slot<ESTree.Pattern[]>,
   ECMAScriptCode: slot<ESTree.BlockStatement|ESTree.Expression>,
   ConstructorKind: slot<BASE|DERIVED>,

@@ -1,7 +1,7 @@
-import { Func } from "./func";
-import { Obj, OrdinaryObjectCreate } from "./obj";
-import { Val } from "./val";
-import { VM } from "./vm";
+import { Func } from './func';
+import { Obj, OrdinaryObjectCreate } from './obj';
+import { Val } from './val';
+import { VM } from './vm';
 
 /**
  * 7.4.1 Iterator Records
@@ -49,7 +49,15 @@ export class IteratorRecord {
  * NOTE: The list iterator object is never directly accessible to ECMAScript code.
  */
 export function CreateListIteratorRecord($: VM, list: Val[]): IteratorRecord {
-  // TODO - implement!!
-  if (1 < 2) throw new Error('not implemented');
+  function* gen() {
+    for (const value of list) {
+      yield value;
+    }
+    
+  }
+  // TODO - CreateIteratorFromClosure ... etc
   return new IteratorRecord(OrdinaryObjectCreate(null), null!, false);
 }
+
+
+

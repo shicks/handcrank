@@ -4,20 +4,23 @@ import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, 
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
 import { PropertyDescriptor } from './property_descriptor';
 import { Assert } from './assert';
-import { DefinePropertyOrThrow } from './abstract_object';
+import { Call, DefinePropertyOrThrow } from './abstract_object';
 import * as ESTree from 'estree';
 import { RealmRecord } from './realm_record';
 import { ScriptRecord } from './script_record';
 import { ModuleRecord } from './module_record';
-import { CodeExecutionContext, ExecutionContext } from './execution_context';
+import { CodeExecutionContext, ExecutionContext, ResolveBinding } from './execution_context';
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
-import { BoundNames, IsConstantDeclaration, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
-import { ContainsExpression, GetSourceText, IsSimpleParameterList } from './static/functions';
-import { Obj, OrdinaryObjectCreate, OrdinaryObject } from './obj';
+import { BoundNames, IsConstantDeclaration, IsStrictMode, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
+import { ContainsExpression, GetSourceText, IsSimpleParameterList, IteratorBindingInitialization } from './static/functions';
+import { Obj, OrdinaryObject } from './obj';
 import { PropertyKey, Val } from './val';
 import { lazySuper } from './record';
 import { ParentNode, Source } from './tree';
 import { CreateListIteratorRecord } from './abstract_iterator';
+import { ToObject } from './abstract_conversion';
+import { GetThisValue, GetValue, InitializeReferencedBinding, IsPropertyReference, PutValue, ReferenceRecord } from './reference_record';
+import { IsCallable } from './abstract_compare';
 
 type Node = ESTree.Node;
 
@@ -25,15 +28,16 @@ type PrivateElement = never;
 type ClassFieldDefinitionRecord = never;
 
 function MakeConstructor(...args: any[]): void {}
-declare const IsStrictMode: (...args: any[]) => boolean;
-declare const ToObject: (...args: any[]) => Obj;
-declare const IteratorBindingInitialization: (...args: any[]) => Obj;
+function PrepareForTailCall(...args: any): void {}
 declare const CreateDataPropertyOrThrow: (...args: any[]) => Obj;
+declare const GetIterator: any;
+declare const IteratorStep: any;
+declare const IteratorValue: any;
 
 // New interface with various required properties
 export interface Func extends Obj {
   // Environment: EnvironmentRecord;
-  // PrivateEnvironment: PrivateEnvironmentRecord;
+  PrivateEnvironment: PrivateEnvironmentRecord|null;
   // FormalParameters: ESTree.Pattern[];
   // ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression;
   // ConstructorKind: BASE|DERIVED;
@@ -85,7 +89,7 @@ export class OrdinaryFunction extends lazySuper(() => OrdinaryObject) implements
    * within a class. Used as the outer PrivateEnvironment for inner
    * classes when evaluating the code of the function.
    */
-  declare PrivateEnvironment: PrivateEnvironmentRecord;
+  declare PrivateEnvironment: PrivateEnvironmentRecord|null;
 
   /**
    * [[FormalParameters]], a Parse Node - The root parse node of the
@@ -191,6 +195,8 @@ export class OrdinaryFunction extends lazySuper(() => OrdinaryObject) implements
     this.SourceText = sourceText;
     this.FormalParameters = ParameterList;
     this.ECMAScriptCode = Body;
+    this.Environment = env;
+    this.PrivateEnvironment = privateEnv;
     if (IsStrictMode(Body)) {
       // TODO - can we recurse through in the post-parse step to do this?
       //  - does it belong somewhere else?
@@ -507,10 +513,17 @@ export function OrdinaryFunctionCreate(
     env,
     privateEnv,
   );
+  F.ScriptOrModule = castExists($.getRunningContext().ScriptOrModule);
+  F.Realm = castExists($.getRealm());
 
   // TODO - length, class field initializer name?
 
   return F;
+}
+
+function castExists<T>(arg: T|null|undefined): T {
+  Assert(arg != null);
+  return arg;
 }
 
 /**
@@ -540,7 +553,7 @@ export function PrepareForOrdinaryCall($: VM, F: Func, newTarget: Obj|undefined)
   const localEnv = new FunctionEnvironmentRecord(F, newTarget);
   Assert(F.ScriptOrModule);
   Assert(F.Realm);
-  Assert(F.PrivateEnvironment);
+  //Assert(F.PrivateEnvironment);
   const calleeContext = new CodeExecutionContext(
       F.ScriptOrModule, F, F.Realm, F.PrivateEnvironment, localEnv, localEnv);
   if (callerContext.isRunning) callerContext.suspend();
@@ -672,7 +685,7 @@ export function* EvaluateBody(
     // FunctionBody : FunctionStatementList
     // 1. Perform ? FunctionDeclarationInstantiation(functionObject, argumentsList).
     // 2. Return ? Evaluation of FunctionStatementList.
-    const err = FunctionDeclarationInstantiation($, functionObject, argumentsList);
+    const err = yield* FunctionDeclarationInstantiation($, functionObject, argumentsList);
     if (IsAbrupt(err)) return err;
     return yield* $.evaluateValue(node);
   }
@@ -792,7 +805,7 @@ export function SetFunctionLength($: VM, F: Func, length: number): UNUSED {
  * FunctionDeclarationInstantiation. All other bindings are
  * initialized during evaluation of the function body.
  */
-export function FunctionDeclarationInstantiation($: VM, func: Func, argumentsList: Val[]) {
+export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsList: Val[]): EvalGen<CR<UNUSED>> {
   // It performs the following steps when called:
   // 1. Let calleeContext be the running execution context.
   const calleeContext = $.getRunningContext();
@@ -933,16 +946,54 @@ export function FunctionDeclarationInstantiation($: VM, func: Func, argumentsLis
     parameterBindings = [...parameterNames, 'arguments'];
   }
   // 24. Let iteratorRecord be CreateListIteratorRecord(argumentsList).
-  const iteratorRecord = CreateListIteratorRecord($, argumentsList);
   // 25. If hasDuplicates is true, then
   //     a. Perform ? IteratorBindingInitialization of formals with
   //        arguments iteratorRecord and undefined.
   // 26. Else,
   //     a. Perform ? IteratorBindingInitialization of formals with
   //        arguments iteratorRecord and env.
-  const result = IteratorBindingInitialization(
-    iteratorRecord, hasDuplicates ? undefined : env, formals);
-  if (IsAbrupt(result)) return result;
+
+  // if (hasDuplicates) {
+  //   const iteratorRecord = CreateListIteratorRecord($, argumentsList);
+  //   const result = yield* IteratorBindingInitialization(
+  //     $, iteratorRecord, undefined, formals);
+  //   if (IsAbrupt(result)) return result;
+  // } else {
+  //   const iteratorRecord = CreateListIteratorRecord($, argumentsList);
+  //   const result = yield* IteratorBindingInitialization(
+  //     $, iteratorRecord, env, formals);
+  //   if (IsAbrupt(result)) return result;
+  // }
+  let argIndex = 0;
+  for (const formal of formals) {
+    // NOTE: This is going off-spec a bit, but the overhead of doing
+    // a full iterator here is a bit ridiculous - we can revisit this if
+    // we need to support destructuring (etc) more faithfully someday.
+    switch (formal?.type) {
+      case undefined:
+        argIndex++;
+        break;
+      case 'Identifier': {
+        const name = formal.name;
+        const lhs = ResolveBinding($, name, hasDuplicates ? env : undefined);
+        if (IsAbrupt(lhs)) return lhs;
+        const result = hasDuplicates ?
+          PutValue($, lhs, argumentsList[argIndex++]) :
+          InitializeReferencedBinding($, lhs, argumentsList[argIndex++]);
+        if (IsAbrupt(result)) return result;
+        break;
+      }
+      case 'RestElement': {
+        // TODO - recurse because this could be a pattern?
+        //  - probably need to pull this out into a separate function
+      }
+      case 'AssignmentPattern': {
+        // NOTE: we may need to recurse here if `left` is a pattern
+      }
+      default:
+        throw new Error('not implemented: complex bindings');
+    }
+  }
 
   let varEnv: EnvironmentRecord;
 
@@ -1116,6 +1167,8 @@ export function FunctionDeclarationInstantiation($: VM, func: Func, argumentsLis
  */
 export abstract class BuiltinFunction extends OrdinaryObject implements Func {
 
+  PrivateEnvironment!: PrivateEnvironmentRecord|null;
+
   Prototype: Obj;
   Realm: RealmRecord;
   InitialName!: string;
@@ -1232,17 +1285,6 @@ export abstract class BuiltinFunction extends OrdinaryObject implements Func {
   }
 }
 
-export class ObjectConstructor extends BuiltinFunction { // extends BuiltinClass ??
-  constructor($: VM, prototype: Obj) {
-    // TODO - need $, among others... - change to generator so we can pass stuff
-    super($, 1, 'Object', undefined, prototype);
-  }
-
-  override *Call($: VM) {
-    return OrdinaryObjectCreate(this.Prototype);
-  }
-}
-
 /**
  * 10.4.4.6 CreateUnmappedArgumentsObject ( argumentsList )
  *
@@ -1334,5 +1376,212 @@ export function CreateMappedArgumentsObject($: VM, func: Func, formals: Node[],
   // 20. Perform ! DefinePropertyOrThrow(obj, @@iterator, PropertyDescriptor { [[Value]]: %Array.prototype.values%, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
   // 21. Perform ! DefinePropertyOrThrow(obj, "callee", PropertyDescriptor { [[Value]]: func, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
   // 22. Return obj.
-  throw new Error('NOT IMPLEMENTED');
+
+  return new OrdinaryObject($.getIntrinsic('%Object.prototype%'));
+
+  //throw new Error('NOT IMPLEMENTED');
 } 
+
+
+
+/**
+ * 13.3.6 Function Calls
+ *
+ * 13.3.6.1 Runtime Semantics: Evaluation
+ * 
+ * CallExpression : CoverCallExpressionAndAsyncArrowHead
+ * 1. Let expr be the CallMemberExpression that is covered by
+ *    CoverCallExpressionAndAsyncArrowHead.
+ * 2. Let memberExpr be the MemberExpression of expr.
+ * 3. Let arguments be the Arguments of expr.
+ * 4. Let ref be ? Evaluation of memberExpr.
+ * 5. Let func be ? GetValue(ref).
+ * 6. If ref is a Reference Record, IsPropertyReference(ref) is false,
+ *    and ref.[[ReferencedName]] is "eval", then
+ *     a. If SameValue(func, %eval%) is true, then
+ *         i. Let argList be ? ArgumentListEvaluation of arguments.
+ *         ii. If argList has no elements, return undefined.
+ *         iii. Let evalArg be the first element of argList.
+ *         iv. If the source text matched by this CallExpression is
+ *             strict mode code, let strictCaller be true. Otherwise let
+ *             strictCaller be false.
+ *         v. Return ? PerformEval(evalArg, strictCaller, true).
+ * 7. Let thisCall be this CallExpression.
+ * 8. Let tailCall be IsInTailPosition(thisCall).
+ * 9. Return ? EvaluateCall(func, ref, arguments, tailCall).
+ *
+ * A CallExpression evaluation that executes step 6.a.v is a direct eval.
+ * 
+ * CallExpression : CallExpression Arguments
+ * 1. Let ref be ? Evaluation of CallExpression.
+ * 2. Let func be ? GetValue(ref).
+ * 3. Let thisCall be this CallExpression.
+ * 4. Let tailCall be IsInTailPosition(thisCall).
+ * 5. Return ? EvaluateCall(func, ref, Arguments, tailCall).
+ */
+export function* Evaluation_CallExpression(
+  $: VM,
+  node: ESTree.CallExpression,
+): EvalGen<CR<Val>> {
+
+  // TODO - handle the async case above
+
+  const ref = yield* $.Evaluation(node.callee);
+  if (IsAbrupt(ref)) return ref;
+  Assert(!EMPTY.is(ref)); // ??? does this break stuff?
+  const func = GetValue($, ref);
+  if (IsAbrupt(func)) return func;
+
+  // if (ref instanceof ReferenceRecord)  && !IsPropertyReference(ref)
+  //   && ref.ReferencedName === 'eval') {
+  // const thisCall = n;
+  const tailCall = false; // IsInTailPosition(thisCall);
+  return yield* EvaluateCall($, func, ref, node.arguments, tailCall);
+}
+
+/**
+ * 13.3.6.2 EvaluateCall ( func, ref, arguments, tailPosition )
+ *
+ * The abstract operation EvaluateCall takes arguments func (an
+ * ECMAScript language value), ref (an ECMAScript language value or a
+ * Reference Record), arguments (a Parse Node), and tailPosition (a
+ * Boolean) and returns either a normal completion containing an
+ * ECMAScript language value or an abrupt completion. It performs the
+ * following steps when called:
+ * 
+ * 1. If ref is a Reference Record, then
+ *     a. If IsPropertyReference(ref) is true, then
+ *         i. Let thisValue be GetThisValue(ref).
+ *     b. Else,
+ *         i. Let refEnv be ref.[[Base]].
+ *         ii. Assert: refEnv is an Environment Record.
+ *         iii. Let thisValue be refEnv.WithBaseObject().
+ * 2. Else,
+ *     a. Let thisValue be undefined.
+ * 3. Let argList be ? ArgumentListEvaluation of arguments.
+ * 4. If func is not an Object, throw a TypeError exception.
+ * 5. If IsCallable(func) is false, throw a TypeError exception.
+ * 6. If tailPosition is true, perform PrepareForTailCall().
+ * 7. Return ? Call(func, thisValue, argList).
+ */
+export function* EvaluateCall(
+  $: VM,
+  func: Val,
+  ref: Val|ReferenceRecord,
+  // NOTE: "arguments" is not allowed for param names in strict mode
+  args: Array<ESTree.Expression|ESTree.SpreadElement>,
+  tailPosition: boolean,
+): EvalGen<CR<Val>> {
+  let thisValue: Val;
+  if (ref instanceof ReferenceRecord) {
+    if (IsPropertyReference(ref)) {
+      thisValue = GetThisValue($, ref);
+    } else {
+      const refEnv = ref.Base;
+      Assert(refEnv instanceof EnvironmentRecord);
+      thisValue = refEnv.WithBaseObject();
+    }
+  } else {
+    thisValue = undefined;
+  }
+  const argList = yield* ArgumentListEvaluation($, args);
+  if (IsAbrupt(argList)) return argList;
+  if (typeof func !== 'object') throw new TypeError('func is not an object');
+  if (!IsCallable(func)) throw new TypeError('func is not callable');
+  if (tailPosition) PrepareForTailCall($);
+  return yield* Call($, func, thisValue, argList);
+}
+
+/**
+ * 13.3.8.1 Runtime Semantics: ArgumentListEvaluation
+ * 
+ * The syntax-directed operation ArgumentListEvaluation takes no
+ * arguments and returns either a normal completion containing a List
+ * of ECMAScript language values or an abrupt completion. It is
+ * defined piecewise over the following productions:
+ * 
+ * Arguments : ( )
+ * 1. Return a new empty List.
+ *
+ * ArgumentList : AssignmentExpression
+ * 1. Let ref be ? Evaluation of AssignmentExpression.
+ * 2. Let arg be ? GetValue(ref).
+ * 3. Return « arg ».
+ *
+ * ArgumentList : ... AssignmentExpression
+ * 1. Let list be a new empty List.
+ * 2. Let spreadRef be ? Evaluation of AssignmentExpression.
+ * 3. Let spreadObj be ? GetValue(spreadRef).
+ * 4. Let iteratorRecord be ? GetIterator(spreadObj, sync).
+ * 5. Repeat,
+ *     a. Let next be ? IteratorStep(iteratorRecord).
+ *     b. If next is false, return list.
+ *     c. Let nextArg be ? IteratorValue(next).
+ *     d. Append nextArg to list.
+ *
+ * ArgumentList : ArgumentList , AssignmentExpression
+ * 1. Let precedingArgs be ? ArgumentListEvaluation of ArgumentList.
+ * 2. Let ref be ? Evaluation of AssignmentExpression.
+ * 3. Let arg be ? GetValue(ref).
+ * 4. Return the list-concatenation of precedingArgs and « arg ».
+ *
+ * ArgumentList : ArgumentList , ... AssignmentExpression
+ * 1. Let precedingArgs be ? ArgumentListEvaluation of ArgumentList.
+ * 2. Let spreadRef be ? Evaluation of AssignmentExpression.
+ * 3. Let iteratorRecord be ? GetIterator(? GetValue(spreadRef), sync).
+ * 4. Repeat,
+ *     a. Let next be ? IteratorStep(iteratorRecord).
+ *     b. If next is false, return precedingArgs.
+ *     c. Let nextArg be ? IteratorValue(next).
+ *     d. Append nextArg to precedingArgs.
+ *
+ * TODO - template literal is not handled here
+ *
+ * TemplateLiteral : NoSubstitutionTemplate
+ * 1. Let templateLiteral be this TemplateLiteral.
+ * 2. Let siteObj be GetTemplateObject(templateLiteral).
+ * 3. Return « siteObj ».
+ *
+ * TemplateLiteral : SubstitutionTemplate
+ * 1. Let templateLiteral be this TemplateLiteral.
+ * 2. Let siteObj be GetTemplateObject(templateLiteral).
+ * 3. Let remaining be ? ArgumentListEvaluation of SubstitutionTemplate.
+ * 4. Return the list-concatenation of « siteObj » and remaining.
+ *
+ * SubstitutionTemplate : TemplateHead Expression TemplateSpans
+ * 1. Let firstSubRef be ? Evaluation of Expression.
+ * 2. Let firstSub be ? GetValue(firstSubRef).
+ * 3. Let restSub be ? SubstitutionEvaluation of TemplateSpans.
+ * 4. Assert: restSub is a possibly empty List.
+ * 5. Return the list-concatenation of « firstSub » and restSub.
+ */
+function* ArgumentListEvaluation(
+  $: VM,
+  argList: Array<ESTree.Expression|ESTree.SpreadElement>,
+): EvalGen<CR<Val[]>> {
+  const list: Val[] = [];
+  for (const arg of argList) {
+    if (arg.type === 'SpreadElement') {
+      // TODO - we haven't implemented iterators yet
+      const spreadObj = yield* $.evaluateValue(arg.argument);
+      if (IsAbrupt(spreadObj)) return spreadObj;
+      const iteratorRecord = GetIterator($, spreadObj, false);
+      if (IsAbrupt(iteratorRecord)) return iteratorRecord;
+      while (true) {
+        const next = IteratorStep($, iteratorRecord);
+        if (IsAbrupt(next)) return next;
+        if (!next) break;
+        const nextArg = IteratorValue($, next);
+        if (IsAbrupt(nextArg)) return nextArg;
+        list.push(nextArg);
+      }
+    } else {
+      const ref = yield* $.evaluateValue(arg);
+      if (IsAbrupt(ref)) return ref;
+      const argVal = GetValue($, ref);
+      if (IsAbrupt(argVal)) return argVal;
+      list.push(argVal);
+    }
+  }
+  return list;
+}
