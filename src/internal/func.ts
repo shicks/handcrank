@@ -4,7 +4,7 @@ import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, 
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
 import { PropertyDescriptor, PropertyRecord, propC, propWC } from './property_descriptor';
 import { Assert } from './assert';
-import { Call, DefinePropertyOrThrow } from './abstract_object';
+import { Call, Construct, DefinePropertyOrThrow } from './abstract_object';
 import * as ESTree from 'estree';
 import { RealmRecord } from './realm_record';
 import { ScriptRecord } from './script_record';
@@ -15,10 +15,10 @@ import { BoundNames, IsConstantDeclaration, IsStrictMode, LexicallyDeclaredNames
 import { ContainsExpression, ExpectedArgumentCount, GetSourceText, IsSimpleParameterList } from './static/functions';
 import { Obj, OrdinaryObject, OrdinaryObjectCreate } from './obj';
 import { PropertyKey, Val } from './val';
-import { ParentNode, Source } from './tree';
+import { Source } from './tree';
 import { ToObject } from './abstract_conversion';
 import { GetThisValue, GetValue, InitializeReferencedBinding, IsPropertyReference, PutValue, ReferenceRecord } from './reference_record';
-import { IsCallable } from './abstract_compare';
+import { IsCallable, IsConstructor } from './abstract_compare';
 import { memoize } from './slots';
 
 type Node = ESTree.Node;
@@ -548,8 +548,11 @@ export function InstantiateOrdinaryFunctionExpression(
 
 function sourceText(node: Node): string {
   let n = node as Node&ParentNode;
-  if (n.type === 'FunctionExpression' && n.parent?.type === 'Property') {
-    n = n.parent;
+
+  // TODO - fix this!
+
+  if (n.type === 'FunctionExpression' && (n as any).parent?.type === 'Property') {
+    n = (n as any).parent;
   }
   const source = n.loc?.source as unknown as Source;
   if (!source) return '';
@@ -1474,6 +1477,51 @@ export function CreateMappedArgumentsObject($: VM, func: Func, formals: Node[],
 
 
 /**
+ * 13.3.5 The new Operator
+ *
+ * 13.3.5.1 Runtime Semantics: Evaluation
+ *
+ * NewExpression : new NewExpression
+ * 1. Return ? EvaluateNew(NewExpression, empty).
+ *
+ * MemberExpression : new MemberExpression Arguments
+ * 1. Return ? EvaluateNew(MemberExpression, Arguments).
+ *
+ * 13.3.5.1.1 EvaluateNew ( constructExpr, arguments )
+ *
+ * The abstract operation EvaluateNew takes arguments constructExpr (a
+ * NewExpression Parse Node or a MemberExpression Parse Node) and
+ * arguments (empty or an Arguments Parse Node) and returns either a
+ * normal completion containing an ECMAScript language value or an
+ * abrupt completion. It performs the following steps when called:
+ * 
+ * 1. Let ref be ? Evaluation of constructExpr.
+ * 2. Let constructor be ? GetValue(ref).
+ * 3. If arguments is empty, let argList be a new empty List.
+ * 4. Else,
+ *     a. Let argList be ? ArgumentListEvaluation of arguments.
+ * 5. If IsConstructor(constructor) is false, throw a TypeError exception.
+ * 6. Return ? Construct(constructor, argList).
+ */
+export function* Evaluation_NewExpression(
+  $: VM,
+  node: ESTree.NewExpression,
+): ECR<Obj> {
+  const ref = yield* $.Evaluation(node.callee);
+  if (IsAbrupt(ref)) return ref;
+  Assert(!EMPTY.is(ref));
+  const constructor = yield* GetValue($, ref);
+  if (IsAbrupt(constructor)) return constructor;
+  const argList = yield* ArgumentListEvaluation($, node.arguments);
+  if (IsAbrupt(argList)) return argList;
+  if (!IsConstructor(constructor)) {
+    return Throw('TypeError', `${DebugString(ref)} is not a constructor`);
+  }
+  return yield* Construct($, constructor as Func, argList);
+}
+
+
+/**
  * 13.3.6 Function Calls
  *
  * 13.3.6.1 Runtime Semantics: Evaluation
@@ -1511,7 +1559,7 @@ export function CreateMappedArgumentsObject($: VM, func: Func, formals: Node[],
 export function* Evaluation_CallExpression(
   $: VM,
   node: ESTree.CallExpression,
-): EvalGen<CR<Val>> {
+): ECR<Val> {
 
   // TODO - handle the async case above
 

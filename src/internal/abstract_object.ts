@@ -13,7 +13,7 @@ import { Obj } from "./obj";
 import { PropertyDescriptor, propWEC } from "./property_descriptor";
 import { RealmRecord } from "./realm_record";
 import { PropertyKey, Val } from "./val";
-import { DebugString, ECR, EvalGen, VM, just } from "./vm";
+import { DebugString, ECR, VM, just } from "./vm";
 
 declare const ToObject: any;
 declare const ValidateNonRevokedProxy: any;
@@ -300,7 +300,7 @@ export function HasOwnProperty($: VM, O: Obj, P: PropertyKey): CR<boolean> {
  * 2. If IsCallable(F) is false, throw a TypeError exception.
  * 3. Return ? F.[[Call]](V, argumentsList).
  */
-export function Call($: VM, F: Val, V: Val, argumentsList: Val[] = []): EvalGen<CR<Val>> {
+export function Call($: VM, F: Val, V: Val, argumentsList: Val[] = []): ECR<Val> {
   if (!IsCallable(F)) {
     return just(Throw('TypeError', `${DebugString(F)} is not a function`));
   }
@@ -333,7 +333,7 @@ export function Construct(
   F: Func,
   argumentsList: Val[] = [],
   newTarget: Func = F,
-): EvalGen<CR<Val>> {
+): ECR<Obj> {
   return F.Construct!($, argumentsList, newTarget);
 }
 

@@ -8,7 +8,7 @@ import { StrictNode } from '../tree';
 import { ToPropertyKey } from '../abstract_conversion';
 import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from '../statements';
 import { Evaluation_AssignmentExpression } from '../assignment';
-import { Evaluation_CallExpression } from '../func';
+import { Evaluation_CallExpression, Evaluation_NewExpression } from '../func';
 
 // type Plugin<ExtraIntrinsics = never> = {[K in Intrinsics|Globals]: Intrinsics|($: VM) => Generator<Intrinsic, K extends `%${string}%` ? Obj : Val|PropertyDescriptor, Obj>} & {Evaluate?(on: fn): ...};
 // export const basic: Plugin = {
@@ -114,6 +114,7 @@ export const basic: Plugin = {
         return new Abrupt(CompletionType.Return, exprValue, EMPTY);
       });
       on('CallExpression', (n) => Evaluation_CallExpression($, n));
+      on('NewExpression', (n) => Evaluation_NewExpression($, n));
     },
   },
 };
