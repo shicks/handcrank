@@ -1,57 +1,27 @@
 import { IsExtensible, IsPropertyKey, SameValue } from './abstract_compare';
-import { CreateDataProperty } from './abstract_object';
+import { Call, CreateDataProperty, Get, GetFunctionRealm } from './abstract_object';
 import { Assert } from './assert';
 import { CR, IsAbrupt } from './completion_record';
-import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor } from './property_descriptor';
-import { Slots, hasAnyFields } from './record';
+import type { Func } from './func';
+import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor, propWEC } from './property_descriptor';
+import { Slots, hasAnyFields, memoize } from './slots';
 import { PropertyKey, Val } from './val';
-import { VM } from './vm';
-import { EnvironmentRecord } from './environment_record';
-import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
-import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, STRICT } from './enums';
-import { RealmRecord } from './realm_record';
-import { ScriptRecord } from './script_record';
-import { ModuleRecord } from './module_record';
-import * as ESTree from 'estree';
+import { ECR, VM } from './vm';
 
-type ClassFieldDefinitionRecord = any;
-type PrivateElement = any;
-declare const Call: any;
+declare global {
+  /**
+   * Global interface for defining slots on Obj.  Should be
+   * augmented by other modules as needed.  All properties
+   * should be optional and mutable.
+   */
+  interface ObjectSlots {
+    // Standard slots for all objects
+    Prototype?: Obj|null;
+    Extensible?: boolean;
+  }
+}
 
-export abstract class Obj extends Slots(slot => ({
-  // Standard slots for all objects
-  Prototype: slot<Obj|null>,
-  Extensible: slot<boolean>,
-
-  // Slots for function objects
-  Environment: slot<EnvironmentRecord>,
-  PrivateEnvironment: slot<PrivateEnvironmentRecord|null>,
-  FormalParameters: slot<ESTree.Pattern[]>,
-  ECMAScriptCode: slot<ESTree.BlockStatement|ESTree.Expression>,
-  ConstructorKind: slot<BASE|DERIVED>,
-  Realm: slot<RealmRecord>,
-  ScriptOrModule: slot<ScriptRecord|ModuleRecord>,
-  ThisMode: slot<LEXICAL|STRICT|GLOBAL>,
-  Strict: slot<boolean>,
-  HomeObject: slot<Obj|undefined>, // |undefined?
-  SourceText: slot<string>,
-  Fields: slot<ClassFieldDefinitionRecord[]>, // TODO - Map?
-  PrivateMethods: slot<PrivateElement[]>, // TODO - Map?
-  ClassFieldInitializerName: slot<string|symbol|PrivateName|EMPTY>,
-  IsClassConstructor: slot<boolean>,
-
-  // Slot for builtin function object
-  InitialName: slot<string>,
-
-  // Slots for bound function exotic objects
-  BoundTargetFunction: slot<Obj>,
-  BoundThis: slot<Val>,
-  BoundArguments: slot<Val[]>,
-
-  // Slot for exotic mapped arguments object
-  ParameterMap: slot<Obj|undefined>,
-
-})) {
+export abstract class Obj extends Slots<ObjectSlots>() {
 
   // Implementation details not in spec
   abstract OwnProps: Map<PropertyKey, PropertyDescriptor>;
@@ -64,15 +34,10 @@ export abstract class Obj extends Slots(slot => ({
   abstract GetOwnProperty(_$: VM, P: PropertyKey): CR<PropertyDescriptor|undefined>;
   abstract DefineOwnProperty($: VM, P: PropertyKey, Desc: PropertyDescriptor): CR<boolean>;
   abstract HasProperty($: VM, P: PropertyKey): CR<boolean>;
-  abstract Get($: VM, P: PropertyKey, Receiver: Val): CR<Val>;
-  abstract Set($: VM, P: PropertyKey, V: Val, Receiver: Val): CR<boolean>;
+  abstract Get($: VM, P: PropertyKey, Receiver: Val): ECR<Val>;
+  abstract Set($: VM, P: PropertyKey, V: Val, Receiver: Val): ECR<boolean>;
   abstract Delete($: VM, P: PropertyKey): CR<boolean>;
   abstract OwnPropertyKeys(_$: VM): CR<PropertyKey[]>;
-
-  // NOTE: we do not define Func methods here, but instead use
-  // a separate subclass.  This makes it a little more awkward
-  // to use slot existence for branding, but instance should
-  // be fine.
 }
 
 /**
@@ -116,10 +81,27 @@ export abstract class Obj extends Slots(slot => ({
  * this file have no value imports to avoid cycles, since it must
  * always be imported BEFORE any concrete `Obj` subclasses.
  */
-export class OrdinaryObject extends Obj {
+export type OrdinaryObject = InstanceType<ReturnType<typeof OrdinaryObject>>;
+export const OrdinaryObject = memoize(() => class OrdinaryObject extends Obj {
   override OwnProps = new Map<PropertyKey, PropertyDescriptor>();
-  override Extensible = true;
-  override Prototype: Obj|null = null;
+
+  declare Extensible: boolean;
+  declare Prototype: Obj|null;
+
+  constructor(
+    slots: ObjectSlots = {},
+    props: Record<PropertyKey, PropertyDescriptor> = {},
+  ) {
+    super();
+    for (const [k, v] of Object.entries(slots)) {
+      (this as any)[k] = v;
+    }
+    for (const [k, v] of Object.entries(props)) {
+      this.OwnProps.set(k as PropertyKey, v);
+    }
+    this.Extensible ??= true;
+    this.Prototype ??= null;
+  }
 
   /**
    * 10.1.1 [[GetPrototypeOf]] ( )
@@ -229,7 +211,7 @@ export class OrdinaryObject extends Obj {
    *
    * 1. Return ? OrdinaryGet(O, P, Receiver).
    */
-  Get($: VM, P: PropertyKey, Receiver: Val): CR<Val> {
+  Get($: VM, P: PropertyKey, Receiver: Val): ECR<Val> {
     return OrdinaryGet($, this, P, Receiver);
   };
 
@@ -244,7 +226,7 @@ export class OrdinaryObject extends Obj {
    *
    * 1. Return ? OrdinarySet(O, P, V, Receiver).
    */
-  Set($: VM, P: PropertyKey, V: Val, Receiver: Val): CR<boolean> {
+  Set($: VM, P: PropertyKey, V: Val, Receiver: Val): ECR<boolean> {
     return OrdinarySet($, this, P, V, Receiver);
   }
 
@@ -275,7 +257,8 @@ export class OrdinaryObject extends Obj {
   OwnPropertyKeys(_$: VM): CR<PropertyKey[]> {
     return OrdinaryOwnPropertyKeys(this);
   }
-}
+});
+
 
 /**
  * 10.1.1.1 OrdinaryGetPrototypeOf ( O )
@@ -351,8 +334,8 @@ export function OrdinarySetPrototypeOf(O: Obj, V: Obj|null): boolean {
  *
  * 1. Return O.[[Extensible]].
  */
-export function OrdinaryIsExtensible(O: Obj): boolean {
-  return (O as OrdinaryObject).Extensible;
+export function OrdinaryIsExtensible(O: OrdinaryObject): boolean {
+  return O.Extensible;
 }
 
 /**
@@ -365,7 +348,7 @@ export function OrdinaryIsExtensible(O: Obj): boolean {
  * 1. Set O.[[Extensible]] to false.
  * 2. Return true.
  */
-export function OrdinaryPreventExtensions(O:Obj): true {
+export function OrdinaryPreventExtensions(O: OrdinaryObject): true {
   O.Extensible = false;
   return true;
 }
@@ -394,7 +377,7 @@ export function OrdinaryPreventExtensions(O:Obj): true {
 export function OrdinaryGetOwnProperty(O: Obj, P: PropertyKey):
     PropertyDescriptor|undefined {
   const X = O.OwnProps.get(P);
-  return X && new PropertyDescriptor(O.OwnProps.get(P));
+  return X && {...O.OwnProps.get(P)};
 }
 
 /**
@@ -469,12 +452,12 @@ export function ValidateAndApplyPropertyDescriptor(
       //        [[Configurable]] attributes are set to the value of the
       //        corresponding field in Desc if Desc has that field, or to
       //        the attribute's default value otherwise.
-      O.OwnProps.set(P, new PropertyDescriptor({
+      O.OwnProps.set(P, {
         Get: Desc.Get,
         Set: Desc.Set,
         Enumerable: Desc.Enumerable ?? false,
         Configurable: Desc.Configurable ?? false,
-      }));
+      });
     } 
     //   d. Else,
     else {
@@ -483,12 +466,12 @@ export function ValidateAndApplyPropertyDescriptor(
       //        [[Configurable]] attributes are set to the value of the
       //        corresponding field in Desc if Desc has that field, or to
       //        the attribute's default value otherwise.
-      O.OwnProps.set(P, new PropertyDescriptor({
+      O.OwnProps.set(P, {
         Value: Desc.Value,
         Writable: Desc.Writable ?? false,
         Enumerable: Desc.Enumerable ?? false,
         Configurable: Desc.Configurable ?? false,
-      }));
+      });
     }
     //   e. Return true.
     return true;
@@ -558,12 +541,12 @@ export function ValidateAndApplyPropertyDescriptor(
       //          set to the value of the corresponding field in Desc if Desc
       //          has that field, or to the attribute's default value
       //          otherwise.
-      O.OwnProps.set(P, new PropertyDescriptor({
+      O.OwnProps.set(P, {
         Configurable: configurable,
         Enumerable: enumerable,
         Get: Desc.Get,
         Set: Desc.Set,
-      }));
+      });
       // (7. Return true.)
       return true;
     }
@@ -585,12 +568,12 @@ export function ValidateAndApplyPropertyDescriptor(
       //          attributes are set to the value of the corresponding field
       //          in Desc if Desc has that field, or to the attribute's
       //          default value otherwise.
-      O.OwnProps.set(P, new PropertyDescriptor({
+      O.OwnProps.set(P, {
         Configurable: configurable,
         Enumerable: enumerable,
         Value: Desc.Value,
         Writable: Desc.Writable,
-      }));
+      });
       // (7. Return true.)
       return true;
     }
@@ -598,7 +581,7 @@ export function ValidateAndApplyPropertyDescriptor(
     //       i. For each field of Desc, set the corresponding attribute
     //           of the property named P of object O to the value of the
     //           field.
-    const p = new PropertyDescriptor(current);
+    const p = {...current};
     if (HasValueField(Desc)) p.Value = Desc.Value;
     if (Desc.Writable != undefined) p.Writable = Desc.Writable;
     if (Desc.Enumerable != undefined) p.Enumerable = Desc.Enumerable;
@@ -656,20 +639,20 @@ export function OrdinaryHasProperty($: VM, O: Obj, P: PropertyKey): CR<boolean> 
  * 6. If getter is undefined, return undefined.
  * 7. Return ? Call(getter, Receiver).
  */
-export function OrdinaryGet($: VM, O: Obj, P: PropertyKey, Receiver: Val): CR<Val> {
+export function* OrdinaryGet($: VM, O: Obj, P: PropertyKey, Receiver: Val): ECR<Val> {
   const desc = O.GetOwnProperty($, P);
   if (IsAbrupt(desc)) return desc;
   if (desc == undefined) {
     const parent = O.GetPrototypeOf($);
     if (IsAbrupt(parent)) return parent;
     if (parent == null) return undefined;
-    return parent.Get($, P, Receiver);
+    return yield* parent.Get($, P, Receiver);
   }
   if (IsDataDescriptor(desc)) return desc.Value;
   Assert(IsAccessorDescriptor(desc));
   const getter = desc.Get;
   if (getter == undefined) return undefined;
-  return Call($, getter, Receiver);
+  return yield* Call($, getter, Receiver);
 }
 
 /**
@@ -684,10 +667,16 @@ export function OrdinaryGet($: VM, O: Obj, P: PropertyKey, Receiver: Val): CR<Va
  * 1. Let ownDesc be ? O.[[GetOwnProperty]](P).
  * 2. Return ? OrdinarySetWithOwnDescriptor(O, P, V, Receiver, ownDesc).
  */
-export function OrdinarySet($: VM, O: Obj, P: PropertyKey, V: Val, Receiver: Val): CR<boolean> {
+export function* OrdinarySet(
+  $: VM,
+  O: Obj,
+  P: PropertyKey,
+  V: Val,
+  Receiver: Val,
+): ECR<boolean> {
   const ownDesc = O.GetOwnProperty($, P);
   if (IsAbrupt(ownDesc)) return ownDesc;
-  return OrdinarySetWithOwnDescriptor($, O, P, V, Receiver, ownDesc);
+  return yield* OrdinarySetWithOwnDescriptor($, O, P, V, Receiver, ownDesc);
 }
 
 /**
@@ -700,14 +689,14 @@ export function OrdinarySet($: VM, O: Obj, P: PropertyKey, V: Val, Receiver: Val
  * completion containing a Boolean or a throw completion. It performs
  * the following steps when called:
  */
-export function OrdinarySetWithOwnDescriptor(
+export function* OrdinarySetWithOwnDescriptor(
   $: VM,
   O: Obj,
   P: PropertyKey,
   V: Val,
   Receiver: Val,
   ownDesc: PropertyDescriptor|undefined,
-): CR<boolean> {
+): ECR<boolean> {
   // 1. If ownDesc is undefined, then
   if (ownDesc == undefined) {
     //   a. Let parent be ? O.[[GetPrototypeOf]]().
@@ -715,17 +704,12 @@ export function OrdinarySetWithOwnDescriptor(
     if (IsAbrupt(parent)) return parent;
     //   b. If parent is not null, then
     //       i. Return ? parent.[[Set]](P, V, Receiver).
-    if (parent != null) return parent.Set($, P, V, Receiver);
+    if (parent != null) return yield* parent.Set($, P, V, Receiver);
     //   c. Else,
     //       i. Set ownDesc to the PropertyDescriptor { [[Value]]:
     //          undefined, [[Writable]]: true, [[Enumerable]]: true,
     //          [[Configurable]]: true }.
-    ownDesc = new PropertyDescriptor({
-      Value: undefined,
-      Writable: true,
-      Enumerable: true,
-      Configurable: true,
-    });
+    ownDesc = propWEC(undefined);
   }
   // 2. If IsDataDescriptor(ownDesc) is true, then
   if (IsDataDescriptor(ownDesc)) {
@@ -744,7 +728,7 @@ export function OrdinarySetWithOwnDescriptor(
       //     ii. If existingDescriptor.[[Writable]] is false, return false.
       if (!existingDescriptor.Writable) return false;
       //     iii. Let valueDesc be the PropertyDescriptor { [[Value]]: V }.
-      const valueDesc = new PropertyDescriptor({Value: V});
+      const valueDesc = {Value: V};
       //     iv. Return ? Receiver.[[DefineOwnProperty]](P, valueDesc).
       return Receiver.DefineOwnProperty($, P, valueDesc);
     }
@@ -761,7 +745,7 @@ export function OrdinarySetWithOwnDescriptor(
   // 5. If setter is undefined, return false.
   if (!setter) return false;
   // 6. Perform ? Call(setter, Receiver, « V »).
-  const result = Call($, setter, Receiver, [V]);
+  const result = yield* Call($, setter, Receiver, [V]);
   if (IsAbrupt(result)) return result;
   // 7. Return true.
   return true;
@@ -859,30 +843,95 @@ export function OrdinaryOwnPropertyKeys(O: Obj): PropertyKey[] {
  * the result non-ordinary. Operations that create exotic objects
  * invoke MakeBasicObject directly.
  */
-export function OrdinaryObjectCreate(proto: Obj|null,
-                                     additionalInternalSlotsList?: Array<keyof Obj>) {
+export function OrdinaryObjectCreate(
+  slots?: ObjectSlots,
+  props?: Record<PropertyKey, PropertyDescriptor>,
+): OrdinaryObject {
   //const internalSlotsList = ['Prototype', 'Extensible', ...(additionalInternalSlotsList || [])];
   // const O = MakeBasicObject(internalSlotsList);
   // O.Prototype = proto;
   // return O;
   //return new OrdinaryObject(proto);
-  const O = new OrdinaryObject();
-  O.Prototype = proto;
-  for (const slot of additionalInternalSlotsList || []) {
-    (O as any)[slot] = undefined;
-  }
-  return O;
+  return new (OrdinaryObject())(slots, props);
 }
 
-/*
-10.1.13 OrdinaryCreateFromConstructor ( constructor, intrinsicDefaultProto [ , internalSlotsList ] )
+/**
+ * 10.1.13 OrdinaryCreateFromConstructor ( constructor,
+ *         intrinsicDefaultProto [ , internalSlotsList ] )
+ * 
+ * The abstract operation OrdinaryCreateFromConstructor takes
+ * arguments constructor (a constructor) and intrinsicDefaultProto (a
+ * String) and optional argument internalSlotsList (a List of names of
+ * internal slots) and returns either a normal completion containing
+ * an Object or a throw completion. It creates an ordinary object
+ * whose [[Prototype]] value is retrieved from a constructor\'s
+ * "prototype" property, if it exists. Otherwise the intrinsic named
+ * by intrinsicDefaultProto is used for
+ * [[Prototype]]. internalSlotsList contains the names of additional
+ * internal slots that must be defined as part of the object. If
+ * internalSlotsList is not provided, a new empty List is used. It
+ * performs the following steps when called:
+ * 
+ * 1. Assert: intrinsicDefaultProto is this specification\'s name of
+ *    an intrinsic object. The corresponding object must be an intrinsic
+ *    that is intended to be used as the [[Prototype]] value of an
+ *    object.
+ * 2. Let proto be ? GetPrototypeFromConstructor(constructor, intrinsicDefaultProto).
+ * 3. If internalSlotsList is present, let slotsList be internalSlotsList.
+ * 4. Else, let slotsList be a new empty List.
+ * 5. Return OrdinaryObjectCreate(proto, slotsList).
+ */
+export function* OrdinaryCreateFromConstructor(
+  $: VM,
+  constructor: Func,
+  intrinsicDefaultProto: string,
+  slots?: ObjectSlots,
+): ECR<Obj> {
+  const proto = yield* GetPrototypeFromConstructor($, constructor, intrinsicDefaultProto);
+  if (IsAbrupt(proto)) return proto;
+  return OrdinaryObjectCreate({...slots, Prototype: proto});
+}
 
-The abstract operation OrdinaryCreateFromConstructor takes arguments constructor (a constructor) and intrinsicDefaultProto (a String) and optional argument internalSlotsList (a List of names of internal slots) and returns either a normal completion containing an Object or a throw completion. It creates an ordinary object whose [[Prototype]] value is retrieved from a constructor\'s "prototype" property, if it exists. Otherwise the intrinsic named by intrinsicDefaultProto is used for [[Prototype]]. internalSlotsList contains the names of additional internal slots that must be defined as part of the object. If internalSlotsList is not provided, a new empty List is used. It performs the following steps when called:
-
-1. 1. Assert: intrinsicDefaultProto is this specification\'s name of an intrinsic object. The corresponding object must be an intrinsic that is intended to be used as the [[Prototype]] value of an object.
-2. 2. Let proto be ? GetPrototypeFromConstructor(constructor, intrinsicDefaultProto).
-3. 3. If internalSlotsList is present, let slotsList be internalSlotsList.
-4. 4. Else, let slotsList be a new empty List.
-5. 5. Return OrdinaryObjectCreate(proto, slotsList).
+/**
+ * 10.1.14 GetPrototypeFromConstructor ( constructor, intrinsicDefaultProto )
+ *
+ * The abstract operation GetPrototypeFromConstructor takes arguments
+ * constructor (a function object) and intrinsicDefaultProto (a
+ * String) and returns either a normal completion containing an Object
+ * or a throw completion. It determines the [[Prototype]] value that
+ * should be used to create an object corresponding to a specific
+ * constructor. The value is retrieved from the constructor's
+ * "prototype" property, if it exists. Otherwise the intrinsic named
+ * by intrinsicDefaultProto is used for [[Prototype]]. It performs the
+ * following steps when called:
+ * 
+ * 1. Assert: intrinsicDefaultProto is this specification's name of an
+ *    intrinsic object. The corresponding object must be an intrinsic
+ *    that is intended to be used as the [[Prototype]] value of an
+ *    object.
+ * 2. Let proto be ? Get(constructor, "prototype").
+ * 3. If proto is not an Object, then
+ *     a. Let realm be ? GetFunctionRealm(constructor).
+ *     b. Set proto to realm's intrinsic object named intrinsicDefaultProto.
+ * 4. Return proto.
+ * 
+ * NOTE: If constructor does not supply a [[Prototype]] value, the
+ * default value that is used is obtained from the realm of the
+ * constructor function rather than from the running execution context.
+ */
+export function* GetPrototypeFromConstructor(
+  $: VM,
+  constructor: Func,
+  intrinsicDefaultProto: string,
+): ECR<Obj> {
+  const proto = yield* Get($, constructor, 'prototype');
+  if (IsAbrupt(proto)) return proto;
+  if (!(proto instanceof Obj)) {
+    const realm = GetFunctionRealm($, constructor);
+    if (IsAbrupt(realm)) return realm;
+    return realm.Intrinsics.get(intrinsicDefaultProto)!;
+  }
+  return proto;
+}
 
 /**/

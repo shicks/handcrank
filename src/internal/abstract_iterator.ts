@@ -48,15 +48,16 @@ export class IteratorRecord {
  *
  * NOTE: The list iterator object is never directly accessible to ECMAScript code.
  */
-export function CreateListIteratorRecord($: VM, list: Val[]): IteratorRecord {
+export function CreateListIteratorRecord(_$: VM, list: Val[]): IteratorRecord {
   function* gen() {
     for (const value of list) {
       yield value;
     }
     
   }
+  const [] = [gen];
   // TODO - CreateIteratorFromClosure ... etc
-  return new IteratorRecord(OrdinaryObjectCreate(null), null!, false);
+  return new IteratorRecord(OrdinaryObjectCreate(null!), null!, false);
 }
 
 

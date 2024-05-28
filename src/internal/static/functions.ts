@@ -507,3 +507,60 @@ export function GetSourceText(n: Node): string {
       NO_SOURCE;
 }
 const NO_SOURCE = '(no source)';
+
+
+/**
+ * 15.1.5 Static Semantics: ExpectedArgumentCount
+ *
+ * The syntax-directed operation ExpectedArgumentCount takes no
+ * arguments and returns an integer. It is defined piecewise over the
+ * following productions:
+ *
+ * FormalParameters :
+ *   [empty]
+ *   FunctionRestParameter
+ * 1. Return 0.
+ *
+ * FormalParameters : FormalParameterList , FunctionRestParameter
+ * 1. Return ExpectedArgumentCount of FormalParameterList.
+ *
+ * NOTE: The ExpectedArgumentCount of a FormalParameterList is the
+ * number of FormalParameters to the left of either the rest parameter
+ * or the first FormalParameter with an Initializer. A FormalParameter
+ * without an initializer is allowed after the first parameter with an
+ * initializer but such parameters are considered to be optional with
+ * undefined as their default value.
+ * 
+ * FormalParameterList : FormalParameter
+ * 1. If HasInitializer of FormalParameter is true, return 0.
+ * 2. Return 1.
+ *
+ * FormalParameterList : FormalParameterList , FormalParameter
+ * 1. Let count be ExpectedArgumentCount of FormalParameterList.
+ * 2. If HasInitializer of FormalParameterList is true or
+ *    HasInitializer of FormalParameter is true, return count.
+ * 3. Return count + 1.
+ *
+ * ArrowParameters : BindingIdentifier
+ * 1. Return 1.
+ *
+ * ArrowParameters : CoverParenthesizedExpressionAndArrowParameterList
+ * 1. Let formals be the ArrowFormalParameters that is covered by
+ *    CoverParenthesizedExpressionAndArrowParameterList.
+ * 2. Return ExpectedArgumentCount of formals.
+ *
+ * PropertySetParameterList : FormalParameter
+ * 1. If HasInitializer of FormalParameter is true, return 0.
+ * 2. Return 1.
+ *
+ * AsyncArrowBindingIdentifier : BindingIdentifier
+ * 1. Return 1.
+ */
+export function ExpectedArgumentCount(params: ESTree.Pattern[]): number {
+  let count = 0;
+  for (const n of params) {
+    if (n.type === 'AssignmentPattern' || n.type === 'RestElement') break;
+    count++;
+  }
+  return count;
+}

@@ -6,7 +6,7 @@ import { EMPTY, UNRESOLVABLE, UNUSED } from './enums';
 import { EnvironmentRecord } from './environment_record';
 import { GetGlobalObject } from './execution_context';
 import { PropertyKey, Val } from './val';
-import { VM } from './vm';
+import { ECR, VM } from './vm';
 
 declare type PrivateName = {__privatename__: true};
 declare const PrivateName: any;
@@ -144,7 +144,7 @@ interface PrivateReferenceRecord extends ReferenceRecord {
  * completion containing an ECMAScript language value or an abrupt
  * completion. It performs the following steps when called:
  */
-export function GetValue($: VM, V: ReferenceRecord|Val): CR<Val> {
+export function* GetValue($: VM, V: ReferenceRecord|Val): ECR<Val> {
   if (!(V instanceof ReferenceRecord)) return V;
   if (IsUnresolvableReference(V)) return Throw('ReferenceError');
   if (IsPropertyReference(V)) {
@@ -153,10 +153,10 @@ export function GetValue($: VM, V: ReferenceRecord|Val): CR<Val> {
     if (IsPrivateReference(V)) {
       return PrivateGet(baseObj, V.ReferencedName);
     }
-    return baseObj.Get($, V.ReferencedName as PropertyKey, GetThisValue($, V));
+    return yield* baseObj.Get($, V.ReferencedName as PropertyKey, GetThisValue($, V));
   }
   Assert(IsEnvironmentReference(V));
-  return V.Base.GetBindingValue($, V.ReferencedName, V.Strict);
+  return yield* V.Base.GetBindingValue($, V.ReferencedName, V.Strict);
 }
 
 /**

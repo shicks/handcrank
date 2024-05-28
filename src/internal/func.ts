@@ -1,26 +1,25 @@
-import { CR, CastNotAbrupt, IsAbrupt, ThrowCompletion } from './completion_record';
-import { EvalGen, VM } from './vm';
+import { CR, CastNotAbrupt, IsAbrupt, Throw, ThrowCompletion } from './completion_record';
+import { DebugString, ECR, EvalGen, VM } from './vm';
 import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, STRICT, UNINITIALIZED, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
-import { PropertyDescriptor } from './property_descriptor';
+import { PropertyDescriptor, PropertyRecord, propC, propWC } from './property_descriptor';
 import { Assert } from './assert';
 import { Call, DefinePropertyOrThrow } from './abstract_object';
 import * as ESTree from 'estree';
 import { RealmRecord } from './realm_record';
 import { ScriptRecord } from './script_record';
 import { ModuleRecord } from './module_record';
-import { CodeExecutionContext, ExecutionContext, ResolveBinding } from './execution_context';
+import { CodeExecutionContext, ExecutionContext, GetActiveScriptOrModule, ResolveBinding } from './execution_context';
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 import { BoundNames, IsConstantDeclaration, IsStrictMode, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
-import { ContainsExpression, GetSourceText, IsSimpleParameterList, IteratorBindingInitialization } from './static/functions';
-import { Obj, OrdinaryObject } from './obj';
+import { ContainsExpression, ExpectedArgumentCount, GetSourceText, IsSimpleParameterList } from './static/functions';
+import { Obj, OrdinaryObject, OrdinaryObjectCreate } from './obj';
 import { PropertyKey, Val } from './val';
-import { lazySuper } from './record';
 import { ParentNode, Source } from './tree';
-import { CreateListIteratorRecord } from './abstract_iterator';
 import { ToObject } from './abstract_conversion';
 import { GetThisValue, GetValue, InitializeReferencedBinding, IsPropertyReference, PutValue, ReferenceRecord } from './reference_record';
 import { IsCallable } from './abstract_compare';
+import { memoize } from './slots';
 
 type Node = ESTree.Node;
 
@@ -29,36 +28,169 @@ type ClassFieldDefinitionRecord = never;
 
 function MakeConstructor(...args: any[]): void {}
 function PrepareForTailCall(...args: any): void {}
-declare const CreateDataPropertyOrThrow: (...args: any[]) => Obj;
 declare const GetIterator: any;
 declare const IteratorStep: any;
 declare const IteratorValue: any;
 
+declare global {
+  interface ObjectSlots {
+    ////////////////////////////////////////////////////////////////
+    // Slots for function objects
+
+    /**
+     * [[Environment]], an Environment Record - The Environment Record
+     * that the function was closed over. Used as the outer environment
+     * when evaluating the code of the function.
+     */
+    Environment?: EnvironmentRecord;
+
+    /**
+     * [[PrivateEnvironment]], a PrivateEnvironment Record or null - The
+     * PrivateEnvironment Record for Private Names that the function was
+     * closed over. null if this function is not syntactically contained
+     * within a class. Used as the outer PrivateEnvironment for inner
+     * classes when evaluating the code of the function.
+     */
+    PrivateEnvironment?: PrivateEnvironmentRecord|null;
+
+    /**
+     * [[FormalParameters]], a Parse Node - The root parse node of the
+     * source text that defines the function's formal parameter list.
+     */
+    FormalParameters?: ESTree.Pattern[];
+
+    /**
+     * [[ECMAScriptCode]], a Parse Node - The root parse node of the
+     * source text that defines the function's body.
+     */
+    ECMAScriptCode?: ESTree.BlockStatement|ESTree.Expression;
+
+    /**
+     * [[ConstructorKind]], base or derived - Whether or not the function
+     * is a derived class constructor.
+     */
+    ConstructorKind?: BASE|DERIVED;
+
+    /**
+     * [[Realm]], a Realm Record - The realm in which the function was
+     * created and which provides any intrinsic objects that are accessed
+     * when evaluating the function.
+     */
+    Realm?: RealmRecord;
+
+    /**
+     * [[ScriptOrModule]], a Script Record or a Module Record - The script
+     * or module in which the function was created.
+     */
+    ScriptOrModule?: ScriptRecord|ModuleRecord;
+
+    /**
+     * [[ThisMode]], lexical, strict, or global - Defines how this
+     * references are interpreted within the formal parameters and code
+     * body of the function. lexical means that this refers to the this
+     * value of a lexically enclosing function. strict means that the this
+     * value is used exactly as provided by an invocation of the
+     * function. global means that a this value of undefined or null is
+     * interpreted as a reference to the global object, and any other this
+     * value is first passed to ToObject.
+     */
+    ThisMode?: LEXICAL|STRICT|GLOBAL;
+
+    /**
+     * [[Strict]], a Boolean - true if this is a strict function, false if
+     * this is a non-strict function.
+     */
+    Strict?: boolean;
+
+    /**
+     * [[HomeObject]], an Object - If the function uses super, this is the
+     * object whose [[GetPrototypeOf]] provides the object where super
+     * property lookups begin.
+     */
+    HomeObject?: Obj|undefined;
+
+    /**
+     * [[SourceText]], a sequence of Unicode code points - The source text
+     * that defines the function.
+     */
+    SourceText?: string;
+
+    /**
+     * [[Fields]], a List of ClassFieldDefinition Records - If the
+     * function is a class, this is a list of Records representing the
+     * non-static fields and corresponding initializers of the class.
+     */
+    Fields?: ClassFieldDefinitionRecord[]; // TODO - Map?
+
+    /**
+     * [[PrivateMethods]], a List of PrivateElements - If the function is
+     * a class, this is a list representing the non-static private methods
+     * and accessors of the class.
+     */
+    PrivateMethods?: PrivateElement[]; // TODO - Map?
+
+    /**
+     * [[ClassFieldInitializerName]], a String, a Symbol, a Private Name,
+     * or empty - If the function is created as the initializer of a class
+     * field, the name to use for NamedEvaluation of the field; empty
+     * otherwise.
+     */
+    ClassFieldInitializerName?: string|symbol|PrivateName|EMPTY;
+
+    /**
+     * [[IsClassConstructor]], a Boolean - Indicates whether the function
+     * is a class constructor. (If true, invoking the function's [[Call]]
+     * will immediately throw a TypeError exception.)
+     */
+    IsClassConstructor?: boolean;
+
+    ////////////////////////////////////////////////////////////////
+    // Slot for builtin function object
+
+    InitialName?: string;
+
+    ////////////////////////////////////////////////////////////////
+    // Slot for bound function exotic objects (10.4.1)
+
+    /**
+     * [[BoundTargetFunction]], a callable Object - The wrapped
+     * function object.
+     */
+    BoundTargetFunction?: Func;
+
+    /**
+     * [[BoundThis]], an ECMAScript language value - The value that is
+     * always passed as the this value when calling the wrapped function.
+     */
+    BoundThis?: Val;
+
+    /**
+     * [[BoundArguments]], a List of ECMAScript language values - A list
+     * of values whose elements are used as the first arguments to any
+     * call to the wrapped function.
+     */
+    BoundArguments?: Val[];
+  }
+
+  // // Slots for bound function exotic objects
+  // BoundTargetFunction: slot<Obj>,
+  // BoundThis: slot<Val>,
+  // BoundArguments: slot<Val[]>,
+
+  // // Slot for exotic mapped arguments object
+  // ParameterMap: slot<Obj|undefined>,
+}
+
 // New interface with various required properties
 export interface Func extends Obj {
-  // Environment: EnvironmentRecord;
-  PrivateEnvironment: PrivateEnvironmentRecord|null;
-  // FormalParameters: ESTree.Pattern[];
-  // ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression;
-  // ConstructorKind: BASE|DERIVED;
-  // Realm: RealmRecord;
-  // ScriptOrModule: ScriptRecord|ModuleRecord;
-  // ThisMode: LEXICAL|STRICT|GLOBAL;
-  // Strict: boolean;
-  // HomeObject: Obj|undefined;
-  // SourceText: string;
-  // Fields: ClassFieldDefinitionRecord[]; // TODO - Map?
-  // PrivateMethods: PrivateElement[]; // TODO - Map?
-  // ClassFieldInitializerName: string|symbol|PrivateName|EMPTY;
-  // IsClassConstructor: boolean;
 
-  // (from OrdinaryObjectCreate)
   Prototype: Obj;
   Extensible: boolean;
   OwnProps: Map<PropertyKey, PropertyDescriptor>;
+  Realm: RealmRecord;
 
-  Call?($: VM, thisArgument: Val, argumentsList: Val[]): EvalGen<CR<Val>>;
-  Construct?($: VM, argumentsList: Val[], newTarget: Obj): EvalGen<CR<Obj>>;
+  Call?(this: Func, $: VM, thisArgument: Val, argumentsList: Val[]): EvalGen<CR<Val>>;
+  Construct?(this: Func, $: VM, argumentsList: Val[], newTarget: Obj): EvalGen<CR<Obj>>;
 }
 
 export function IsFunc(arg: unknown): arg is Func {
@@ -67,140 +199,120 @@ export function IsFunc(arg: unknown): arg is Func {
       typeof (arg as Func).Construct === 'function');
 }
 
-// TODO - maybe remove this?
-export function Func() { throw new Error('do not call'); }
-Object.defineProperty(Func, Symbol.hasInstance, {value: IsFunc});
+/**
+ * 10.2.3 OrdinaryFunctionCreate (
+ *           functionPrototype, sourceText, ParameterList, Body,
+ *           thisMode, env, privateEnv )
+ *
+ * The abstract operation OrdinaryFunctionCreate takes arguments
+ * functionPrototype (an Object), sourceText (a sequence of Unicode
+ * code points), ParameterList (a Parse Node), Body (a Parse Node),
+ * thisMode (lexical-this or non-lexical-this), env (an Environment
+ * Record), and privateEnv (a PrivateEnvironment Record or null) and
+ * returns a function object. It is used to specify the runtime
+ * creation of a new function with a default [[Call]] internal method
+ * and no [[Construct]] internal method (although one may be
+ * subsequently added by an operation such as
+ * MakeConstructor). sourceText is the source text of the syntactic
+ * definition of the function to be created. It performs the following
+ * steps when called:
+ *
+ * 1. Let internalSlotsList be the internal slots listed in Table 30.
+ * 2. Let F be OrdinaryObjectCreate(functionPrototype, internalSlotsList).
+ * 3. Set F.[[Call]] to the definition specified in 10.2.1.
+ * 4. Set F.[[SourceText]] to sourceText.
+ * 5. Set F.[[FormalParameters]] to ParameterList.
+ * 6. Set F.[[ECMAScriptCode]] to Body.
+ * 7. If the source text matched by Body is strict mode code, let Strict
+ *    be true; else let Strict be false.
+ * 8. Set F.[[Strict]] to Strict.
+ * 9. If thisMode is lexical-this, set F.[[ThisMode]] to lexical.
+ * 10. Else if Strict is true, set F.[[ThisMode]] to strict.
+ * 11. Else, set F.[[ThisMode]] to global.
+ * 12. Set F.[[IsClassConstructor]] to false.
+ * 13. Set F.[[Environment]] to env.
+ * 14. Set F.[[PrivateEnvironment]] to privateEnv.
+ * 15. Set F.[[ScriptOrModule]] to GetActiveScriptOrModule().
+ * 16. Set F.[[Realm]] to the current Realm Record.
+ * 17. Set F.[[HomeObject]] to undefined.
+ * 18. Set F.[[Fields]] to a new empty List.
+ * 19. Set F.[[PrivateMethods]] to a new empty List.
+ * 20. Set F.[[ClassFieldInitializerName]] to empty.
+ * 21. Let len be the ExpectedArgumentCount of ParameterList.
+ * 22. Perform SetFunctionLength(F, len).
+ * 23. Return F.
+ */
+export function OrdinaryFunctionCreate(
+  $: VM,
+  functionPrototype: Obj,
+  sourceText: string,
+  ParameterList: ESTree.Pattern[],
+  Body: ESTree.BlockStatement|ESTree.Expression,
+  thisMode: LEXICAL_THIS|NON_LEXICAL_THIS,
+  env: EnvironmentRecord,
+  privateEnv: PrivateEnvironmentRecord|null,
+): OrdinaryFunction {
+  const realm = $.getRealm();
+  const strict = IsStrictMode(Body);
+  const scriptOrModule = GetActiveScriptOrModule($);
+  const len = ExpectedArgumentCount(ParameterList);
+  Assert(realm);
+  Assert(scriptOrModule);
+  return new (OrdinaryFunction())({
+    Prototype: functionPrototype,
+    SourceText: sourceText,
+    FormalParameters: ParameterList,
+    ECMAScriptCode: Body,
+    Strict: strict,
+    ThisMode: LEXICAL_THIS.is(thisMode) ? LEXICAL : strict ? STRICT : GLOBAL,
+    Environment: env,
+    PrivateEnvironment: privateEnv,
+    ScriptOrModule: scriptOrModule,
+    Realm: realm,
+  }, {
+    length: propC(len),
+  });
+}
 
-// Basic function
-export class OrdinaryFunction extends lazySuper(() => OrdinaryObject) implements Func {
-  override Prototype: Obj;
+export interface OrdinaryFunctionSlots extends ObjectSlots {
+  Prototype: Obj;
+  Realm: RealmRecord;
+  Environment: EnvironmentRecord;
+  PrivateEnvironment: PrivateEnvironmentRecord|null,
+  FormalParameters: ESTree.Pattern[],
+  ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression,
+  ScriptOrModule: ScriptRecord|ModuleRecord;
+  ThisMode: LEXICAL|STRICT|GLOBAL;
+  SourceText: string;
+  Strict: boolean;
+}
 
-  /**
-   * [[Environment]], an Environment Record - The Environment Record
-   * that the function was closed over. Used as the outer environment
-   * when evaluating the code of the function.
-   */
-  declare Environment: EnvironmentRecord;
+export type OrdinaryFunction = InstanceType<ReturnType<typeof OrdinaryFunction>>;
+export const OrdinaryFunction = memoize(() => class OrdinaryFunction extends OrdinaryObject() implements Func {
 
-  /**
-   * [[PrivateEnvironment]], a PrivateEnvironment Record or null - The
-   * PrivateEnvironment Record for Private Names that the function was
-   * closed over. null if this function is not syntactically contained
-   * within a class. Used as the outer PrivateEnvironment for inner
-   * classes when evaluating the code of the function.
-   */
-  declare PrivateEnvironment: PrivateEnvironmentRecord|null;
-
-  /**
-   * [[FormalParameters]], a Parse Node - The root parse node of the
-   * source text that defines the function's formal parameter list.
-   */
-  declare FormalParameters: ESTree.Pattern[];
-
-  /**
-   * [[ECMAScriptCode]], a Parse Node - The root parse node of the
-   * source text that defines the function's body.
-   */
-  declare ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression;
-
-  /**
-   * [[ConstructorKind]], base or derived - Whether or not the function
-   * is a derived class constructor.
-   */
-  declare ConstructorKind: BASE|DERIVED;
-
-  /**
-   * [[Realm]], a Realm Record - The realm in which the function was
-   * created and which provides any intrinsic objects that are accessed
-   * when evaluating the function.
-   */
+  declare Prototype: Obj;
   declare Realm: RealmRecord;
-
-  /**
-   * [[ScriptOrModule]], a Script Record or a Module Record - The script
-   * or module in which the function was created.
-   */
+  declare Environment: EnvironmentRecord;
+  declare PrivateEnvironment: PrivateEnvironmentRecord|null;
+  declare FormalParameters: ESTree.Pattern[];
+  declare ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression;
   declare ScriptOrModule: ScriptRecord|ModuleRecord;
-
-  /**
-   * [[ThisMode]], lexical, strict, or global - Defines how this
-   * references are interpreted within the formal parameters and code
-   * body of the function. lexical means that this refers to the this
-   * value of a lexically enclosing function. strict means that the this
-   * value is used exactly as provided by an invocation of the
-   * function. global means that a this value of undefined or null is
-   * interpreted as a reference to the global object, and any other this
-   * value is first passed to ToObject.
-   */
   declare ThisMode: LEXICAL|STRICT|GLOBAL;
-
-  /**
-   * [[Strict]], a Boolean - true if this is a strict function, false if
-   * this is a non-strict function.
-   */
   declare Strict: boolean;
-
-  /**
-   * [[HomeObject]], an Object - If the function uses super, this is the
-   * object whose [[GetPrototypeOf]] provides the object where super
-   * property lookups begin.
-   */
-  declare HomeObject: Obj|undefined; // |undefined?
-
-  /**
-   * [[SourceText]], a sequence of Unicode code points - The source text
-   * that defines the function.
-   */
   declare SourceText: string;
-
-  /**
-   * [[Fields]], a List of ClassFieldDefinition Records - If the
-   * function is a class, this is a list of Records representing the
-   * non-static fields and corresponding initializers of the class.
-   */
+  declare HomeObject: Obj|undefined;
   declare Fields: ClassFieldDefinitionRecord[]; // TODO - Map?
-
-  /**
-   * [[PrivateMethods]], a List of PrivateElements - If the function is
-   * a class, this is a list representing the non-static private methods
-   * and accessors of the class.
-   */
   declare PrivateMethods: PrivateElement[]; // TODO - Map?
-
-  /**
-   * [[ClassFieldInitializerName]], a String, a Symbol, a Private Name,
-   * or empty - If the function is created as the initializer of a class
-   * field, the name to use for NamedEvaluation of the field; empty
-   * otherwise.
-   */
   declare ClassFieldInitializerName: string|symbol|PrivateName|EMPTY;
-
-  /**
-   * [[IsClassConstructor]], a Boolean - Indicates whether the function
-   * is a class constructor. (If true, invoking the function's [[Call]]
-   * will immediately throw a TypeError exception.)
-   */
   declare IsClassConstructor: boolean;
 
-  constructor(functionPrototype: Obj,
-              sourceText: string,
-              ParameterList: ESTree.Pattern[],
-              Body: ESTree.BlockStatement|ESTree.Expression,
-              thisMode: LEXICAL_THIS|NON_LEXICAL_THIS,
-              env: EnvironmentRecord,
-              privateEnv: PrivateEnvironmentRecord|null,
-             ) {
-    super();
-    this.Prototype = functionPrototype;
-    this.SourceText = sourceText;
-    this.FormalParameters = ParameterList;
-    this.ECMAScriptCode = Body;
-    this.Environment = env;
-    this.PrivateEnvironment = privateEnv;
-    if (IsStrictMode(Body)) {
-      // TODO - can we recurse through in the post-parse step to do this?
-      //  - does it belong somewhere else?
-    }
+  constructor(slots: OrdinaryFunctionSlots, props: PropertyRecord) {
+    super(slots, props);
+    this.HomeObject ??= undefined;
+    this.Fields ??= [];
+    this.PrivateMethods ??= [];
+    this.ClassFieldInitializerName ??= EMPTY;
+    this.IsClassConstructor ??= false;
   }
 
   /**
@@ -253,11 +365,7 @@ export class OrdinaryFunction extends lazySuper(() => OrdinaryObject) implements
     }
     return undefined;
   }
-
-  *Construct($: VM, argumentsList: Val[], newTarget: Obj): EvalGen<CR<Obj>> {
-    throw 'not implemented';
-  }
-}
+});
 
 
 /**
@@ -449,83 +557,6 @@ function sourceText(node: Node): string {
   return source.sourceText?.substring(range[0], range[1]) || '';
 }
 
-// TODO - use range to get actual sourceText ??? is that too much ???
-
-/**
- * 10.2.3 OrdinaryFunctionCreate (
- *           functionPrototype, sourceText, ParameterList, Body,
- *           thisMode, env, privateEnv )
- *
- * The abstract operation OrdinaryFunctionCreate takes arguments
- * functionPrototype (an Object), sourceText (a sequence of Unicode
- * code points), ParameterList (a Parse Node), Body (a Parse Node),
- * thisMode (lexical-this or non-lexical-this), env (an Environment
- * Record), and privateEnv (a PrivateEnvironment Record or null) and
- * returns a function object. It is used to specify the runtime
- * creation of a new function with a default [[Call]] internal method
- * and no [[Construct]] internal method (although one may be
- * subsequently added by an operation such as
- * MakeConstructor). sourceText is the source text of the syntactic
- * definition of the function to be created. It performs the following
- * steps when called:
- */
-export function OrdinaryFunctionCreate(
-  $: VM,
-  functionPrototype: Obj,
-  sourceText: string,
-  ParameterList: ESTree.Pattern[],
-  Body: ESTree.BlockStatement|ESTree.Expression,
-  thisMode: LEXICAL_THIS|NON_LEXICAL_THIS,
-  env: EnvironmentRecord,
-  privateEnv: PrivateEnvironmentRecord|null,
-): Func {
-  // 1. Let internalSlotsList be the internal slots listed in Table 30.
-  // 2. Let F be OrdinaryObjectCreate(functionPrototype, internalSlotsList).
-  // 3. Set F.[[Call]] to the definition specified in 10.2.1.
-  // 4. Set F.[[SourceText]] to sourceText.
-  // 5. Set F.[[FormalParameters]] to ParameterList.
-  // 6. Set F.[[ECMAScriptCode]] to Body.
-  // 7. If the source text matched by Body is strict mode code, let Strict
-  //    be true; else let Strict be false.
-  // 8. Set F.[[Strict]] to Strict.
-  // 9. If thisMode is lexical-this, set F.[[ThisMode]] to lexical.
-  // 10. Else if Strict is true, set F.[[ThisMode]] to strict.
-  // 11. Else, set F.[[ThisMode]] to global.
-  // 12. Set F.[[IsClassConstructor]] to false.
-  // 13. Set F.[[Environment]] to env.
-  // 14. Set F.[[PrivateEnvironment]] to privateEnv.
-  // 15. Set F.[[ScriptOrModule]] to GetActiveScriptOrModule().
-  // 16. Set F.[[Realm]] to the current Realm Record.
-  // 17. Set F.[[HomeObject]] to undefined.
-  // 18. Set F.[[Fields]] to a new empty List.
-  // 19. Set F.[[PrivateMethods]] to a new empty List.
-  // 20. Set F.[[ClassFieldInitializerName]] to empty.
-  // 21. Let len be the ExpectedArgumentCount of ParameterList.
-  // 22. Perform SetFunctionLength(F, len).
-  // 23. Return F.
-
-  const F = new OrdinaryFunction(
-    functionPrototype,
-    sourceText,
-    ParameterList,
-    Body,
-    thisMode,
-    env,
-    privateEnv,
-  );
-  F.ScriptOrModule = castExists($.getRunningContext().ScriptOrModule);
-  F.Realm = castExists($.getRealm());
-
-  // TODO - length, class field initializer name?
-
-  return F;
-}
-
-function castExists<T>(arg: T|null|undefined): T {
-  Assert(arg != null);
-  return arg;
-}
-
 /**
  * 10.2.1.1 PrepareForOrdinaryCall ( F, newTarget )
  *
@@ -548,7 +579,7 @@ function castExists<T>(arg: T|null|undefined): T {
  * 13. NOTE: Any exception objects produced after this point are associated with calleeRealm.
  * 14. Return calleeContext.
  */
-export function PrepareForOrdinaryCall($: VM, F: Func, newTarget: Obj|undefined) {
+export function PrepareForOrdinaryCall($: VM, F: OrdinaryFunction, newTarget: Obj|undefined) {
   const callerContext = $.getRunningContext();
   const localEnv = new FunctionEnvironmentRecord(F, newTarget);
   Assert(F.ScriptOrModule);
@@ -671,7 +702,7 @@ export function* EvaluateBody(
 ): EvalGen<CR<Val>> {
   // TODO - check for generator and/or async, which will probably be different
   // subtypes of Function.
-  if (functionObject instanceof OrdinaryFunction && functionObject.ECMAScriptCode) {
+  if (functionObject.ECMAScriptCode) {
     //return EvaluateFunctionBody(functionObject, argumentsList, node);
     // 15.2.3 Runtime Semantics: EvaluateFunctionBody
     //
@@ -727,7 +758,8 @@ export function* OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]):
  * 4. If F has an [[InitialName]] internal slot, then
  *     a. Set F.[[InitialName]] to name.
  * 5. If prefix is present, then
- *     a. Set name to the string-concatenation of prefix, the code unit 0x0020 (SPACE), and name.
+ *     a. Set name to the string-concatenation of prefix, the code
+ *        unit 0x0020 (SPACE), and name.
  *     b. If F has an [[InitialName]] internal slot, then
  *         i. Optionally, set F.[[InitialName]] to name.
  * 6. Perform ! DefinePropertyOrThrow(F, "name", PropertyDescriptor {
@@ -751,11 +783,10 @@ export function SetFunctionName($: VM, F: Func,
   if (prefix) {
     name = `${prefix} ${String(name)}`;
   }
-  if (F instanceof BuiltinFunction) {
-    F.InitialName = name;
-  }
-  CastNotAbrupt(DefinePropertyOrThrow($, F, 'name', new PropertyDescriptor({
-    Value: name, Writable: false, Enumerable: false, Configurable: true})));
+  // if (F instanceof BuiltinFunction) {
+  //   F.InitialName = name;
+  // }
+  CastNotAbrupt(DefinePropertyOrThrow($, F, 'name', propC(name)));
   return UNUSED;
 }
 
@@ -777,9 +808,7 @@ export function SetFunctionName($: VM, F: Func,
 export function SetFunctionLength($: VM, F: Func, length: number): UNUSED {
   Assert(F.Extensible);
   Assert(!F.OwnProps.has('length'));
-  CastNotAbrupt(DefinePropertyOrThrow($, F, 'length', new PropertyDescriptor({
-    Value: length, Writable: false, Enumerable: false, Configurable: true,
-  })));
+  CastNotAbrupt(DefinePropertyOrThrow($, F, 'length', propC(length)));
   return UNUSED;
 }
 
@@ -830,11 +859,12 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
   // 8. Let hasParameterExpressions be ContainsExpression of formals.
   const hasParameterExpressions = formals.some(ContainsExpression);
   // 9. Let varNames be the VarDeclaredNames of code.
-  const varNames = VarDeclaredNames(code);
+  const body: Node|Node[] = code.type === 'BlockStatement' ? code.body : code;
+  const varNames = VarDeclaredNames(body);
   // 10. Let varDeclarations be the VarScopedDeclarations of code.
   const varDeclarations = VarScopedDeclarations(code);
   // 11. Let lexicalNames be the LexicallyDeclaredNames of code.
-  const lexicalNames = LexicallyDeclaredNames(code);
+  const lexicalNames = new Set(LexicallyDeclaredNames(code));
   // 12. Let functionNames be a new empty List.
   const functionNames: string[] = [];
   // 13. Let functionsToInitialize be a new empty List.
@@ -875,7 +905,7 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
   //        "arguments", then
   //         i. Set argumentsObjectNeeded to false.
   else if (!hasParameterExpressions &&
-    (functionNames.includes('arguments') || lexicalNames.includes('arguments'))) {
+    (functionNames.includes('arguments') || lexicalNames.has('arguments'))) {
     argumentsObjectNeeded = false;
   }
   // 19. If strict is true or hasParameterExpressions is false, then
@@ -1037,7 +1067,7 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
       const initialValue =
         !parameterBindings.includes(n) || functionNames.includes(n) ?
         undefined :
-        CastNotAbrupt(env.GetBindingValue($, n, false));
+        CastNotAbrupt(yield* env.GetBindingValue($, n, false));
       //         5. Perform ! varEnv.InitializeBinding(n, initialValue).
       CastNotAbrupt(varEnv.InitializeBinding($, n, initialValue));
       //         6. NOTE: A var with the same name as a formal parameter initially
@@ -1165,69 +1195,17 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
  * function it must provide [[Call]] and [[Construct]] internal
  * methods that conform to the following definitions:
  */
-export abstract class BuiltinFunction extends OrdinaryObject implements Func {
+export type BuiltinFunction = InstanceType<ReturnType<typeof BuiltinFunction>>;
+export const BuiltinFunction = memoize(() => class BuiltinFunction extends OrdinaryObject() implements Func {
 
-  PrivateEnvironment!: PrivateEnvironmentRecord|null;
+  declare Prototype: Obj;
+  declare Realm: RealmRecord;
+  declare InitialName: string;
+  declare CallBehavior?: CallBehavior;
+  declare ConstructBehavior?: ConstructBehavior;
 
-  Prototype: Obj;
-  Realm: RealmRecord;
-  InitialName!: string;
-
-  /**
-   * 10.3.3 CreateBuiltinFunction (
-   *     behaviour, length, name, additionalInternalSlotsList
-   *     [ , realm [ , prototype [ , prefix ] ] ] )
-   *
-   * The abstract operation CreateBuiltinFunction takes arguments
-   * behaviour (an Abstract Closure, a set of algorithm steps, or some
-   * other definition of a function's behaviour provided in this
-   * specification), length (a non-negative integer or +∞), name (a
-   * property key or a Private Name), and additionalInternalSlotsList (a
-   * List of names of internal slots) and optional arguments realm (a
-   * Realm Record), prototype (an Object or null), and prefix (a String)
-   * and returns a function object. additionalInternalSlotsList contains
-   * the names of additional internal slots that must be defined as part
-   * of the object. This operation creates a built-in function
-   * object. It performs the following steps when called:
-   *
-   * 1. If realm is not present, set realm to the current Realm Record.
-   * 2. If prototype is not present, set prototype to
-   *    realm.[[Intrinsics]].[[%Function.prototype%]].
-   * 3. Let internalSlotsList be a List containing the names of all the
-   *    internal slots that 10.3 requires for the built-in function object
-   *    that is about to be created.
-   * 4. Append to internalSlotsList the elements of additionalInternalSlotsList.
-   * 5. Let func be a new built-in function object that, when called,
-   *    performs the action described by behaviour using the provided
-   *    arguments as the values of the corresponding parameters specified
-   *    by behaviour. The new function object has internal slots whose
-   *    names are the elements of internalSlotsList, and an [[InitialName]]
-   *    internal slot.
-   * 6. Set func.[[Prototype]] to prototype.
-   * 7. Set func.[[Extensible]] to true.
-   * 8. Set func.[[Realm]] to realm.
-   * 9. Set func.[[InitialName]] to null.
-   * 10. Perform SetFunctionLength(func, length).
-   * 11. If prefix is not present, then
-   *     a. Perform SetFunctionName(func, name).
-   * 12. Else,
-   *     a. Perform SetFunctionName(func, name, prefix).
-   * 13. Return func.
-   *
-   * Each built-in function defined in this specification is created by
-   * calling the CreateBuiltinFunction abstract operation.
-   */
-  constructor($: VM, length: number, name: string,
-              realm: RealmRecord|undefined, prototype: Obj,
-              prefix?: string) {
-    super();
-    // NOTE: require %FunctionPrototype% as explicit dep
-    this.Prototype = prototype;
-    if (!realm) realm = $.getRealm();
-    Assert(realm != null);
-    this.Realm = realm;
-    SetFunctionLength($, this, length);
-    SetFunctionName($, this, name, prefix);
+  constructor(slots: BuiltinFunctionSlots, props: PropertyRecord) {
+    super(slots, props);
   }
 
   /**
@@ -1261,8 +1239,9 @@ export abstract class BuiltinFunction extends OrdinaryObject implements Func {
    * stack it must not be destroyed if it has been suspended and
    * retained by an accessible Generator for later resumption.
    */
-  *Call($: VM, thisArgument: Val, argumentsList: Val[]): EvalGen<CR<Val>> {
-    throw 'NotImplemented';
+  Call($: VM, thisArgument: Val, argumentsList: Val[]): ECR<Val> {
+    if (this.CallBehavior) return this.CallBehavior($, thisArgument, argumentsList);
+    return (function*() { return Throw('TypeError', 'not callable'); })();
   }
 
   /**
@@ -1280,8 +1259,114 @@ export abstract class BuiltinFunction extends OrdinaryObject implements Func {
    *     F. The this value is uninitialized, argumentsList provides the named
    *     parameters, and newTarget provides the NewTarget value.
    */
-  *Construct($: VM, argumentsList: Val[], newTarget: Obj): EvalGen<CR<Obj>> {
-    throw 'NotImplemented';
+  Construct($: VM, argumentsList: Val[], newTarget: Obj): ECR<Obj> {
+    if (this.ConstructBehavior) return this.ConstructBehavior($, argumentsList, newTarget);
+    return (function*() { return Throw('TypeError', 'not a constructible'); })();
+  }
+});
+
+export interface BuiltinFunctionSlots extends ObjectSlots {
+  // NOTE: See 10.3.1 for details on exact correct behavior of Call
+  CallBehavior?: CallBehavior;
+  ConstructBehavior?: ConstructBehavior;
+  Prototype: Obj;
+  Realm: RealmRecord;
+  InitialName: string;
+  Extensible: boolean;
+}
+interface CallBehavior {
+  (
+    this: Func,
+    $: VM,
+    thisArgument: Val,
+    argumentsList: Val[],
+  ): ECR<Val>;
+}
+interface ConstructBehavior {
+  (
+    this: Func,
+    $: VM,
+    argumentsList: Val[],
+    newTarget: Val,
+  ): ECR<Obj>;
+}
+export interface BuiltinFunctionBehavior {
+  Call?: CallBehavior;
+  Construct?: ConstructBehavior;
+}
+
+/**
+ * 10.3.3 CreateBuiltinFunction (
+ *     behaviour, length, name, additionalInternalSlotsList
+ *     [ , realm [ , prototype [ , prefix ] ] ] )
+ *
+ * The abstract operation CreateBuiltinFunction takes arguments
+ * behaviour (an Abstract Closure, a set of algorithm steps, or some
+ * other definition of a function's behaviour provided in this
+ * specification), length (a non-negative integer or +∞), name (a
+ * property key or a Private Name), and additionalInternalSlotsList (a
+ * List of names of internal slots) and optional arguments realm (a
+ * Realm Record), prototype (an Object or null), and prefix (a String)
+ * and returns a function object. additionalInternalSlotsList contains
+ * the names of additional internal slots that must be defined as part
+ * of the object. This operation creates a built-in function
+ * object. It performs the following steps when called:
+ *
+ * 1. If realm is not present, set realm to the current Realm Record.
+ * 2. If prototype is not present, set prototype to
+ *    realm.[[Intrinsics]].[[%Function.prototype%]].
+ * 3. Let internalSlotsList be a List containing the names of all the
+ *    internal slots that 10.3 requires for the built-in function object
+ *    that is about to be created.
+ * 4. Append to internalSlotsList the elements of additionalInternalSlotsList.
+ * 5. Let func be a new built-in function object that, when called,
+ *    performs the action described by behaviour using the provided
+ *    arguments as the values of the corresponding parameters specified
+ *    by behaviour. The new function object has internal slots whose
+ *    names are the elements of internalSlotsList, and an [[InitialName]]
+ *    internal slot.
+ * 6. Set func.[[Prototype]] to prototype.
+ * 7. Set func.[[Extensible]] to true.
+ * 8. Set func.[[Realm]] to realm.
+ * 9. Set func.[[InitialName]] to null.
+ * 10. Perform SetFunctionLength(func, length).
+ * 11. If prefix is not present, then
+ *     a. Perform SetFunctionName(func, name).
+ * 12. Else,
+ *     a. Perform SetFunctionName(func, name, prefix).
+ * 13. Return func.
+ *
+ * Each built-in function defined in this specification is created by
+ * calling the CreateBuiltinFunction abstract operation.
+ */
+export function CreateBuiltinFunction(
+  behaviour: BuiltinFunctionBehavior,
+  length: number,
+  name: string,
+  realm: RealmRecord,
+  functionPrototype: Obj,
+  prefix?: string,
+) {
+  const fnName = prefix ? `${prefix} ${name}` : name;
+  const slots: BuiltinFunctionSlots = {
+    Prototype: functionPrototype,
+    Extensible: true,
+    Realm: realm,
+    InitialName: fnName,
+  };
+  if (behaviour.Call) slots.CallBehavior = behaviour.Call;
+  if (behaviour.Construct) slots.ConstructBehavior = behaviour.Construct;
+  return new (BuiltinFunction())(
+    slots, {
+      length: propC(length),
+      name: propC(fnName),
+    });
+}
+
+declare global {
+  interface ObjectSlots {
+    // Slots for exotic arguments objects
+    ParameterMap?: Obj|undefined;
   }
 }
 
@@ -1291,44 +1376,44 @@ export abstract class BuiltinFunction extends OrdinaryObject implements Func {
  * The abstract operation CreateUnmappedArgumentsObject takes argument
  * argumentsList (a List of ECMAScript language values) and returns an
  * ordinary object. It performs the following steps when called:
+ *
+ * 1. Let len be the number of elements in argumentsList.
+ * 2. Let obj be OrdinaryObjectCreate(%Object.prototype%, « [[ParameterMap]] »).
+ * 3. Set obj.[[ParameterMap]] to undefined.
+ * 4. Perform ! DefinePropertyOrThrow(obj, "length",
+ *      PropertyDescriptor { [[Value]]: 𝔽(len), [[Writable]]: true,
+ *                           [[Enumerable]]: false, [[Configurable]]: true }).
+ * 5. Let index be 0.
+ * 6. Repeat, while index < len,
+ *     a. Let val be argumentsList[index].
+ *     b. Perform ! CreateDataPropertyOrThrow(obj, ! ToString(𝔽(index)), val).
+ *     c. Set index to index + 1.
+ * 7. Perform ! DefinePropertyOrThrow(obj, @@iterator,
+ *      PropertyDescriptor { [[Value]]: %Array.prototype.values%, [[Writable]]: true,
+ *                           [[Enumerable]]: false, [[Configurable]]: true }).
+ * 8. Perform ! DefinePropertyOrThrow(obj, "callee",
+ *      PropertyDescriptor { [[Get]]: %ThrowTypeError%, [[Set]]: %ThrowTypeError%,
+ *                           [[Enumerable]]: false, [[Configurable]]: false }).
+ * 9. Return obj.
  */
 export function CreateUnmappedArgumentsObject($: VM, argumentsList: Val[]): Obj {
-  // 1. Let len be the number of elements in argumentsList.
   const len = argumentsList.length;
-  // 2. Let obj be OrdinaryObjectCreate(%Object.prototype%, « [[ParameterMap]] »).
-  const obj = new OrdinaryObject($.getIntrinsic('%Object.prototype%'));
-  // 3. Set obj.[[ParameterMap]] to undefined.
-  obj.ParameterMap = undefined;
-  // 4. Perform ! DefinePropertyOrThrow(obj, "length",
-  //      PropertyDescriptor { [[Value]]: 𝔽(len), [[Writable]]: true,
-  //                           [[Enumerable]]: false, [[Configurable]]: true }).
-  CastNotAbrupt(DefinePropertyOrThrow($, obj, 'length', new PropertyDescriptor({
-    Value: len, Writable: true, Enumerable: false, Configurable: true})));
-  // 5. Let index be 0.
-  // 6. Repeat, while index < len,
+  const props: PropertyRecord = {
+    length: propWC(len),
+    [Symbol.iterator]: propWC($.getIntrinsic('%Array.prototype.values%')),
+    callee: {
+      Get: $.getIntrinsic('%ThrowTypeError%'),
+      Set: $.getIntrinsic('%ThrowTypeError%'),
+      Enumerable: false, Configurable: false,
+    },
+  };
   for (let index = 0; index < len; index++) {
-    //   a. Let val be argumentsList[index].
-    const val = argumentsList[index];
-    //   b. Perform ! CreateDataPropertyOrThrow(obj, ! ToString(𝔽(index)), val).
-    CastNotAbrupt(CreateDataPropertyOrThrow($, obj, String(index), val));
-    //   c. Set index to index + 1.
+    props[String(index)] = propWC(argumentsList[index]);
   }
-  // 7. Perform ! DefinePropertyOrThrow(obj, @@iterator,
-  //      PropertyDescriptor { [[Value]]: %Array.prototype.values%, [[Writable]]: true,
-  //                           [[Enumerable]]: false, [[Configurable]]: true }).
-  CastNotAbrupt(DefinePropertyOrThrow($, obj, Symbol.iterator, new PropertyDescriptor({
-    Value: $.getIntrinsic('%Array.prototype.values%'),
-    Writable: true, Enumerable: false, Configurable: true})));
-  // 8. Perform ! DefinePropertyOrThrow(obj, "callee",
-  //      PropertyDescriptor { [[Get]]: %ThrowTypeError%, [[Set]]: %ThrowTypeError%,
-  //                           [[Enumerable]]: false, [[Configurable]]: false }).
-  CastNotAbrupt(DefinePropertyOrThrow($, obj, 'callee', new PropertyDescriptor({
-    Get: $.getIntrinsic('ThrowTypeError'),
-    Set: $.getIntrinsic('ThrowTypeError'),
-    Enumerable: false, Configurable: false,
-  })));
-  // 9. Return obj.
-  return obj;
+  return OrdinaryObjectCreate({
+    Prototype: $.getIntrinsic('%Object.prototype%'),
+    ParameterMap: undefined,
+  }, props);
 }
 
 /**
@@ -1377,7 +1462,7 @@ export function CreateMappedArgumentsObject($: VM, func: Func, formals: Node[],
   // 21. Perform ! DefinePropertyOrThrow(obj, "callee", PropertyDescriptor { [[Value]]: func, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
   // 22. Return obj.
 
-  return new OrdinaryObject($.getIntrinsic('%Object.prototype%'));
+  return OrdinaryObjectCreate({Prototype: $.getIntrinsic('%Object.prototype%')});
 
   //throw new Error('NOT IMPLEMENTED');
 } 
@@ -1429,7 +1514,7 @@ export function* Evaluation_CallExpression(
   const ref = yield* $.Evaluation(node.callee);
   if (IsAbrupt(ref)) return ref;
   Assert(!EMPTY.is(ref)); // ??? does this break stuff?
-  const func = GetValue($, ref);
+  const func = yield* GetValue($, ref);
   if (IsAbrupt(func)) return func;
 
   // if (ref instanceof ReferenceRecord)  && !IsPropertyReference(ref)
@@ -1471,7 +1556,7 @@ export function* EvaluateCall(
   // NOTE: "arguments" is not allowed for param names in strict mode
   args: Array<ESTree.Expression|ESTree.SpreadElement>,
   tailPosition: boolean,
-): EvalGen<CR<Val>> {
+): ECR<Val> {
   let thisValue: Val;
   if (ref instanceof ReferenceRecord) {
     if (IsPropertyReference(ref)) {
@@ -1486,8 +1571,8 @@ export function* EvaluateCall(
   }
   const argList = yield* ArgumentListEvaluation($, args);
   if (IsAbrupt(argList)) return argList;
-  if (typeof func !== 'object') throw new TypeError('func is not an object');
-  if (!IsCallable(func)) throw new TypeError('func is not callable');
+  if (typeof func !== 'object') return Throw('TypeError', `${DebugString(ref)} is not an object`);
+  if (!IsCallable(func)) return Throw('TypeError', `${DebugString(ref)} is not callable`);
   if (tailPosition) PrepareForTailCall($);
   return yield* Call($, func, thisValue, argList);
 }
@@ -1578,10 +1663,22 @@ function* ArgumentListEvaluation(
     } else {
       const ref = yield* $.evaluateValue(arg);
       if (IsAbrupt(ref)) return ref;
-      const argVal = GetValue($, ref);
+      const argVal = yield* GetValue($, ref);
       if (IsAbrupt(argVal)) return argVal;
       list.push(argVal);
     }
   }
   return list;
+}
+
+/**
+ * Defines a property descriptor for a builtin method.  For use with
+ * `defineProperties`, which allows passing lazy descriptors.
+ */
+export function method(
+  fn: ($: VM, thisValue: Val, ...params: Val[]) => ECR<Val>,
+): (realm: RealmRecord, name: string) => PropertyDescriptor {
+  return (realm, name) => propWC(CreateBuiltinFunction({
+    Call($, thisObj, argumentsList) { return fn($, thisObj, ...argumentsList); },
+  }, fn.length - 2, name, realm, realm.Intrinsics.get('%Function.prototype%')!));
 }

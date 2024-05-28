@@ -1,6 +1,6 @@
 import { RealmRecord } from './realm_record';
 import * as ESTree from 'estree';
-import { EvalGen, VM } from './vm';
+import { ECR, EvalGen, VM } from './vm';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { Val } from './val';
 import { CodeExecutionContext } from './execution_context';
@@ -9,6 +9,7 @@ import { Assert } from './assert';
 import { BoundNames, IsConstantDeclaration, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
 import { GlobalEnvironmentRecord } from './environment_record';
 import { InstantiateFunctionObject } from './func';
+import { analyze } from './static/errors';
 
 /**
  * 16.1.4 Script Records
@@ -55,13 +56,15 @@ export class ScriptRecord {
  */
 export function ParseScript(script: ESTree.Program,
                             realm: RealmRecord|undefined,
-                            hostDefined: unknown): ScriptRecord {
+                            hostDefined: unknown): ScriptRecord|string[] {
 
   // NOTE: An implementation may parse script source text and analyse
   // it for Early Error conditions prior to evaluation of ParseScript
   // for that script source text. However, the reporting of any errors
   // must be deferred until the point where this specification
   // actually performs ParseScript upon that source text.
+  const errors = analyze(script);
+  if (errors.length) return errors;
   return new ScriptRecord(realm, script, hostDefined);
 }
 
@@ -147,15 +150,22 @@ export function GlobalDeclarationInstantiation(
   env: GlobalEnvironmentRecord,
 ): CR<UNUSED> {
   // 1. Let lexNames be the LexicallyDeclaredNames of script.
+  // NOTE: To enforce the early error in 14.2.1, that lexNames
+  // and varNames are disjoint, we make lexNames a set and
+  // check against it in the varNames loop.
   const lexNames = LexicallyDeclaredNames(script);
   // 2. Let varNames be the VarDeclaredNames of script.
   const varNames = VarDeclaredNames(script);
-  // 3. For each element name of lexNames, do
   for (const name of lexNames) {
     //   a. If env.HasVarDeclaration(name) is true, throw a SyntaxError exception.
-    if (env.HasVarDeclaration($, name)) return Throw('SyntaxError');
+    if (env.HasVarDeclaration($, name)) {
+      return Throw('SyntaxError',
+                   `Identifier '${name}' has already been declared`);
+    }
     //   b. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
-    if (env.HasLexicalDeclaration($, name)) return Throw('SyntaxError');
+    if (env.HasLexicalDeclaration($, name)) {
+      return Throw('SyntaxError', `Identifier '${name}' has already been declared`);
+    }
     //   c. Let hasRestrictedGlobal be ? env.HasRestrictedGlobalProperty(name).
     const hasRestrictedGlobal = env.HasRestrictedGlobalProperty($, name);
     if (IsAbrupt(hasRestrictedGlobal)) return hasRestrictedGlobal;
@@ -165,7 +175,11 @@ export function GlobalDeclarationInstantiation(
   // 4. For each element name of varNames, do
   for (const name of varNames) {
     //   a. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
-    if (env.HasLexicalDeclaration($, name)) return Throw('SyntaxError');
+    debugger;
+    if (env.HasLexicalDeclaration($, name)) {
+      return Throw('SyntaxError',
+                   `Identifier '${name}' has already been declared`);
+    }
   }
   // 5. Let varDeclarations be the VarScopedDeclarations of script.
   const varDeclarations = VarScopedDeclarations(script);
@@ -261,6 +275,10 @@ export function GlobalDeclarationInstantiation(
   }
   // 17. For each String vn of declaredVarNames, do
   //     a. Perform ? env.CreateGlobalVarBinding(vn, false).
+  for (const vn of declaredVarNames) {
+    const result = env.CreateGlobalVarBinding($, vn, false);
+    if (IsAbrupt(result)) return result;
+  }
   // 18. Return unused.
   return UNUSED;
 }

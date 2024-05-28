@@ -1,14 +1,22 @@
 import { Plugin } from '../vm';
-import { PropertyDescriptor } from '../property_descriptor';
+import { prop0 } from '../property_descriptor';
 import { Evaluate_BinaryExpression } from '../binary_operators';
+import { defineProperties } from '../realm_record';
 
 export const arithmetic: Plugin = {
+  id: 'arithmetic',
 
-  Evaluation($, on) {
-    on('BinaryExpression', (n) => Evaluate_BinaryExpression($, n));
+  syntax: {
+    Evaluation($, on) {
+      on('BinaryExpression', (n) => Evaluate_BinaryExpression($, n));
+    },
   },
 
-  Globals: {
-    *'Infinity'() { return new PropertyDescriptor({Value: Infinity}); },
+  realm: {
+    SetDefaultGlobalBindings(realm) {
+      defineProperties(realm, realm.GlobalObject!, {
+        'Infinity': prop0(Infinity),
+      });
+    },
   },
 };

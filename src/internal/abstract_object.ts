@@ -10,11 +10,19 @@ import { CR, IsAbrupt, Throw } from "./completion_record";
 import { UNUSED } from "./enums";
 import { Func } from "./func";
 import { Obj } from "./obj";
-import { PropertyDescriptor } from "./property_descriptor";
+import { PropertyDescriptor, propWEC } from "./property_descriptor";
+import { RealmRecord } from "./realm_record";
 import { PropertyKey, Val } from "./val";
-import { DebugString, EvalGen, VM, just } from "./vm";
+import { DebugString, ECR, EvalGen, VM, just } from "./vm";
 
 declare const ToObject: any;
+declare const ValidateNonRevokedProxy: any;
+declare global {
+  interface ObjectSlots {
+    ProxyHandler?: unknown;
+    ProxyTarget?: unknown;
+  }
+}
 
 /**
  * 7.3.1 MakeBasicObject ( internalSlotsList )
@@ -67,7 +75,7 @@ declare const ToObject: any;
  *
  * 1. Return ? O.[[Get]](P, O).
  */
-export function Get($: VM, O: Obj, P: PropertyKey): CR<Val> {
+export function Get($: VM, O: Obj, P: PropertyKey): ECR<Val> {
   return O.Get($, P, O);
 }
 
@@ -85,10 +93,10 @@ export function Get($: VM, O: Obj, P: PropertyKey): CR<Val> {
  * 1. Let O be ? ToObject(V).
  * 2. Return ? O.[[Get]](P, V).
  */
-export function GetV($: VM, V: Val, P: PropertyKey): CR<Val> {
+export function* GetV($: VM, V: Val, P: PropertyKey): ECR<Val> {
   const O = ToObject($, V);
   if (IsAbrupt(O)) return O;
-  return O.Get($, P, O);
+  return yield* O.Get($, P, O);
 }
 
 /**
@@ -105,10 +113,16 @@ export function GetV($: VM, V: Val, P: PropertyKey): CR<Val> {
  * 2. If success is false and Throw is true, throw a TypeError exception.
  * 3. Return unused.
  */
-export function Set($: VM, O: Obj, P: PropertyKey, V: Val, Throw$: boolean): CR<UNUSED> {
-  const success = O.Set($, P, V, O);
+export function* Set(
+  $: VM,
+  O: Obj,
+  P: PropertyKey,
+  V: Val,
+  ShouldThrow: boolean,
+): ECR<UNUSED> {
+  const success = yield* O.Set($, P, V, O);
   if (IsAbrupt(success)) return success;
-  if (!success && Throw$) return Throw('TypeError');
+  if (!success && ShouldThrow) return Throw('TypeError');
   return UNUSED;
 }
 
@@ -132,12 +146,7 @@ export function Set($: VM, O: Obj, P: PropertyKey, V: Val, Throw$: boolean): CR<
  * if O is not extensible, [[DefineOwnProperty]] will return false.
  */
 export function CreateDataProperty($: VM, O: Obj, P: PropertyKey, V: Val): CR<boolean> {
-  const newDesc = new PropertyDescriptor({
-    Value: V,
-    Writable: true,
-    Enumerable: true,
-    Configurable: true,
-  });
+  const newDesc = propWEC(V);
   return O.DefineOwnProperty($, P, newDesc);
 }
 
@@ -186,7 +195,9 @@ export function DefinePropertyOrThrow($: VM, O: Obj, P: PropertyKey,
                                       desc: PropertyDescriptor): CR<UNUSED> {
   const success = O.DefineOwnProperty($, P, desc);
   if (IsAbrupt(success)) return success;
-  if (!success) return Throw('TypeError');
+  if (!success) {
+    return Throw('TypeError', `Cannot define property ${DebugString(P)} on ${DebugString(O)}`);
+  }
   return UNUSED;
 }
 
@@ -227,8 +238,8 @@ export function DeletePropertyOrThrow($: VM, O: Obj, P: PropertyKey): CR<UNUSED>
  * 3. If IsCallable(func) is false, throw a TypeError exception.
  * 4. Return func.
  */
-export function GetMethod($: VM, V: Val, P: PropertyKey): CR<Val> {
-  const func = GetV($, V, P);
+export function* GetMethod($: VM, V: Val, P: PropertyKey): ECR<Val> {
+  const func = yield* GetV($, V, P);
   if (IsAbrupt(func)) return func;
   if (func == null) return undefined;
   if (!IsCallable(func)) return Throw('TypeError');
@@ -326,6 +337,41 @@ export function Construct(
   return F.Construct!($, argumentsList, newTarget);
 }
 
+
+
+////////
+
+
+
+/**
+ * 7.3.21 Invoke ( V, P [ , argumentsList ] )
+ *
+ * The abstract operation Invoke takes arguments V (an ECMAScript
+ * language value) and P (a property key) and optional argument
+ * argumentsList (a List of ECMAScript language values) and returns
+ * either a normal completion containing an ECMAScript language value
+ * or a throw completion. It is used to call a method property of an
+ * ECMAScript language value. V serves as both the lookup point for
+ * the property and the this value of the call. argumentsList is the
+ * list of arguments values passed to the method. If argumentsList is
+ * not present, a new empty List is used as its value. It performs the
+ * following steps when called:
+ * 
+ * 1. If argumentsList is not present, set argumentsList to a new empty List.
+ * 2. Let func be ? GetV(V, P).
+ * 3. Return ? Call(func, V, argumentsList).
+ */
+export function* Invoke(
+  $: VM,
+  V: Val,
+  P: PropertyKey,
+  argumentsList: Val[] = [],
+): ECR<Val> {
+  const func = yield* GetV($, V, P);
+  if (IsAbrupt(func)) return func;
+  return yield* Call($, func, V, argumentsList);
+}
+
 /**
  * 7.3.22 OrdinaryHasInstance ( C, O )
  *
@@ -348,10 +394,10 @@ export function Construct(
  *     b. If O is null, return false.
  *     c. If SameValue(P, O) is true, return true.
  */
-export function* OrdinaryHasInstance($: VM, C: Val, O: Val): EvalGen<CR<boolean>> {
+export function* OrdinaryHasInstance($: VM, C: Val, O: Val): ECR<boolean> {
   if (!IsCallable(C)) return false;
   Assert(C instanceof Obj);
-  if (Obj.BoundTargetFunction in C) {
+  if (C.BoundTargetFunction != null) {
     const BC = C.BoundTargetFunction;
     return yield* InstanceofOperator($, O, BC);
   }
@@ -367,4 +413,42 @@ export function* OrdinaryHasInstance($: VM, C: Val, O: Val): EvalGen<CR<boolean>
     if (P === next) return true;
     O = next;
   }
+}
+
+
+
+
+/**
+ * 7.3.25 GetFunctionRealm ( obj )
+ *
+ * The abstract operation GetFunctionRealm takes argument obj (a
+ * function object) and returns either a normal completion containing
+ * a Realm Record or a throw completion. It performs the following
+ * steps when called:
+ * 
+ * 1. If obj has a [[Realm]] internal slot, then
+ *     a. Return obj.[[Realm]].
+ * 2. If obj is a bound function exotic object, then
+ *     a. Let boundTargetFunction be obj.[[BoundTargetFunction]].
+ *     b. Return ? GetFunctionRealm(boundTargetFunction).
+ * 3. If obj is a Proxy exotic object, then
+ *     a. Perform ? ValidateNonRevokedProxy(obj).
+ *     b. Let proxyTarget be obj.[[ProxyTarget]].
+ *     c. Return ? GetFunctionRealm(proxyTarget).
+ * 4. Return the current Realm Record.
+ *
+ * NOTE: Step 4 will only be reached if obj is a non-standard function
+ * exotic object that does not have a [[Realm]] internal slot.
+ */
+export function GetFunctionRealm($: VM, obj: Func): CR<RealmRecord> {
+  if (obj.Realm != null) return obj.Realm;
+  if (obj.BoundTargetFunction != null) {
+    return GetFunctionRealm($, obj.BoundTargetFunction);
+  }
+  if (obj.ProxyTarget != null) {
+    const result = ValidateNonRevokedProxy($, obj);
+    if (IsAbrupt(result)) return result;
+    return GetFunctionRealm($, obj.ProxyTarget as Func);
+  }
+  return $.getRealm()!;
 }

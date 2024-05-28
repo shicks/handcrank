@@ -6,7 +6,6 @@ import { GlobalEnvironmentRecord } from './environment_record';
 import { ExecutionContext } from './execution_context';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { PropertyDescriptor } from './property_descriptor';
-import { Val } from './val';
 import { VM } from './vm';
 
 /**
@@ -68,6 +67,8 @@ export class RealmRecord {
 // NOTE: this is inlined in InitializeHostDefinedRealm
 // }
 
+const stagedGlobalsMapping = new WeakMap<RealmRecord, Map<string, PropertyDescriptor>>();
+
 /**
  * 9.3.2 CreateIntrinsics ( realmRec )
  *
@@ -99,27 +100,12 @@ export function CreateIntrinsics($: VM, realmRec: RealmRecord): UNUSED {
   // TODO - TABLE 6
   //      - this is a great place for plugins...?
   //        -> could be registered with VM
-
-  const intrinsics = new Map<string, Obj>();
-  const building = new Set<string>();
-  function build(name: string): Obj {
-    if (building.has(name)) throw new Error(`Could not initialize intrinsic: ${name}`);
-    const gen = $.intrinsics.get(name)!;
-    if (!gen) throw new Error(`No provider for intrinsic: ${name}`);
-    const iter = gen($);
-    let result = iter.next();
-    while (!result.done) {
-      result = iter.next(build(result.value));
-    }
-    intrinsics.set(name, result.value);
-    return result.value;
+  const stagedGlobals = new Map<string, PropertyDescriptor>();
+  stagedGlobalsMapping.set(realmRec, stagedGlobals);
+  realmRec.Intrinsics = new Map<string, Obj>();
+  for (const plugin of $.plugins.values()) {
+    plugin.realm?.CreateIntrinsics?.(realmRec, stagedGlobals);
   }
-  for (const name of $.intrinsics.keys()) {
-    build(name);
-  }
-
-  // TODO - should we assign this earlier?
-  realmRec.Intrinsics = intrinsics;
 
   // TODO -
   // AddRestrictedFunctionProperties(realmRec.Intrinsics.get('%Function.prototype%', realmRec);
@@ -180,41 +166,15 @@ export function SetRealmGlobalObject(realmRec: RealmRecord,
  * 3. Return global.
  */
 export function SetDefaultGlobalBindings($: VM, realmRec: RealmRecord): CR<Obj> {
-  debugger;
   const gbl = realmRec.GlobalObject!;
   Assert(gbl);
 
-  // NOTE: at this point, the intrinsics should already be done.
-  // We now need to go through the defines for global objects, which
-  // may depend on intrinsics.
-  const built = new Map<string, Val>();
-  function build(name: string): CR<Val> {
-    if (built.has(name)) return built.get(name);
-    // Check for a qualified name
-    const lastDot = name.lastIndexOf('.');
-    const owner = lastDot < 0 ? gbl : build(name.substring(0, lastDot));
-    if (!(owner instanceof Obj)) throw new Error(`not an object: ${name}`);
-    const prop = name.substring(lastDot + 1);
-
-    const gen = $.globals.get(name)!;
-    if (!gen) throw new Error(`No provider for global: ${name}`);
-    const iter = gen($);
-    let result = iter.next();
-    while (!result.done) {
-      const intrinsic = realmRec.Intrinsics.get(result.value);
-      if (!intrinsic) throw new Error(`No intrinsic: ${result.value}`);
-      result = iter.next(intrinsic);
-    }
-    const desc: PropertyDescriptor = result.value instanceof PropertyDescriptor ?
-      result.value : new PropertyDescriptor({Value: result.value});
-    const define = DefinePropertyOrThrow($, owner, prop, desc);
-    if (IsAbrupt(define)) return define;
-    built.set(name, desc.Value);
-    return desc.Value;
+  for (const [key, desc] of stagedGlobalsMapping.get(realmRec)!) {
+    const result = DefinePropertyOrThrow($, gbl, key, desc);
+    if (IsAbrupt(result)) return result;
   }
-
-  for (const name of $.globals.keys()) {
-    const result = build(name);
+  for (const plugin of $.plugins.values()) {
+    const result = plugin.realm?.SetDefaultGlobalBindings?.(realmRec);
     if (IsAbrupt(result)) return result;
   }
   return gbl;
@@ -250,11 +210,48 @@ export function InitializeHostDefinedRealm($: VM): CR<UNUSED> {
   //    manner. Otherwise, let thisValue be undefined, indicating that
   //    realm's global this binding should be the global object.
   // 9. Perform SetRealmGlobalObject(realm, global, thisValue).
-  SetRealmGlobalObject(realm, undefined, undefined);
+  const args: [RealmRecord, Obj|undefined, Obj|undefined]
+    = [realm, undefined, undefined];
+  for (const plugin of $.plugins.values()) {
+    plugin.realm?.SetRealmGlobalObject?.(args);
+  }
+  SetRealmGlobalObject(...args);
   // 10. Let globalObj be ? SetDefaultGlobalBindings(realm).
   // 11. Create any host-defined global object properties on globalObj.
   const globalObj = SetDefaultGlobalBindings($, realm);
   if (IsAbrupt(globalObj)) return globalObj;
   // 12. Return unused.
   return UNUSED;
+}
+
+/**
+ * Define a handful of property (descriptors) on an object.  Allows
+ * passing descriptor factories to facilitate definitions without
+ * needing to depend directly on the realm or duplicate the name.
+ */
+export function defineProperties(
+  realm: RealmRecord,
+  obj: Obj,
+  props: Record<string|symbol, PropertyDescriptor|((realm: RealmRecord, name: string) => PropertyDescriptor)>,
+): void {
+  for (const k of Reflect.ownKeys(props)) {
+    const v = props[k];
+    const desc = typeof v === 'function' ? v(realm, typeof k === 'symbol' ? `[${k.description}]` : k) : v;
+    obj.OwnProps.set(k, desc);
+  }
+}
+
+/** SPI for specifying plugins to modify realms. */
+export interface RealmAdvice {
+  /** Adds additional intrinsics (and stage globals). */
+  CreateIntrinsics?(
+    realm: RealmRecord,
+    stagedGlobals: Map<string, PropertyDescriptor>,
+  ): void;
+
+  /** Modifies arguments passed to `SetRealmGlobalObject`. */
+  SetRealmGlobalObject?(params: [realm: RealmRecord, globalObj: Obj|undefined, thisValue: Obj|undefined]): void;
+
+  /** Adds additional default global bindings. */
+  SetDefaultGlobalBindings?(realm: RealmRecord): CR<void>;
 }

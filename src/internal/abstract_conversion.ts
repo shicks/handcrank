@@ -15,17 +15,13 @@
  */
 
 import { IsCallable } from './abstract_compare';
-import { Get } from './abstract_object';
+import { Call, Get, GetMethod } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt, Throw } from './completion_record';
 import { NUMBER, STRING } from './enums';
 import { Obj } from './obj';
 import { PropertyKey, Val } from './val';
-import { VM } from './vm';
-
-
-function GetMethod(..._args: any[]) { return undefined; }
-declare const Call: any;
+import { ECR, VM } from './vm';
 
 /**
  * 7.1.1 ToPrimitive ( input [ , preferredType ] )
@@ -47,11 +43,12 @@ declare const Call: any;
  * behaviour. Dates treat the absence of a hint as if the hint were
  * string.
  */
-export function ToPrimitive($: VM, input: Val, preferredType?: STRING|NUMBER): CR<Val> {
+export function* ToPrimitive($: VM, input: Val, preferredType?: STRING|NUMBER): ECR<Val> {
   // 1. If input is an Object, then
   if (input instanceof Obj) {
     //   a. Let exoticToPrim be ? GetMethod(input, @@toPrimitive).
-    const exoticToPrim = GetMethod(input, Symbol.toPrimitive);
+    const exoticToPrim = yield* GetMethod($, input, Symbol.toPrimitive);
+    if (IsAbrupt(exoticToPrim)) return exoticToPrim;
     //   b. If exoticToPrim is not undefined, then
     if (exoticToPrim != null) {
       //     i. If preferredType is not present, let hint be "default".
@@ -61,7 +58,7 @@ export function ToPrimitive($: VM, input: Val, preferredType?: STRING|NUMBER): C
       //         2. Let hint be "number".
       const hint = !preferredType ? 'default' : STRING.is(preferredType) ? 'string' : 'number';
       //     iv. Let result be ? Call(exoticToPrim, input, « hint »).
-      const result = Call(exoticToPrim, input, [hint]);
+      const result = yield* Call($, exoticToPrim, input, [hint]);
       if (IsAbrupt(result)) return result;
       //     v. If result is not an Object, return result.
       if (!(result instanceof Obj)) return result;
@@ -70,7 +67,7 @@ export function ToPrimitive($: VM, input: Val, preferredType?: STRING|NUMBER): C
     }
     //   c. If preferredType is not present, let preferredType be number.
     //   d. Return ? OrdinaryToPrimitive(input, preferredType).
-    return OrdinaryToPrimitive($, input, preferredType ?? NUMBER);
+    return yield* OrdinaryToPrimitive($, input, preferredType ?? NUMBER);
   }
   // 2. Return input.
   return input;
@@ -84,7 +81,7 @@ export function ToPrimitive($: VM, input: Val, preferredType?: STRING|NUMBER): C
  * completion containing an ECMAScript language value or a throw
  * completion. It performs the following steps when called:
  */
-function OrdinaryToPrimitive($: VM, O: Obj, hint: STRING|NUMBER): CR<Val> {
+function* OrdinaryToPrimitive($: VM, O: Obj, hint: STRING|NUMBER): ECR<Val> {
   // 1. If hint is string, then
   //     a. Let methodNames be « "toString", "valueOf" ».
   // 2. Else,
@@ -93,12 +90,12 @@ function OrdinaryToPrimitive($: VM, O: Obj, hint: STRING|NUMBER): CR<Val> {
   // 3. For each element name of methodNames, do
   for (const name of methodNames) {
     //   a. Let method be ? Get(O, name).
-    const method = Get($, O, name);
+    const method = yield* Get($, O, name);
     if (IsAbrupt(method)) return method;
     //   b. If IsCallable(method) is true, then
     if (IsCallable(method)) {
       //     i. Let result be ? Call(method, O).
-      const result = Call(method, O);
+      const result = yield* Call($, method, O);
       if (IsAbrupt(result)) return result;
       //     ii. If result is not an Object, return result.
       if (!(result instanceof Obj)) return result;
@@ -139,11 +136,11 @@ export function ToBoolean(argument: Val): boolean {
  * 2. If primValue is a BigInt, return primValue.
  * 3. Return ? ToNumber(primValue).
  */
-export function ToNumeric($: VM, value: Val): CR<number|bigint> {
-  const primValue = ToPrimitive($, value, NUMBER);
+export function* ToNumeric($: VM, value: Val): ECR<number|bigint> {
+  const primValue = yield* ToPrimitive($, value, NUMBER);
   if (IsAbrupt(primValue)) return primValue;
   if (typeof primValue === 'bigint') return primValue;
-  return ToNumber($, primValue);
+  return yield* ToNumber($, primValue);
 }
 
 /**
@@ -166,12 +163,12 @@ export function ToNumeric($: VM, value: Val): CR<number|bigint> {
  * 10. Return ? ToNumber(primValue).
  * 9. Assert: primValue is not an Object.
  */
-export function ToNumber($: VM, argument: Val): CR<number> {
+export function* ToNumber($: VM, argument: Val): ECR<number> {
   if (argument instanceof Obj) {
-    const primValue = ToPrimitive($, argument, NUMBER);
+    const primValue = yield* ToPrimitive($, argument, NUMBER);
     if (IsAbrupt(primValue)) return primValue;
     Assert(!(primValue instanceof Obj));
-    return ToNumber($, primValue);
+    return yield* ToNumber($, primValue);
   } else if (typeof argument === 'symbol' || typeof argument === 'bigint') {
     return Throw('TypeError');
   }
@@ -200,12 +197,12 @@ export function ToNumber($: VM, argument: Val): CR<number> {
  * 11. Assert: primValue is not an Object.
  * 12. Return ? ToString(primValue).
  */ 
-export function ToString($: VM, argument: Val): CR<string> {
+export function* ToString($: VM, argument: Val): ECR<string> {
   if (argument instanceof Obj) {
-    const primValue = ToPrimitive($, argument);
+    const primValue = yield* ToPrimitive($, argument);
     if (IsAbrupt(primValue)) return primValue;
     Assert(!(primValue instanceof Obj));
-    return ToString($, primValue);
+    return yield* ToString($, primValue);
   } else if (typeof argument === 'symbol') {
     return Throw('TypeError');
   }
@@ -240,7 +237,7 @@ export function ToString($: VM, argument: Val): CR<string> {
  *            objects.
  * Object:    Return argument.
  */
-export function ToObject($: VM, argument: Val): CR<Obj> {
+export function ToObject(_$: VM, argument: Val): CR<Obj> {
   if (argument instanceof Obj) return argument;
   throw new Error('not implemented');
 }
@@ -259,11 +256,11 @@ export function ToObject($: VM, argument: Val): CR<Obj> {
  *     a. Return key.
  * 3. Return ! ToString(key).
  */
-export function ToPropertyKey($: VM, argument: Val): CR<PropertyKey> {
-  const key = ToPrimitive($, argument, STRING);
+export function* ToPropertyKey($: VM, argument: Val): ECR<PropertyKey> {
+  const key = yield* ToPrimitive($, argument, STRING);
   if (IsAbrupt(key)) return key;
   if (typeof key === 'symbol') return key;
-  return CastNotAbrupt(ToString($, key));
+  return CastNotAbrupt(yield* ToString($, key));
 }
 
 /**

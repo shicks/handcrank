@@ -132,7 +132,7 @@ export function* Evaluation_AssignmentExpression($: VM, n: AssignmentExpression)
   Assert(!EMPTY.is(lref));
   let lval;
   if (n.operator !== '=') {
-    lval = GetValue($, lref);
+    lval = yield* GetValue($, lref);
     if (IsAbrupt(lval)) return lval;
   }
   if (n.operator === '||=' && ToBoolean(lval) === true) return lval;
@@ -149,7 +149,7 @@ export function* Evaluation_AssignmentExpression($: VM, n: AssignmentExpression)
   }
   if (IsAbrupt(rval)) return rval;
   if (STRNUM_OPS.has(compoundOp)) {
-    rval = ApplyStringOrNumericBinaryOperator($, lval, compoundOp, rval);
+    rval = yield* ApplyStringOrNumericBinaryOperator($, lval, compoundOp, rval);
     if (IsAbrupt(rval)) return rval;
   }
   const result = PutValue($, lref, rval);

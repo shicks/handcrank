@@ -65,7 +65,12 @@ export function IsAbrupt(x: CR<unknown>): x is Abrupt {
 }
 
 export function CastNotAbrupt<T>(x: CR<T>): T {
-  Assert(!IsAbrupt(x));
+  try {
+    Assert(!IsAbrupt(x));
+  } catch (e) {
+    console.dir(x); // NOTE: This is a debugging aid.
+    throw e;
+  }
   return x;
 }
 
@@ -94,6 +99,11 @@ export function ThrowCompletion(value: Val): CR<never> {
 // NOTE: This is a convenience for throwing an error
 export function Throw(name: string, msg?: string): Abrupt {
   // TODO - actual errors
+  try {
+    Assert(1 > 2);
+  } catch (e) {
+    throw new Error(msg ? `${name}: ${msg}` : name);
+  }
   return ThrowCompletion(msg ? `${name}: ${msg}` : name);
 }
 

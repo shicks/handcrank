@@ -1,19 +1,20 @@
-import { Assert } from './assert';
-import { CR, IsAbrupt, Throw } from './completion_record';
+import { IsCallable } from './abstract_compare';
+import { ToBoolean } from './abstract_conversion';
+import { Get, HasProperty } from './abstract_object';
+import { IsAbrupt, Throw } from './completion_record';
 import { UNUSED } from './enums';
-import { Obj } from './obj';
-import { Slots } from './record';
+import { Obj, OrdinaryObjectCreate } from './obj';
+import { slots } from './slots';
 import { Val } from './val';
-import { VM } from './vm';
+import { ECR, VM } from './vm';
 
-declare const OrdinaryObjectCreate: any;
-declare const OBJECT_PROTOTYPE: any;
-declare const CreateDataPropertyOrThrow: any;
-declare const HasProperty: any;
-declare const Get: any;
-declare const Set: any;
-declare const ToBoolean: any;
-declare const IsCallable: any;
+export type PropertyRecord = Record<PropertyKey, PropertyDescriptor>;
+
+// TODO - we could make this a privately-constructable class
+// if we really need to be able to distinguish it from other
+// types.  But `PropertyDescriptor|Value` is already distinguishable
+// with `instanceof Obj`, so it may still be fine as-is, and keeping
+// it an interface should be more performant.
 
 /**
  * 6.2.6 The Property Descriptor Specification Type
@@ -40,14 +41,15 @@ declare const IsCallable: any;
  * accessor Property Descriptor or a data Property Descriptor and that
  * has all of the corresponding fields defined in Table 3.
  */
-export class PropertyDescriptor extends Slots(slot => ({
-  Enumerable: slot<boolean>,
-  Configurable: slot<boolean>,
-  Writable: slot<boolean>,
-  Value: slot<Val>,
-  Get: slot<Obj|undefined>,
-  Set: slot<Obj|undefined>,
-}), 'PropertyDescriptor') {}
+export interface PropertyDescriptor {
+  Enumerable?: boolean;
+  Configurable?: boolean;
+  Writable?: boolean;
+  Value?: Val;
+  Get?: Obj;
+  Set?: Obj;
+}
+const PropertyDescriptorSlots = slots({Value: true});
 
 interface DataDescriptor extends PropertyDescriptor {
   Get?: undefined;
@@ -65,12 +67,14 @@ interface AccessorDescriptor extends PropertyDescriptor {
  * Property Descriptor or undefined) and returns a Boolean. It
  * performs the following steps when called:
  */
-export function IsAccessorDescriptor(Desc: PropertyDescriptor|undefined): Desc is AccessorDescriptor {
+export function IsAccessorDescriptor(
+  Desc: PropertyDescriptor|undefined,
+): Desc is AccessorDescriptor {
   return Boolean(Desc && (Desc.Get || Desc.Set));
 }
 
 export function HasValueField(Desc: PropertyDescriptor): boolean {
-  return PropertyDescriptor.Value in Desc;
+  return PropertyDescriptorSlots.Value in Desc;
 }
 
 /**
@@ -101,30 +105,37 @@ export function IsGenericDescriptor(Desc: PropertyDescriptor|undefined): boolean
  * The abstract operation FromPropertyDescriptor takes argument Desc
  * (a Property Descriptor or undefined) and returns an Object or
  * undefined. It performs the following steps when called:
+ * 
+ * 1. If Desc is undefined, return undefined.
+ * 2. Let obj be OrdinaryObjectCreate(%Object.prototype%).
+ * 3. Assert: obj is an extensible ordinary object with no own properties.
+ * 4. If Desc has a [[Value]] field, then
+ * a. Perform ! CreateDataPropertyOrThrow(obj, "value", Desc.[[Value]]).
+ * 5. If Desc has a [[Writable]] field, then
+ * a. Perform ! CreateDataPropertyOrThrow(obj, "writable", Desc.[[Writable]]).
+ * 6. If Desc has a [[Get]] field, then
+ * a. Perform ! CreateDataPropertyOrThrow(obj, "get", Desc.[[Get]]).
+ * 7. If Desc has a [[Set]] field, then
+ * a. Perform ! CreateDataPropertyOrThrow(obj, "set", Desc.[[Set]]).
+ * 8. If Desc has an [[Enumerable]] field, then
+ * a. Perform ! CreateDataPropertyOrThrow(obj, "enumerable", Desc.[[Enumerable]]).
+ * 9. If Desc has a [[Configurable]] field, then
+ * a. Perform ! CreateDataPropertyOrThrow(obj, "configurable", Desc.[[Configurable]]).
+ * 10. Return obj.
  */
-export function FromPropertyDescriptor($: VM, Desc: PropertyDescriptor|undefined): Obj|undefined {
+export function FromPropertyDescriptor(
+  $: VM,
+  Desc: PropertyDescriptor|undefined,
+): Obj|undefined {
   if (Desc == null) return Desc;
-  const obj = OrdinaryObjectCreate($, OBJECT_PROTOTYPE); // ???? $.Get('Object.prototype') ???
-  Assert(obj.IsExtensible() && obj.IsOrdinary() && obj.OwnPropertyKeys().length === 0);
-  if (Desc.Value != null) {
-    Assert(!IsAbrupt(CreateDataPropertyOrThrow($, obj, 'value', Desc.Value)));
-  }
-  if (Desc.Writable != null) {
-    Assert(!IsAbrupt(CreateDataPropertyOrThrow($, obj, 'writable', Desc.Writable)));
-  }
-  if (Desc.Get != null) {
-    Assert(!IsAbrupt(CreateDataPropertyOrThrow($, obj, 'get', Desc.Get)));
-  }
-  if (Desc.Set != null) {
-    Assert(!IsAbrupt(CreateDataPropertyOrThrow($, obj, 'set', Desc.Set)));
-  }
-  if (Desc.Enumerable != null) {
-    Assert(!IsAbrupt(CreateDataPropertyOrThrow($, obj, 'enumerable', Desc.Enumerable)));
-  }
-  if (Desc.Configurable != null) {
-    Assert(!IsAbrupt(CreateDataPropertyOrThrow($, obj, 'configurable', Desc.Configurable)));
-  }
-  return obj;
+  const props: PropertyRecord = {};
+  if (PropertyDescriptorSlots.Value in Desc) props.Value = propWEC(Desc.Value);
+  if (Desc.Writable != null) props.Writable = propWEC(Desc.Writable);
+  if (Desc.Get != null) props.Get = propWEC(Desc.Get);
+  if (Desc.Set != null) props.Set = propWEC(Desc.Set);
+  if (Desc.Enumerable != null) props.Enumerable = propWEC(Desc.Enumerable);
+  if (Desc.Configurable != null) props.Configurable = propWEC(Desc.Configurable);
+  return OrdinaryObjectCreate({Prototype: $.getIntrinsic('%Object.prototype%')}, props);
 }
 
 /**
@@ -135,56 +146,54 @@ export function FromPropertyDescriptor($: VM, Desc: PropertyDescriptor|undefined
  * containing a Property Descriptor or a throw completion. It performs
  * the following steps when called:
  */
-export function ToPropertyDescriptor($: VM, obj: Val): CR<PropertyDescriptor> {
+export function* ToPropertyDescriptor($: VM, obj: Val): ECR<PropertyDescriptor> {
   if (!(obj instanceof Obj)) return Throw('TypeError');
-  const desc = new PropertyDescriptor();
+  const desc: PropertyDescriptor = {};
   const hasEnumerable = HasProperty($, obj, 'enumerable');
   if (IsAbrupt(hasEnumerable)) return hasEnumerable;
   if (hasEnumerable) {
-    const enumerable = Get($, obj, 'enumerable');
+    const enumerable = yield* Get($, obj, 'enumerable');
     if (IsAbrupt(enumerable)) return enumerable;
-    desc.Enumerable = ToBoolean($, enumerable);
+    desc.Enumerable = ToBoolean(enumerable);
   }
   const hasConfigurable = HasProperty($, obj, 'configurable');
   if (IsAbrupt(hasConfigurable)) return hasConfigurable;
   if (hasConfigurable) {
-    const configurable = Get($, obj, 'configurable');
+    const configurable = yield* Get($, obj, 'configurable');
     if (IsAbrupt(configurable)) return configurable;
-    desc.Configurable = ToBoolean($, configurable);
+    desc.Configurable = ToBoolean(configurable);
   }
   const hasValue = HasProperty($, obj, 'value');
   if (IsAbrupt(hasValue)) return hasValue;
   if (hasValue) {
-    const value = Get($, obj, 'value');
+    const value = yield* Get($, obj, 'value');
     if (IsAbrupt(value)) return value;
     desc.Value = value;
   }
   const hasWritable = HasProperty($, obj, 'writable');
   if (IsAbrupt(hasWritable)) return hasWritable;
   if (hasWritable) {
-    const writable = Get($, obj, 'writable');
+    const writable = yield* Get($, obj, 'writable');
     if (IsAbrupt(writable)) return writable;
-    desc.Writable = ToBoolean($, writable);
+    desc.Writable = ToBoolean(writable);
   }
   const hasGet = HasProperty($, obj, 'get');
   if (IsAbrupt(hasGet)) return hasGet;
   if (hasGet) {
-    const getter = Get($, obj, 'get');
+    const getter = yield* Get($, obj, 'get');
     if (IsAbrupt(getter)) return getter;
     if (!IsCallable(getter) && getter != undefined) return Throw('TypeError');
-    desc.Get = getter;
+    desc.Get = getter as Obj;
   }
   const hasSet = HasProperty($, obj, 'set');
   if (IsAbrupt(hasSet)) return hasSet;
   if (hasSet) {
-    const setter = Set($, obj, 'set');
+    const setter = yield* Get($, obj, 'set');
     if (IsAbrupt(setter)) return setter;
     if (!IsCallable(setter) && setter != undefined) return Throw('TypeError');
-    desc.Set = setter;
+    desc.Set = setter as Obj;
   }
-  if (desc.Get || desc.Set) {
-    if (desc.Value || desc.Writable) return Throw('TypeError');
-  }
+  if ((desc.Get || desc.Set) && (desc.Value || desc.Writable)) return Throw('TypeError');
   return desc;
 }
 
@@ -206,4 +215,44 @@ export function CompletePropertyDescriptor(_$: VM, Desc: PropertyDescriptor): UN
   if (!Desc.Enumerable) Desc.Enumerable = false;
   if (!Desc.Configurable) Desc.Configurable = false;
   return UNUSED;
+}
+
+/** Returns a writabe, enumerable, and configurable property descriptor. */
+export function propWEC(v: Val): PropertyDescriptor {
+  return {
+    Value: v,
+    Writable: true,
+    Enumerable: true,
+    Configurable: true,
+  };
+}
+
+/** Returns a writabe and configurable property descriptor. */
+export function propWC(v: Val): PropertyDescriptor {
+  return {
+    Value: v,
+    Writable: true,
+    Enumerable: false,
+    Configurable: true,
+  };
+}
+
+/** Returns configurable but not writable property descriptor. */
+export function propC(v: Val): PropertyDescriptor {
+  return {
+    Value: v,
+    Writable: false,
+    Enumerable: false,
+    Configurable: true,
+  };
+}
+
+/** Returns a non-writabe, non-enumerable, non-configurable property descriptor. */
+export function prop0(v: Val): PropertyDescriptor {
+  return {
+    Value: v,
+    Writable: false,
+    Enumerable: false,
+    Configurable: false,
+  };
 }

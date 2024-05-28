@@ -2,10 +2,10 @@ import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt, Throw } from './completion_record';
 import { Val } from './val';
 import { EMPTY, INITIALIZED, LEXICAL, UNINITIALIZED, UNRESOLVABLE, UNUSED } from './enums';
-import { VM } from './vm';
+import { ECR, EvalGen, VM, run } from './vm';
 import { ReferenceRecord } from './reference_record';
 import { ModuleRecord } from './module_record';
-import { IsDataDescriptor, PropertyDescriptor } from './property_descriptor';
+import { IsDataDescriptor } from './property_descriptor';
 import { DefinePropertyOrThrow, Get, HasOwnProperty, HasProperty, Set as Set$ } from './abstract_object';
 import { Func } from './func';
 import { Obj } from './obj';
@@ -113,7 +113,7 @@ export abstract class EnvironmentRecord {
    * is uninitialized a ReferenceError is thrown, regardless of the
    * value of S.
    */
-  abstract GetBindingValue($: VM, N: string, S: boolean): CR<Val>;
+  abstract GetBindingValue($: VM, N: string, S: boolean): ECR<Val>;
   /**
    * DeleteBinding(N) - Delete a binding from an Environment
    * Record. The String value N is the text of the bound name. If a
@@ -335,7 +335,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * uninitialized a ReferenceError is thrown, regardless of the value
    * of S. It performs the following steps when called:
    */
-  override GetBindingValue(_$: VM, N: string, _S: boolean): CR<Val> {
+  override *GetBindingValue(_$: VM, N: string, _S: boolean): ECR<Val> {
     Assert(this.bindings.has(N));
     const binding = this.bindings.get(N)!;
     if (!binding.Initialized) return Throw('ReferenceError', '');
@@ -443,6 +443,10 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    * completion containing a Boolean or a throw completion. It
    * determines if its associated binding object has a property whose
    * name is N. It performs the following steps when called:
+   *
+   * NOTE: We do not yield through inspecting @@unscopables, because
+   * it would force too much basic inspection into generators for such
+   * an obscure use case.
    */
   override HasBinding($: VM, N: string): CR<boolean> {
     const bindingObject = this.BindingObject;
@@ -450,10 +454,10 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
     if (IsAbrupt(foundBinding)) return foundBinding;
     if (!foundBinding) return false;
     if (!this.IsWithEnvironment) return true;
-    const unscopables = Get($, bindingObject, Symbol.unscopables);
+    const unscopables = run(Get($, bindingObject, Symbol.unscopables));
     if (IsAbrupt(unscopables)) return unscopables;
     if (unscopables instanceof Obj) {
-      const prop = Get($, unscopables, N);
+      const prop = run(Get($, unscopables, N));
       if (IsAbrupt(prop)) return prop;
       const blocked = ToBoolean(prop);
       if (blocked) return false;
@@ -479,12 +483,12 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
     // does, the semantics of DefinePropertyOrThrow may result in an
     // existing binding being replaced or shadowed or cause an abrupt
     // completion to be returned.
-    const result = DefinePropertyOrThrow($, bindingObject, N, new PropertyDescriptor({
+    const result = DefinePropertyOrThrow($, bindingObject, N, {
       Value: undefined,
       Writable: true,
       Enumerable: true,
       Configurable: D,
-    }));
+    });
     if (IsAbrupt(result)) return result;
     return UNUSED;
   }
@@ -554,7 +558,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    * property should already exist but if it does not the result
    * depends upon S. It performs the following steps when called:
    */
-  override GetBindingValue($: VM, N: string, S: boolean): CR<Val> {
+  override *GetBindingValue($: VM, N: string, S: boolean): ECR<Val> {
     const bindingObject = this.BindingObject;
     const value = HasProperty($, bindingObject, N);
     if (IsAbrupt(value)) return value;
@@ -562,7 +566,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
       if (!S) return undefined;
       return Throw('ReferenceError');
     }
-    return Get($, bindingObject, N);
+    return yield* Get($, bindingObject, N);
   }
 
   /**
@@ -865,7 +869,9 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    */
   override CreateMutableBinding($: VM, N: string, D: boolean): CR<UNUSED> {
     const DclRec = this.DeclarativeRecord;
-    if (CastNotAbrupt(DclRec.HasBinding($, N))) return Throw('TypeError');
+    if (CastNotAbrupt(DclRec.HasBinding($, N))) {
+      return Throw('TypeError', `Binding ${N} already exists`);
+    }
     return CastNotAbrupt(DclRec.CreateMutableBinding($, N, D));
   }
 
@@ -883,7 +889,9 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    */
   override CreateImmutableBinding($: VM, N: string, S: boolean): CR<UNUSED> {
     const DclRec = this.DeclarativeRecord;
-    if (CastNotAbrupt(DclRec.HasBinding($, N))) return Throw('TypeError');
+    if (CastNotAbrupt(DclRec.HasBinding($, N))) {
+      return Throw('TypeError', `Binding ${N} already exists`);
+    }
     return CastNotAbrupt(DclRec.CreateImmutableBinding($, N, S));
   }
 
@@ -944,13 +952,13 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * not currently writable, error handling is determined by S. It
    * performs the following steps when called:
    */
-  override GetBindingValue($: VM, N: string, S: boolean): CR<Val> {
+  override *GetBindingValue($: VM, N: string, S: boolean): ECR<Val> {
     const DclRec =this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
-      return DclRec.GetBindingValue($, N, S);
+      return yield* DclRec.GetBindingValue($, N, S);
     }
     const ObjRec = this.ObjectRecord;
-    return ObjRec.GetBindingValue($, N, S);
+    return yield* ObjRec.GetBindingValue($, N, S);
   }
 
   /**
@@ -1136,6 +1144,17 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * the bound name in the associated [[VarNames]] List. If a binding
    * already exists, it is reused and assumed to be initialized. It
    * performs the following steps when called:
+   * 
+   * 1. Let ObjRec be envRec.[[ObjectRecord]].
+   * 2. Let globalObject be ObjRec.[[BindingObject]].
+   * 3. Let hasProperty be ? HasOwnProperty(globalObject, N).
+   * 4. Let extensible be ? IsExtensible(globalObject).
+   * 5. If hasProperty is false and extensible is true, then
+   *     a. Perform ? ObjRec.CreateMutableBinding(N, D).
+   *     b. Perform ? ObjRec.InitializeBinding(N, undefined).
+   * 6. If envRec.[[VarNames]] does not contain N, then
+   *     a. Append N to envRec.[[VarNames]].
+   * 7. Return unused.
    */
   CreateGlobalVarBinding ($: VM, N: string, D: boolean): CR<UNUSED> {
     const globalObject = this.ObjectRecord.BindingObject;
@@ -1177,8 +1196,8 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
     const existingProp = globalObject.GetOwnProperty($, N);
     if (IsAbrupt(existingProp)) return existingProp;
     const desc = (existingProp === undefined || existingProp.Configurable) ?
-        new PropertyDescriptor({Value: V, Writable: true, Enumerable: true, Configurable: D}) :
-        new PropertyDescriptor({Value: V});
+      {Value: V, Writable: true, Enumerable: true, Configurable: D} :
+      {Value: V};
     {
       const result = DefinePropertyOrThrow($, globalObject, N, desc);
       if (IsAbrupt(result)) return result;
@@ -1250,14 +1269,14 @@ export class ModuleEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * the binding exists but is uninitialized a ReferenceError is
    * thrown. It performs the following steps when called:
    */
-  override GetBindingValue(_$: VM, N: string, S: boolean): CR<Val> {
+  override *GetBindingValue($: VM, N: string, S: boolean): ECR<Val> {
     // NOTE: S will always be true because a Module is always strict mode code.
     Assert(S === true);
     const binding = this.bindings.get(N);
     Assert(binding != null);
     if (binding instanceof IndirectBinding) {
       const targetEnv = binding.Module.Environment;
-      return targetEnv.GetBindingValue(binding.Name, true);
+      return yield* targetEnv.GetBindingValue($, binding.Name, true);
     }
     if (!binding.Initialized) return Throw('ReferenceError');
     return binding.Value;

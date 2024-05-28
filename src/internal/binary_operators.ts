@@ -1,5 +1,5 @@
 import { BinaryExpression, Expression } from 'estree';
-import { DebugString, EvalGen, VM } from './vm';
+import { DebugString, ECR, EvalGen, VM } from './vm';
 import { CR, IsAbrupt, Throw } from './completion_record';
 import { Val } from './val';
 import { ToBoolean, ToNumeric, ToPrimitive, ToPropertyKey, ToString } from './abstract_conversion';
@@ -84,7 +84,7 @@ export function* Evaluation_ComparisonExpression(
         return Throw('TypeError', `Cannot use 'in' operator to search for '${
                      DebugString(lval)}' in ${DebugString(rval)}`);
       }
-      const propertyKey = ToPropertyKey($, lval);
+      const propertyKey = yield* ToPropertyKey($, lval);
       if (IsAbrupt(propertyKey)) return propertyKey;
       return HasProperty($, rval, propertyKey);
     }
@@ -126,7 +126,7 @@ export function* InstanceofOperator($: VM, V: Val, target: Val): EvalGen<CR<bool
   if (!(target instanceof Obj)) {
     return Throw('TypeError', `Right-hand side of 'instanceof' is not an object`);
   }
-  const instOfHandler = GetMethod($, target, Symbol.hasInstance);
+  const instOfHandler = yield* GetMethod($, target, Symbol.hasInstance);
   if (IsAbrupt(instOfHandler)) return instOfHandler;
   if (instOfHandler != null) {
     return fmap(yield* Call($, instOfHandler, target, [V]), ToBoolean);
@@ -196,21 +196,21 @@ export function* Evaluation_ShortCircuitExpression(
  * by using the logical-or operation instead of the logical-and
  * operation.
  */
-export function ApplyStringOrNumericBinaryOperator(
+export function* ApplyStringOrNumericBinaryOperator(
   $: VM,
   lval: Val,
   opText: string,
   rval: Val,
-): CR<Val> {
+): ECR<Val> {
   if (opText === '+') {
-    const lprim = ToPrimitive($, lval);
+    const lprim = yield* ToPrimitive($, lval);
     if (IsAbrupt(lprim)) return lprim;
-    const rprim = ToPrimitive($, rval);
+    const rprim = yield* ToPrimitive($, rval);
     if (IsAbrupt(rprim)) return rprim;
     if (typeof lprim === 'string' || typeof rprim === 'string') {
-      const lstr = ToString($, lprim);
+      const lstr = yield* ToString($, lprim);
       if (IsAbrupt(lstr)) return lstr;
-      const rstr = ToString($, rprim);
+      const rstr = yield* ToString($, rprim);
       if (IsAbrupt(rstr)) return rstr;
       return lstr + rstr;
     }
@@ -219,9 +219,9 @@ export function ApplyStringOrNumericBinaryOperator(
   }
   // NOTE: We use `as any` here because TS can't guarantee that the
   // types are the same, but we check it below.
-  const lnum = ToNumeric($, lval) as any;
+  const lnum = yield* ToNumeric($, lval) as any;
   if (IsAbrupt(lnum)) return lnum;
-  const rnum = ToNumeric($, rval) as any;
+  const rnum = yield* ToNumeric($, rval) as any;
   if (IsAbrupt(rnum)) return rnum;
   // NOTE: `typeof` is equivalent to `Type` at this point
   if (typeof lnum !== typeof rnum) {
@@ -271,5 +271,5 @@ export function* EvaluateStringOrNumericBinaryExpression(
   if (IsAbrupt(lval)) return lval;
   const rval = yield* $.evaluateValue(rightOperand);
   if (IsAbrupt(rval)) return rval;
-  return ApplyStringOrNumericBinaryOperator($, lval, opText, rval);
+  return yield* ApplyStringOrNumericBinaryOperator($, lval, opText, rval);
 }

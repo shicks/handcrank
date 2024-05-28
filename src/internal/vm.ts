@@ -1,16 +1,17 @@
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { Val } from './val';
 import { ExecutionContext } from './execution_context';
-import { EMPTY, NOT_APPLICABLE } from './enums';
+import { EMPTY, NOT_APPLICABLE, UNRESOLVABLE } from './enums';
 import { NodeType, NodeMap, Node, Esprima, preprocess } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
-import { PropertyDescriptor } from './property_descriptor';
-import { InitializeHostDefinedRealm, RealmRecord } from './realm_record';
+import { InitializeHostDefinedRealm, RealmAdvice, RealmRecord } from './realm_record';
 import { ParseScript, ScriptEvaluation } from './script_record';
 import * as ESTree from 'estree';
 import { Obj, OrdinaryObjectCreate } from './obj';
+import { EnvironmentRecord } from './environment_record';
 
 export type EvalGen<T> = Generator<undefined, T, undefined>;
+export type ECR<T> = EvalGen<CR<T>>;
 
 export function run<T>(gen: EvalGen<T>) {
   let result;
@@ -25,8 +26,7 @@ export class VM {
   executionStack: ExecutionContext[] = [];
 
   // Plugins - note: globals and intrinsics built in RealmRecord
-  intrinsics = new Map<string, IntrinsicFn>();
-  globals = new Map<string, GlobalDefFn>();
+  plugins = new Map<string|symbol|Plugin, Plugin>();
   syntaxOperations: SyntaxHandlers = {
     Evaluation: {},
   };
@@ -41,7 +41,7 @@ export class VM {
 
   newError(_name: string): Obj {
     // TODO - make this work
-    return OrdinaryObjectCreate(null, []);
+    return OrdinaryObjectCreate();
   }
 
   // TODO - can we store strictness of executing production here?
@@ -75,18 +75,18 @@ export class VM {
   // ReferenceRecords.  The spec does this in a production that's basically
   // transparent to ESTree, so we don't have a good opportunity, but we do
   // know when an rvalue is required from a child.
-  * evaluateValue(node: Node): EvalGen<CR<Val>> {
+  * evaluateValue(node: Node): ECR<Val> {
     this.initialize()
     const result: CR<EMPTY|Val|ReferenceRecord> = yield* this.operate('Evaluation', node);
     if (IsAbrupt(result)) return result;
     if (EMPTY.is(result)) return undefined;
-    if (result instanceof ReferenceRecord) return GetValue(this, result);
+    if (result instanceof ReferenceRecord) return yield* GetValue(this, result);
     return result;
   }
 
-  evaluateScript(script: ESTree.Program): EvalGen<CR<Val>>;
-  evaluateScript(script: string, filename?: string): EvalGen<CR<Val>>;
-  * evaluateScript(script: string|ESTree.Program, filename?: string): EvalGen<CR<Val>> {
+  evaluateScript(script: ESTree.Program): ECR<Val>;
+  evaluateScript(script: string, filename?: string): ECR<Val>;
+  * evaluateScript(script: string|ESTree.Program, filename?: string): ECR<Val> {
     this.initialize()
     if (typeof script === 'string') {
       const source = script;
@@ -132,7 +132,7 @@ export class VM {
     }
     const result = yield* ScriptEvaluation(this, record);
     return IsAbrupt(result) ? result : EMPTY.is(result) ? undefined :
-      GetValue(this, result);
+      yield* GetValue(this, result);
   }
 
   Evaluation(n: Node): SyntaxOp['Evaluation'] {
@@ -140,6 +140,7 @@ export class VM {
   }
 
   operate<O extends keyof SyntaxOp>(op: O, n: Node): SyntaxOp[O] {
+    debugger;
     for (const impl of this.syntaxOperations[op][n.type] || []) {
       const result = impl(n as any, (child) => this.operate(op, child));
       if (!NOT_APPLICABLE.is(result)) return result;
@@ -150,10 +151,18 @@ export class VM {
   }
 
   install(plugin: Plugin): void {
+    for (const dep of plugin.deps ?? []) {
+      const id = dep.id ?? dep;
+      if (!this.plugins.has(id)) this.install(dep);
+    }
+    const id = plugin.id ?? plugin;
+    this.plugins.set(id, plugin);
+
+    if (!plugin.syntax) return;
     for (const key in this.syntaxOperations) {
-      const register = plugin[key as keyof SyntaxOp];
+      const register = plugin.syntax[key as keyof SyntaxOp];
       if (!Object.hasOwn(this.syntaxOperations, key) ||
-        !Object.hasOwn(plugin, key) ||
+        !Object.hasOwn(plugin.syntax, key) ||
         typeof register != 'function') continue;
       const op = this.syntaxOperations[key as keyof SyntaxOp];
       const on = (types: NodeType|NodeType[], handler: SyntaxHandler<any, any>) => {
@@ -163,16 +172,6 @@ export class VM {
         }
       };
       register(this, on);
-    }
-    for (const name in plugin.Intrinsics || {}) {
-      const gen = plugin.Intrinsics![name as `%${string}%`];
-      if (this.intrinsics.has(name)) throw new Error(`already defined: ${name}`);
-      this.intrinsics.set(name, gen);
-    }
-    for (const name in plugin.Globals || {}) {
-      const gen = plugin.Globals![name];
-      if (this.globals.has(name)) throw new Error(`already defined: ${name}`);
-      this.globals.set(name, gen);
     }
   }
 }
@@ -189,16 +188,15 @@ export function when<N, T>(
 }
 
 interface SyntaxOp {
-  Evaluation: EvalGen<CR<Val|ReferenceRecord|EMPTY>>;
+  Evaluation: ECR<Val|ReferenceRecord|EMPTY>;
 }
-type IntrinsicFn = ($: VM) => Generator<string, Obj, Obj>;
-type GlobalDefFn = ($: VM) => Generator<string, Val|PropertyDescriptor, Obj>;
 type SyntaxOpMap = {[K in keyof SyntaxOp]?: ($: VM, on: SyntaxRegistration<K>) => void};
 
-export interface Plugin extends SyntaxOpMap {
-  Intrinsics?: Record<`%${string}%`, IntrinsicFn>;
-  Globals?: Record<string, GlobalDefFn>;
-  // Evaluation?($: VM, on: <N>(types: N|N[], handler: (NodeMap[N]) => Gen<CR<Val>>|NA) => void);
+export interface Plugin {
+  id?: string|symbol;
+  deps?: Plugin[];
+  syntax?: SyntaxOpMap;
+  realm?: RealmAdvice;
 }
 
 type SyntaxRegistration<O extends keyof SyntaxOp> =
@@ -240,7 +238,16 @@ type SyntaxHandlers = {[O in keyof SyntaxOp]: SyntaxHandlerMap<O>};
 //        we can just assume all prereqs exist?
 //export type Plugin = (spi: PluginSPI) => void;
 
-export function DebugString(v: Val): string {
+export function DebugString(v: Val|ReferenceRecord): string {
+  if (v instanceof ReferenceRecord) {
+    if (v.Base instanceof EnvironmentRecord) {
+      return String(v.ReferencedName);
+    } else if (UNRESOLVABLE.is(v.Base)) {
+      return `%UNRESOLVABLE%.${String(v.ReferencedName)}`;
+    } else {
+      return `${DebugString(v.Base)}.${String(v.ReferencedName)}`;
+    }
+  }
   if (typeof v === 'string') return JSON.stringify(v);
   if (typeof v === 'bigint') return `${String(v)}n`;
   if (v instanceof Obj) {

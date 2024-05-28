@@ -1,6 +1,6 @@
 /** @fileoverview 8.2 Scope Analysis */
 
-import { Node, ParentNode } from '../tree';
+import { Node, TopLevelNode } from '../tree';
 
 /**
  * 8.2.1 Static Semantics: BoundNames
@@ -123,9 +123,12 @@ export function IsConstantDeclaration(node: Node): boolean {
  * that it treats top-level functions as `var` instead of `let`.
  * Block-scoped functions are always treated as `let`.
  */
-export function LexicallyDeclaredNames(node: Node): string[] {
+export function LexicallyDeclaredNames(node: Node|Node[]): string[] {
   const names: string[] = [];
-  visitLexicallyScopedDecls(node, (n) => BoundNames(n, names));
+  if (!Array.isArray(node)) node = [node];
+  for (const stmt of node) {
+    visitLexicallyScopedDecls(stmt, (n) => BoundNames(n, names));
+  }
   return names;
 }
 
@@ -169,9 +172,12 @@ export function LexicallyScopedDeclarations(node: Node|Node[]): Node[] {
  * NOTE: At the top level of a function or script, inner function
  * declarations are treated like var declarations.
  */
-export function VarDeclaredNames(node: Node): string[] {
+export function VarDeclaredNames(node: Node|Node[]): string[] {
   const names: string[] = [];
-  visitVarScopedDecls(node, (n) => BoundNames(n, names));
+  if (!Array.isArray(node)) node = [node];
+  for (const stmt of node) {
+    visitVarScopedDecls(stmt, (n) => BoundNames(n, names));
+  }
   return names;
 }
 
@@ -188,38 +194,17 @@ export function VarDeclaredNames(node: Node): string[] {
  * The syntax-directed operation TopLevelVarScopedDeclarations takes
  * no arguments and returns a List of Parse Nodes.
  */
-export function VarScopedDeclarations(node: Node): Node[] {
+export function VarScopedDeclarations(node: Node|Node[]): Node[] {
   const nodes: Node[] = [];
-  visitVarScopedDecls(node, (n) => nodes.push(n));
+  if (!Array.isArray(node)) node = [node];
+  for (const stmt of node) {
+    visitVarScopedDecls(stmt, (n) => nodes.push(n));
+  }
   return nodes;
 }
 
-const TOP_LEVEL_DECLS = new Set<string|undefined>([
-  'FunctionDeclaration',
-  'FunctionExpression',
-  'ClassBody',
-  'ClassDeclaration',
-  'ClassExpression',
-  'Program',
-]);
 export function IsTopLevel(node?: Node): boolean {
-  const parent = (node as ParentNode).parent;
-  if (TOP_LEVEL_DECLS.has(node?.type)) return true;
-  switch (node?.type) {
-    case 'StaticBlock':
-    case 'BlockStatement':
-      return TOP_LEVEL_DECLS.has(parent?.type);
-    case 'IfStatement':
-    case 'ForStatement':
-    case 'ForInStatement':
-    case 'ForOfStatement':
-    case 'DoWhileStatement':
-    case 'WhileStatement':
-    case 'TryStatement':
-    case 'WithStatement':
-      return false;
-  }
-  return IsTopLevel(parent);
+  return (node as TopLevelNode).topLevel || false;
 }
 
 type Visitor = (node: Node) => void;
