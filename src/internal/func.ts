@@ -547,16 +547,9 @@ export function InstantiateOrdinaryFunctionExpression(
 }
 
 function sourceText(node: Node): string {
-  let n = node as Node&ParentNode;
-
-  // TODO - fix this!
-
-  if (n.type === 'FunctionExpression' && (n as any).parent?.type === 'Property') {
-    n = (n as any).parent;
-  }
-  const source = n.loc?.source as unknown as Source;
+  const source = node.loc?.source as unknown as Source;
   if (!source) return '';
-  const range = n.range || [(n as any).start, (n as any).end];
+  const range = node.range || [(node as any).start, (node as any).end];
   return source.sourceText?.substring(range[0], range[1]) || '';
 }
 

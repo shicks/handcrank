@@ -140,7 +140,6 @@ export class VM {
   }
 
   operate<O extends keyof SyntaxOp>(op: O, n: Node): SyntaxOp[O] {
-    debugger;
     for (const impl of this.syntaxOperations[op][n.type] || []) {
       const result = impl(n as any, (child) => this.operate(op, child));
       if (!NOT_APPLICABLE.is(result)) return result;

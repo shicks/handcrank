@@ -435,7 +435,7 @@ export const booleanObject: Plugin = {
       function thisBooleanValue(value: Val): CR<boolean> {
         if (typeof value === 'boolean') return value;
         if (value instanceof Obj && value.BooleanData != null) {
-          Assert(typeof value.BooleanData !== 'boolean');
+          Assert(typeof value.BooleanData === 'boolean');
           return value.BooleanData;
         }
         return Throw('TypeError');
@@ -464,6 +464,7 @@ export const booleanObject: Plugin = {
          * 1. Return ? thisBooleanValue(this value).
          */
         'valueOf': method(function*($, thisValue) {
+          debugger;
           return thisBooleanValue(thisValue);
         }),
       });

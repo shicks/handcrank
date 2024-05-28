@@ -3,7 +3,7 @@ import { PrivateName } from '../private_environment_record';
 import { CR, IsAbrupt } from '../completion_record';
 import { Func, InstantiateOrdinaryFunctionExpression } from '../func';
 import { EvalGen, VM } from '../vm';
-import { ParentNode, Source } from '../tree';
+import { Source } from '../tree';
 import { PropertyKey } from '../val';
 import { IteratorRecord } from '../abstract_iterator';
 import { EnvironmentRecord } from '../environment_record';
@@ -495,9 +495,14 @@ export function IsSimpleParameterList(params: Node[]): boolean {
 
 // ESTree details
 export function GetSourceText(n: Node): string {
-  if ((n as ParentNode).parent?.type === 'Property') {
-    n = (n as ParentNode).parent!;
-  }
+  // NOTE: This is not accurate for methods - we'll need to fix that when
+  // we implement classes and/or object methods, but rather than using a
+  // parent reference, it's probably better to just read the parent directly
+  // when we already have it handy.
+
+  // if ((n as ParentNode).parent?.type === 'Property') {
+  //   n = (n as ParentNode).parent!;
+  // }
   if (!n) return NO_SOURCE;
   if (!n.loc) return NO_SOURCE;
   const start = (n as any).start ?? n.range?.[0];
