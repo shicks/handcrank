@@ -1206,6 +1206,9 @@ export const BuiltinFunction = memoize(() => class BuiltinFunction extends Ordin
 
   constructor(slots: BuiltinFunctionSlots, props: PropertyRecord) {
     super(slots, props);
+
+    if (this.CallBehavior) this.Call = this.CallBehavior;
+    if (this.ConstructBehavior) this.Construct = this.ConstructBehavior;
   }
 
   /**
@@ -1239,10 +1242,11 @@ export const BuiltinFunction = memoize(() => class BuiltinFunction extends Ordin
    * stack it must not be destroyed if it has been suspended and
    * retained by an accessible Generator for later resumption.
    */
-  Call($: VM, thisArgument: Val, argumentsList: Val[]): ECR<Val> {
-    if (this.CallBehavior) return this.CallBehavior($, thisArgument, argumentsList);
-    return (function*() { return Throw('TypeError', 'not callable'); })();
-  }
+  // Call($: VM, thisArgument: Val, argumentsList: Val[]): ECR<Val> {
+  //   console.dir(this);
+  //   if (this.CallBehavior) return this.CallBehavior($, thisArgument, argumentsList);
+  //   return (function*() { return Throw('TypeError', 'not callable'); })();
+  // }
 
   /**
    * 10.3.2 [[Construct]] ( argumentsList, newTarget )
@@ -1259,10 +1263,10 @@ export const BuiltinFunction = memoize(() => class BuiltinFunction extends Ordin
    *     F. The this value is uninitialized, argumentsList provides the named
    *     parameters, and newTarget provides the NewTarget value.
    */
-  Construct($: VM, argumentsList: Val[], newTarget: Obj): ECR<Obj> {
-    if (this.ConstructBehavior) return this.ConstructBehavior($, argumentsList, newTarget);
-    return (function*() { return Throw('TypeError', 'not a constructible'); })();
-  }
+  // Construct($: VM, argumentsList: Val[], newTarget: Obj): ECR<Obj> {
+  //   if (this.ConstructBehavior) return this.ConstructBehavior($, argumentsList, newTarget);
+  //   return (function*() { return Throw('TypeError', 'not a constructible'); })();
+  // }
 });
 
 export interface BuiltinFunctionSlots extends ObjectSlots {

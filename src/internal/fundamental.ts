@@ -352,7 +352,7 @@ function makeWrapper(
   behavior: BuiltinFunctionBehavior,
 ): [BuiltinFunction, OrdinaryObject] {
   const ctor = CreateBuiltinFunction(
-    {}, 1, name, realm, realm.Intrinsics.get('%Function.prototype%')!);
+    behavior, 1, name, realm, realm.Intrinsics.get('%Function.prototype%')!);
   const prototype = OrdinaryObjectCreate({
     Prototype: superClass != null ? realm.Intrinsics.get(superClass) : null,
   }, {
