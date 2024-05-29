@@ -1,3 +1,4 @@
+import { Node } from 'estree';
 import { Assert } from './assert';
 import { CR } from './completion_record';
 import { EnvironmentRecord, FunctionEnvironmentRecord, GetIdentifierReference } from './environment_record';
@@ -133,6 +134,8 @@ export class ExecutionContext {
  * running execution context.
  */
 export class CodeExecutionContext extends ExecutionContext {
+  // currently executing node, for stack trace purposes
+  currentNode: Node|undefined = undefined;
   constructor(
     ScriptOrModule: ScriptRecord|ModuleRecord|null,
     Function: Func|null,
@@ -228,7 +231,7 @@ export function GetThisEnvironment($: VM): EnvironmentRecord {
  * execution context. It performs the following steps when called:
  */
 export function ResolveThisBinding($: VM): CR<Val> {
-  return GetThisEnvironment($).GetThisBinding();
+  return GetThisEnvironment($).GetThisBinding($);
 }
 
 /**

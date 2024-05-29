@@ -96,17 +96,6 @@ export function ThrowCompletion(value: Val): CR<never> {
   return new Abrupt(CompletionType.Throw, value, EMPTY);
 }
 
-// NOTE: This is a convenience for throwing an error
-export function Throw(name: string, msg?: string): Abrupt {
-  // TODO - actual errors
-  try {
-    Assert(1 > 2);
-  } catch (e) {
-    throw new Error(msg ? `${name}: ${msg}` : name);
-  }
-  return ThrowCompletion(msg ? `${name}: ${msg}` : name);
-}
-
 /**
  * 6.2.4.3 UpdateEmpty ( completionRecord, value )
  *

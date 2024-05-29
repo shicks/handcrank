@@ -1,8 +1,8 @@
 import { Assert } from './assert';
-import { CR, CastNotAbrupt, IsAbrupt, Throw } from './completion_record';
+import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { Val } from './val';
 import { EMPTY, INITIALIZED, LEXICAL, UNINITIALIZED, UNRESOLVABLE, UNUSED } from './enums';
-import { ECR, EvalGen, VM, run } from './vm';
+import { ECR, VM, run } from './vm';
 import { ReferenceRecord } from './reference_record';
 import { ModuleRecord } from './module_record';
 import { IsDataDescriptor } from './property_descriptor';
@@ -144,7 +144,7 @@ export abstract class EnvironmentRecord {
    * NOTE: The spec doesn't indicate this as being present on the
    * base class, but it's called on it, so we include it here.
    */
-  GetThisBinding(): CR<Val|undefined> {
+  GetThisBinding(_$: VM): CR<Val|undefined> {
     return undefined;
   }
 }
@@ -305,7 +305,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    */
   override SetMutableBinding($: VM, N: string, V: Val, S: boolean): CR<UNUSED> {
     if (!this.bindings.has(N)) {
-      if (S) return Throw('ReferenceError');
+      if (S) return $.throw('ReferenceError');
       Assert(!IsAbrupt(this.CreateMutableBinding($, N, true)));
       Assert(!IsAbrupt(this.InitializeBinding($, N, V)));
       return UNUSED;
@@ -313,14 +313,14 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
 
     const binding = this.bindings.get(N)!;
     S ||= binding.Strict;
-    if (!binding.Initialized) return Throw('ReferenceError');
+    if (!binding.Initialized) return $.throw('ReferenceError');
     if (binding instanceof MutableBinding) {
       binding.Value = V;
       (binding as UninitializedBinding).Initialized = true;
       return UNUSED;
     }
     // Assert: Attempt to change value of an immutable binding
-    if (S) return Throw('TypeError');
+    if (S) return $.throw('TypeError');
     return UNUSED;
   }
 
@@ -335,10 +335,10 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * uninitialized a ReferenceError is thrown, regardless of the value
    * of S. It performs the following steps when called:
    */
-  override *GetBindingValue(_$: VM, N: string, _S: boolean): ECR<Val> {
+  override *GetBindingValue($: VM, N: string, _S: boolean): ECR<Val> {
     Assert(this.bindings.has(N));
     const binding = this.bindings.get(N)!;
-    if (!binding.Initialized) return Throw('ReferenceError', '');
+    if (!binding.Initialized) return $.throw('ReferenceError', '');
     return binding.Value;
   }
 
@@ -541,7 +541,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
     const bindingObject = this.BindingObject;
     const stillExists = HasProperty($, bindingObject, N);
     if (IsAbrupt(stillExists)) return stillExists;
-    if (!stillExists && S) return Throw('ReferenceError');
+    if (!stillExists && S) return $.throw('ReferenceError');
     const result = Set$($, bindingObject, N, V, S);
     if (IsAbrupt(result)) return result;
     return UNUSED;
@@ -564,7 +564,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
     if (IsAbrupt(value)) return value;
     if (!value) {
       if (!S) return undefined;
-      return Throw('ReferenceError');
+      return $.throw('ReferenceError');
     }
     return yield* Get($, bindingObject, N);
   }
@@ -688,9 +688,9 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * language value or a throw completion. It performs the following
    * steps when called:
    */
-  BindThisValue(_$: VM, V: Val): CR<Val> {
+  BindThisValue($: VM, V: Val): CR<Val> {
     Assert(this.ThisBindingStatus !== LEXICAL);
-    if (this.ThisBindingStatus === INITIALIZED) return Throw('ReferenceError');
+    if (this.ThisBindingStatus === INITIALIZED) return $.throw('ReferenceError');
     this.ThisValue = V;
     this.ThisBindingStatus = INITIALIZED;
     return V;
@@ -728,9 +728,9 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * completion containing an ECMAScript language value or a throw
    * completion. It performs the following steps when called:
    */
-  override GetThisBinding(): CR<Val> {
+  override GetThisBinding($: VM): CR<Val> {
     Assert(this.ThisBindingStatus !== LEXICAL);
-    if (this.ThisBindingStatus === UNINITIALIZED) return Throw('ReferenecError');
+    if (this.ThisBindingStatus === UNINITIALIZED) return $.throw('ReferenecError');
     return this.ThisValue;
   }
 
@@ -870,7 +870,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
   override CreateMutableBinding($: VM, N: string, D: boolean): CR<UNUSED> {
     const DclRec = this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
-      return Throw('TypeError', `Binding ${N} already exists`);
+      return $.throw('TypeError', `Binding ${N} already exists`);
     }
     return CastNotAbrupt(DclRec.CreateMutableBinding($, N, D));
   }
@@ -890,7 +890,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
   override CreateImmutableBinding($: VM, N: string, S: boolean): CR<UNUSED> {
     const DclRec = this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
-      return Throw('TypeError', `Binding ${N} already exists`);
+      return $.throw('TypeError', `Binding ${N} already exists`);
     }
     return CastNotAbrupt(DclRec.CreateImmutableBinding($, N, S));
   }
@@ -1278,7 +1278,7 @@ export class ModuleEnvironmentRecord extends DeclarativeEnvironmentRecord {
       const targetEnv = binding.Module.Environment;
       return yield* targetEnv.GetBindingValue($, binding.Name, true);
     }
-    if (!binding.Initialized) return Throw('ReferenceError');
+    if (!binding.Initialized) return $.throw('ReferenceError');
     return binding.Value;
   }
 

@@ -1,7 +1,7 @@
 import { RealmRecord } from './realm_record';
 import * as ESTree from 'estree';
-import { ECR, EvalGen, VM } from './vm';
-import { CR, IsAbrupt, Throw } from './completion_record';
+import { ECR, VM } from './vm';
+import { CR, IsAbrupt } from './completion_record';
 import { Val } from './val';
 import { CodeExecutionContext } from './execution_context';
 import { UNUSED } from './enums';
@@ -76,7 +76,7 @@ export function ParseScript(script: ESTree.Program,
  * an ECMAScript language value or an abrupt completion. It performs
  * the following steps when called:
  */
-export function* ScriptEvaluation($: VM, scriptRecord: ScriptRecord): EvalGen<CR<Val>> {
+export function* ScriptEvaluation($: VM, scriptRecord: ScriptRecord): ECR<Val> {
 
   const globalEnv = scriptRecord.Realm?.GlobalEnv;
   if (!globalEnv) throw new Error('no global env!');
@@ -159,25 +159,25 @@ export function GlobalDeclarationInstantiation(
   for (const name of lexNames) {
     //   a. If env.HasVarDeclaration(name) is true, throw a SyntaxError exception.
     if (env.HasVarDeclaration($, name)) {
-      return Throw('SyntaxError',
+      return $.throw('SyntaxError',
                    `Identifier '${name}' has already been declared`);
     }
     //   b. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
     if (env.HasLexicalDeclaration($, name)) {
-      return Throw('SyntaxError', `Identifier '${name}' has already been declared`);
+      return $.throw('SyntaxError', `Identifier '${name}' has already been declared`);
     }
     //   c. Let hasRestrictedGlobal be ? env.HasRestrictedGlobalProperty(name).
     const hasRestrictedGlobal = env.HasRestrictedGlobalProperty($, name);
     if (IsAbrupt(hasRestrictedGlobal)) return hasRestrictedGlobal;
     //   d. If hasRestrictedGlobal is true, throw a SyntaxError exception.
-    if (hasRestrictedGlobal) return Throw('SyntaxError');
+    if (hasRestrictedGlobal) return $.throw('SyntaxError');
   }
   // 4. For each element name of varNames, do
   for (const name of varNames) {
     //   a. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
     debugger;
     if (env.HasLexicalDeclaration($, name)) {
-      return Throw('SyntaxError',
+      return $.throw('SyntaxError',
                    `Identifier '${name}' has already been declared`);
     }
   }
@@ -205,7 +205,7 @@ export function GlobalDeclarationInstantiation(
       const fnDefinable = env.CanDeclareGlobalFunction($, fn);
       if (IsAbrupt(fnDefinable)) return fnDefinable;
       //         2. If fnDefinable is false, throw a TypeError exception.
-      if (!fnDefinable) return Throw('TypeError');
+      if (!fnDefinable) return $.throw('TypeError');
       //         3. Append fn to declaredFunctionNames.
       declaredFunctionNames.add(fn);
       //         4. Insert d as the first element of functionsToInitialize.
@@ -228,7 +228,7 @@ export function GlobalDeclarationInstantiation(
           const vnDefinable = env.CanDeclareGlobalVar($, vn);
           if (IsAbrupt(vnDefinable)) return vnDefinable;
           //         b. If vnDefinable is false, throw a TypeError exception.
-          if (!vnDefinable) return Throw('TypeError');
+          if (!vnDefinable) return $.throw('TypeError');
           //         c. If declaredVarNames does not contain vn, then
           //             i. Append vn to declaredVarNames.
           declaredVarNames.add(vn);

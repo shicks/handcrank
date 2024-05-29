@@ -1,4 +1,4 @@
-import { CR, CastNotAbrupt, IsAbrupt, Throw, ThrowCompletion } from './completion_record';
+import { CR, CastNotAbrupt, IsAbrupt, ThrowCompletion } from './completion_record';
 import { DebugString, ECR, EvalGen, VM } from './vm';
 import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, STRICT, UNINITIALIZED, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
@@ -145,6 +145,12 @@ declare global {
     IsClassConstructor?: boolean;
 
     ////////////////////////////////////////////////////////////////
+    // Non-standard slot for improved stack traces
+
+    /** Internal-only name stored when OwnProps.name is empty. */
+    InternalName?: string;
+
+    ////////////////////////////////////////////////////////////////
     // Slot for builtin function object
 
     InitialName?: string;
@@ -171,11 +177,6 @@ declare global {
      */
     BoundArguments?: Val[];
   }
-
-  // // Slots for bound function exotic objects
-  // BoundTargetFunction: slot<Obj>,
-  // BoundThis: slot<Val>,
-  // BoundArguments: slot<Val[]>,
 
   // // Slot for exotic mapped arguments object
   // ParameterMap: slot<Obj|undefined>,
@@ -1203,8 +1204,8 @@ export const BuiltinFunction = memoize(() => class BuiltinFunction extends Ordin
   constructor(slots: BuiltinFunctionSlots, props: PropertyRecord) {
     super(slots, props);
 
-    if (this.CallBehavior) this.Call = this.CallBehavior;
-    if (this.ConstructBehavior) this.Construct = this.ConstructBehavior;
+    if (this.CallBehavior) (this as Func).Call = this.CallBehavior;
+    if (this.ConstructBehavior) (this as Func).Construct = this.ConstructBehavior;
   }
 
   /**
@@ -1508,7 +1509,7 @@ export function* Evaluation_NewExpression(
   const argList = yield* ArgumentListEvaluation($, node.arguments);
   if (IsAbrupt(argList)) return argList;
   if (!IsConstructor(constructor)) {
-    return Throw('TypeError', `${DebugString(ref)} is not a constructor`);
+    return $.throw('TypeError', `${DebugString(ref)} is not a constructor`);
   }
   return yield* Construct($, constructor as Func, argList);
 }
@@ -1616,8 +1617,8 @@ export function* EvaluateCall(
   }
   const argList = yield* ArgumentListEvaluation($, args);
   if (IsAbrupt(argList)) return argList;
-  if (typeof func !== 'object') return Throw('TypeError', `${DebugString(ref)} is not an object`);
-  if (!IsCallable(func)) return Throw('TypeError', `${DebugString(ref)} is not callable`);
+  if (typeof func !== 'object') return $.throw('TypeError', `${DebugString(ref)} is not an object`);
+  if (!IsCallable(func)) return $.throw('TypeError', `${DebugString(ref)} is not callable`);
   if (tailPosition) PrepareForTailCall($);
   return yield* Call($, func, thisValue, argList);
 }
@@ -1726,4 +1727,23 @@ export function method(
   return (realm, name) => propWC(CreateBuiltinFunction({
     Call($, thisObj, argumentsList) { return fn($, thisObj, ...argumentsList); },
   }, fn.length - 2, name, realm, realm.Intrinsics.get('%Function.prototype%')!));
+}
+
+/**
+ * Defines a property descriptor for a builtin method.  For use with
+ * `defineProperties`, which allows passing lazy descriptors.
+ */
+export function getter(
+  fn: ($: VM, thisValue: Val) => ECR<Val>,
+  attrs: PropertyDescriptor = {},
+): (realm: RealmRecord, name: string) => PropertyDescriptor {
+  return (realm, name) => ({
+    Enumerable: false,
+    Configurable: true,
+    Get: CreateBuiltinFunction({
+      Call($, thisObj) { return fn($, thisObj); },
+    }, 0, name, realm, realm.Intrinsics.get('%Function.prototype%')!, 'get'),
+    Set: undefined,
+    ...attrs,
+  });
 }

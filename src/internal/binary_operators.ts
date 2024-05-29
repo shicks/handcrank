@@ -1,6 +1,6 @@
 import { BinaryExpression, Expression } from 'estree';
 import { DebugString, ECR, EvalGen, VM } from './vm';
-import { CR, IsAbrupt, Throw } from './completion_record';
+import { CR, IsAbrupt } from './completion_record';
 import { Val } from './val';
 import { ToBoolean, ToNumeric, ToPrimitive, ToPropertyKey, ToString } from './abstract_conversion';
 import { IsCallable, IsLessThan, IsLooselyEqual, IsStrictlyEqual } from './abstract_compare';
@@ -57,7 +57,7 @@ export function* Evaluation_ComparisonExpression(
     const rval = yield* $.evaluateValue(right);
     if (IsAbrupt(rval)) return rval;
     if (!(rval instanceof Obj)) {
-      return Throw('TypeError', `Cannot use 'in' operator to search for '#${
+      return $.throw('TypeError', `Cannot use 'in' operator to search for '#${
                    privateIdentifier}' in ${DebugString(rval)}`);
     }
     const privateEnv = $.getRunningContext().PrivateEnvironment;
@@ -81,7 +81,7 @@ export function* Evaluation_ComparisonExpression(
     case '>=': return fmap(IsLessThan($, lval, rval, true), x => !x ?? false);
     case 'in': {
       if (!(rval instanceof Obj)) {
-        return Throw('TypeError', `Cannot use 'in' operator to search for '${
+        return $.throw('TypeError', `Cannot use 'in' operator to search for '${
                      DebugString(lval)}' in ${DebugString(rval)}`);
       }
       const propertyKey = yield* ToPropertyKey($, lval);
@@ -124,7 +124,7 @@ function fmap<T, U>(v: CR<T>, f: (arg: T) => CR<U>): CR<U> {
  */
 export function* InstanceofOperator($: VM, V: Val, target: Val): EvalGen<CR<boolean>> {
   if (!(target instanceof Obj)) {
-    return Throw('TypeError', `Right-hand side of 'instanceof' is not an object`);
+    return $.throw('TypeError', `Right-hand side of 'instanceof' is not an object`);
   }
   const instOfHandler = yield* GetMethod($, target, Symbol.hasInstance);
   if (IsAbrupt(instOfHandler)) return instOfHandler;
@@ -132,7 +132,7 @@ export function* InstanceofOperator($: VM, V: Val, target: Val): EvalGen<CR<bool
     return fmap(yield* Call($, instOfHandler, target, [V]), ToBoolean);
   }
   if (!IsCallable(target)) {
-    return Throw('TypeError', `Right-hand side of 'instanceof' is not callable`);
+    return $.throw('TypeError', `Right-hand side of 'instanceof' is not callable`);
   }
   return yield* OrdinaryHasInstance($, target, V);
 }
@@ -225,7 +225,7 @@ export function* ApplyStringOrNumericBinaryOperator(
   if (IsAbrupt(rnum)) return rnum;
   // NOTE: `typeof` is equivalent to `Type` at this point
   if (typeof lnum !== typeof rnum) {
-    return Throw('TypeError', 'Cannot mix BigInt and other types, use explicit conversions');
+    return $.throw('TypeError', 'Cannot mix BigInt and other types, use explicit conversions');
   }
   switch (opText) {
     case '+': return lnum + rnum;

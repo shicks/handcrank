@@ -21,7 +21,7 @@ declare const ToNumeric: any;
  * 2. If argument has a [[Call]] internal method, return true.
  * 3. Return false.
  */
-export function IsCallable(argument: Val): boolean {
+export function IsCallable(argument: Val): argument is Func&{Call: {}} {
   if (!(argument instanceof Obj)) return false;
   if ((argument as Func).Call) return true;
   return false;
@@ -39,7 +39,7 @@ export function IsCallable(argument: Val): boolean {
  * 2. If argument has a [[Construct]] internal method, return true.
  * 3. Return false.
  */
-export function IsConstructor(argument: Val): boolean {
+export function IsConstructor(argument: Val): argument is Func&{Construct: {}} {
   if (!(argument instanceof Obj)) return false;
   if ((argument as Func).Construct) return true;
   return false;
@@ -73,7 +73,7 @@ export function IsExtensible($: VM, O: Obj): CR<boolean> {
  * 2. If argument is a Symbol, return true.
  * 3. Return false.
  */
-export function IsPropertyKey(argument: Val): boolean {
+export function IsPropertyKey(argument: Val): argument is string|symbol {
   const t = typeof argument;
   return t === 'string' || t === 'symbol';
 }

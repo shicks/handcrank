@@ -1,14 +1,16 @@
-import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
+import { CR, CastNotAbrupt, IsAbrupt, ThrowCompletion } from './completion_record';
 import { Val } from './val';
-import { ExecutionContext } from './execution_context';
+import { CodeExecutionContext, ExecutionContext, ResolveThisBinding } from './execution_context';
 import { EMPTY, NOT_APPLICABLE, UNRESOLVABLE } from './enums';
-import { NodeType, NodeMap, Node, Esprima, preprocess } from './tree';
+import { NodeType, NodeMap, Node, Esprima, preprocess, Source } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
 import { InitializeHostDefinedRealm, RealmAdvice, RealmRecord } from './realm_record';
 import { ParseScript, ScriptEvaluation } from './script_record';
 import * as ESTree from 'estree';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { EnvironmentRecord } from './environment_record';
+import { propWC } from './property_descriptor';
+import { Assert } from './assert';
 
 export type EvalGen<T> = Generator<undefined, T, undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
@@ -68,6 +70,60 @@ export class VM {
 
   getIntrinsic(name: string): Obj {
     return this.getRealm()!.Intrinsics.get(name)!;
+  }
+
+  throw(name: string, message?: string): CR<never> {
+
+    // NOTE: This can help with debugging... maybe we can
+    // just store it in the VM?
+    try {
+      Assert(1 > 2);
+    } catch (e) {
+      /* throw */ (this as any).lastThrow = new Error(message ? `${name}: ${message}` : name);
+    }
+
+    const prototype = this.getIntrinsic(`%${name}.prototype%`);
+    if (!prototype) throw new Error(`No such error: ${name}`);
+    const error = OrdinaryObjectCreate({
+      Prototype: prototype,
+      ErrorData: true,
+    }, {
+      message: propWC(message),
+    });
+    this.captureStackTrace(error);
+    return ThrowCompletion(error);
+  }
+
+  captureStackTrace(O: Obj) {
+    const frames: string[] = [];
+    for (let i = this.executionStack.length - 1; i >= 0; i--) {
+      const frame = this.executionStack[i];
+      if (frame instanceof CodeExecutionContext) {
+        const currentNode = frame.currentNode;
+        if (!currentNode) continue;
+        const file = (currentNode.loc?.source as Source)?.sourceFile;
+        let func = frame.Function?.OwnProps.get('name')?.Value;
+        if (!func) func = frame.Function?.InternalName;
+        if (func) {
+          const thisValue = ResolveThisBinding(this);
+          if (!IsAbrupt(thisValue) && thisValue instanceof Obj) {
+            // TODO - read internal name from `this`?
+            const className =
+              (thisValue!.OwnProps?.get('constructor') as unknown as Obj)
+              ?.OwnProps?.get('name')?.Value;
+            if (className) func = `${String(className)}.${String(func)}`;
+          }
+        }
+        const lineCol = currentNode.loc?.start ?
+          ` (${file}:${currentNode.loc.start.line}:${
+             currentNode.loc.start.column})` : '';
+        frames.push(`\n    at ${func ? String(func) : '<anonymous>'}${lineCol}`);
+      }
+    }
+    O.OwnProps.set(
+      'stack',
+      propWC(String((O.OwnProps.get('message')?.Value) ?? '') + frames.join('')),
+    );
   }
 
   // NOTE: this helper method is typically more useful than the "recurse"
@@ -140,6 +196,12 @@ export class VM {
   }
 
   operate<O extends keyof SyntaxOp>(op: O, n: Node): SyntaxOp[O] {
+    if (op === 'Evaluation') {
+      const ctx = this.getRunningContext();
+      if (ctx instanceof CodeExecutionContext) {
+        ctx.currentNode = n;
+      }
+    }
     for (const impl of this.syntaxOperations[op][n.type] || []) {
       const result = impl(n as any, (child) => this.operate(op, child));
       if (!NOT_APPLICABLE.is(result)) return result;
@@ -250,6 +312,9 @@ export function DebugString(v: Val|ReferenceRecord): string {
   if (typeof v === 'string') return JSON.stringify(v);
   if (typeof v === 'bigint') return `${String(v)}n`;
   if (v instanceof Obj) {
+    if (v.ErrorData) {
+      return v.OwnProps.get('stack')?.Value as string ?? 'Error';
+    }
     return '[Object]'; // TODO
   }
   return String(v);

@@ -37,15 +37,9 @@ export interface TopLevelNode {
 //   parent?: Node;
 // }
 
-interface ParseOpts {
-  range?: boolean;
-  loc?: boolean;
-  tolerant?: boolean;
-  comment?: boolean;
-}
 export interface Esprima {
-  parseScript(str: string, opts?: ParseOpts, delegate?: (n: Node, meta: any) => void): any;
-  parseModule(str: string, opts?: ParseOpts, delegate?: (n: Node, meta: any) => void): any;
+  parseScript(str: string): any;
+  parseModule(str: string): any;
 }
 
 class NodeWalker<T> {

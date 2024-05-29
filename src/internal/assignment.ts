@@ -20,7 +20,7 @@
 //    one of
 //      *= /= %= += -= <<= >>= >>>= &= ^= |= **=
 
-import { AssignmentExpression } from "estree";
+import { AssignmentExpression, MemberExpression, Pattern } from "estree";
 import { CR, IsAbrupt } from "./completion_record";
 import { IsAnonymousFunctionDefinition, NamedEvaluation } from "./static/functions";
 import { EvalGen, VM } from "./vm";
@@ -30,6 +30,8 @@ import { EMPTY } from "./enums";
 import { Assert } from "./assert";
 import { ToBoolean } from "./abstract_conversion";
 import { ApplyStringOrNumericBinaryOperator, SHORT_CIRCUIT_OPS, STRNUM_OPS } from "./binary_operators";
+import { HasOwnProperty } from "./abstract_object";
+import { IsCallable } from "./abstract_compare";
 
 /**
  * 13.15.2 Runtime Semantics: Evaluation
@@ -148,6 +150,12 @@ export function* Evaluation_AssignmentExpression($: VM, n: AssignmentExpression)
     rval = yield* $.evaluateValue(n.right);
   }
   if (IsAbrupt(rval)) return rval;
+  // Store a non-standard internal name for stack traces even when `name` prop is missing.
+  if (IsCallable(rval) && !HasOwnProperty($, rval, 'name') && !rval.InternalName) {
+    const internalName = computeInternalName(n.left);
+    if (internalName) rval.InternalName = internalName;
+  }
+
   if (STRNUM_OPS.has(compoundOp)) {
     rval = yield* ApplyStringOrNumericBinaryOperator($, lval, compoundOp, rval);
     if (IsAbrupt(rval)) return rval;
@@ -155,6 +163,17 @@ export function* Evaluation_AssignmentExpression($: VM, n: AssignmentExpression)
   const result = PutValue($, lref, rval);
   if (IsAbrupt(result)) return result;
   return rval;
+}
+
+function computeInternalName(n: Pattern|MemberExpression): string {
+  switch (n.type) {
+    case 'Identifier':
+      return n.name;
+    case 'MemberExpression':
+      if (n.computed) return '<computed>';
+      if (n.property.type === 'Identifier') return n.property.name;
+  }
+  return '';
 }
 
 function Evaluation_AssignmentExpression_pattern(_$: VM, _n: AssignmentExpression): EvalGen<CR<Val>> {

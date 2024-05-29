@@ -6,7 +6,7 @@
 import { IsCallable } from "./abstract_compare";
 import { Assert } from "./assert";
 import { InstanceofOperator } from "./binary_operators";
-import { CR, IsAbrupt, Throw } from "./completion_record";
+import { CR, IsAbrupt } from "./completion_record";
 import { UNUSED } from "./enums";
 import { Func } from "./func";
 import { Obj } from "./obj";
@@ -122,7 +122,7 @@ export function* Set(
 ): ECR<UNUSED> {
   const success = yield* O.Set($, P, V, O);
   if (IsAbrupt(success)) return success;
-  if (!success && ShouldThrow) return Throw('TypeError');
+  if (!success && ShouldThrow) return $.throw('TypeError');
   return UNUSED;
 }
 
@@ -196,7 +196,7 @@ export function DefinePropertyOrThrow($: VM, O: Obj, P: PropertyKey,
   const success = O.DefineOwnProperty($, P, desc);
   if (IsAbrupt(success)) return success;
   if (!success) {
-    return Throw('TypeError', `Cannot define property ${DebugString(P)} on ${DebugString(O)}`);
+    return $.throw('TypeError', `Cannot define property ${DebugString(P)} on ${DebugString(O)}`);
   }
   return UNUSED;
 }
@@ -218,7 +218,7 @@ export function DefinePropertyOrThrow($: VM, O: Obj, P: PropertyKey,
 export function DeletePropertyOrThrow($: VM, O: Obj, P: PropertyKey): CR<UNUSED> {
   const success = O.Delete($, P);
   if (IsAbrupt(success)) return success;
-  if (!success) return Throw('TypeError');
+  if (!success) return $.throw('TypeError');
   return UNUSED;
 }
 
@@ -242,7 +242,7 @@ export function* GetMethod($: VM, V: Val, P: PropertyKey): ECR<Val> {
   const func = yield* GetV($, V, P);
   if (IsAbrupt(func)) return func;
   if (func == null) return undefined;
-  if (!IsCallable(func)) return Throw('TypeError');
+  if (!IsCallable(func)) return $.throw('TypeError');
   return func;
 }
 
@@ -302,7 +302,7 @@ export function HasOwnProperty($: VM, O: Obj, P: PropertyKey): CR<boolean> {
  */
 export function Call($: VM, F: Val, V: Val, argumentsList: Val[] = []): ECR<Val> {
   if (!IsCallable(F)) {
-    return just(Throw('TypeError', `${DebugString(F)} is not a function`));
+    return just($.throw('TypeError', `${DebugString(F)} is not a function`));
   }
   return (F as Func).Call!($, V, argumentsList);
 }
@@ -404,7 +404,7 @@ export function* OrdinaryHasInstance($: VM, C: Val, O: Val): ECR<boolean> {
   if (!(O instanceof Obj)) return false;
   const P = Get($, C, 'prototype');
   if (IsAbrupt(P)) return P;
-  if (!(P instanceof Obj)) return Throw('TypeError');
+  if (!(P instanceof Obj)) return $.throw('TypeError');
   while (true) {
     Assert(O instanceof Obj);
     const next = O.GetPrototypeOf($);

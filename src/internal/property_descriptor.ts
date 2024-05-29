@@ -1,7 +1,7 @@
 import { IsCallable } from './abstract_compare';
 import { ToBoolean } from './abstract_conversion';
 import { Get, HasProperty } from './abstract_object';
-import { IsAbrupt, Throw } from './completion_record';
+import { IsAbrupt } from './completion_record';
 import { UNUSED } from './enums';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { slots } from './slots';
@@ -147,7 +147,7 @@ export function FromPropertyDescriptor(
  * the following steps when called:
  */
 export function* ToPropertyDescriptor($: VM, obj: Val): ECR<PropertyDescriptor> {
-  if (!(obj instanceof Obj)) return Throw('TypeError');
+  if (!(obj instanceof Obj)) return $.throw('TypeError');
   const desc: PropertyDescriptor = {};
   const hasEnumerable = HasProperty($, obj, 'enumerable');
   if (IsAbrupt(hasEnumerable)) return hasEnumerable;
@@ -182,7 +182,7 @@ export function* ToPropertyDescriptor($: VM, obj: Val): ECR<PropertyDescriptor> 
   if (hasGet) {
     const getter = yield* Get($, obj, 'get');
     if (IsAbrupt(getter)) return getter;
-    if (!IsCallable(getter) && getter != undefined) return Throw('TypeError');
+    if (!IsCallable(getter) && getter != undefined) return $.throw('TypeError');
     desc.Get = getter as Obj;
   }
   const hasSet = HasProperty($, obj, 'set');
@@ -190,10 +190,10 @@ export function* ToPropertyDescriptor($: VM, obj: Val): ECR<PropertyDescriptor> 
   if (hasSet) {
     const setter = yield* Get($, obj, 'set');
     if (IsAbrupt(setter)) return setter;
-    if (!IsCallable(setter) && setter != undefined) return Throw('TypeError');
+    if (!IsCallable(setter) && setter != undefined) return $.throw('TypeError');
     desc.Set = setter as Obj;
   }
-  if ((desc.Get || desc.Set) && (desc.Value || desc.Writable)) return Throw('TypeError');
+  if ((desc.Get || desc.Set) && (desc.Value || desc.Writable)) return $.throw('TypeError');
   return desc;
 }
 

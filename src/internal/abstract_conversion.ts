@@ -17,7 +17,7 @@
 import { IsCallable } from './abstract_compare';
 import { Call, Get, GetMethod } from './abstract_object';
 import { Assert } from './assert';
-import { CR, CastNotAbrupt, IsAbrupt, Throw } from './completion_record';
+import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { NUMBER, STRING } from './enums';
 import { Obj } from './obj';
 import { PropertyKey, Val } from './val';
@@ -63,7 +63,7 @@ export function* ToPrimitive($: VM, input: Val, preferredType?: STRING|NUMBER): 
       //     v. If result is not an Object, return result.
       if (!(result instanceof Obj)) return result;
       //     vi. Throw a TypeError exception.
-      return Throw('TypeError');
+      return $.throw('TypeError');
     }
     //   c. If preferredType is not present, let preferredType be number.
     //   d. Return ? OrdinaryToPrimitive(input, preferredType).
@@ -102,7 +102,7 @@ function* OrdinaryToPrimitive($: VM, O: Obj, hint: STRING|NUMBER): ECR<Val> {
     }
   }
   // 4. Throw a TypeError exception.
-  return Throw('TypeError');
+  return $.throw('TypeError');
 }
 
 /**
@@ -170,7 +170,7 @@ export function* ToNumber($: VM, argument: Val): ECR<number> {
     Assert(!(primValue instanceof Obj));
     return yield* ToNumber($, primValue);
   } else if (typeof argument === 'symbol' || typeof argument === 'bigint') {
-    return Throw('TypeError');
+    return $.throw('TypeError');
   }
   return Number(argument);
 }
@@ -204,7 +204,7 @@ export function* ToString($: VM, argument: Val): ECR<string> {
     Assert(!(primValue instanceof Obj));
     return yield* ToString($, primValue);
   } else if (typeof argument === 'symbol') {
-    return Throw('TypeError');
+    return $.throw('TypeError');
   }
   return String(argument);  
 }

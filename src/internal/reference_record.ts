@@ -1,7 +1,7 @@
 import { ToObject } from './abstract_conversion';
 import { Set } from './abstract_object';
 import { Assert } from './assert';
-import { CR, IsAbrupt, Throw } from './completion_record';
+import { CR, IsAbrupt } from './completion_record';
 import { EMPTY, UNRESOLVABLE, UNUSED } from './enums';
 import { EnvironmentRecord } from './environment_record';
 import { GetGlobalObject } from './execution_context';
@@ -146,7 +146,7 @@ interface PrivateReferenceRecord extends ReferenceRecord {
  */
 export function* GetValue($: VM, V: ReferenceRecord|Val): ECR<Val> {
   if (!(V instanceof ReferenceRecord)) return V;
-  if (IsUnresolvableReference(V)) return Throw('ReferenceError');
+  if (IsUnresolvableReference(V)) return $.throw('ReferenceError');
   if (IsPropertyReference(V)) {
     const baseObj = ToObject($, V.Base);
     if (IsAbrupt(baseObj)) return baseObj;
@@ -169,9 +169,9 @@ export function* GetValue($: VM, V: ReferenceRecord|Val): ECR<Val> {
  * when called:
  */
 export function PutValue($: VM, V: ReferenceRecord|Val, W: Val): CR<UNUSED> {
-  if (!(V instanceof ReferenceRecord)) return Throw('ReferenceError');
+  if (!(V instanceof ReferenceRecord)) return $.throw('ReferenceError');
   if (IsUnresolvableReference(V)) {
-    if (V.Strict) return Throw('ReferenceError');
+    if (V.Strict) return $.throw('ReferenceError');
     Assert(typeof V.ReferencedName !== 'object'); // class bodies are strict.
     const globalObj = GetGlobalObject($);
     const result = Set($, globalObj, V.ReferencedName, W, false);
@@ -186,7 +186,7 @@ export function PutValue($: VM, V: ReferenceRecord|Val, W: Val): CR<UNUSED> {
     const succeeded = baseObj.Set(
       $, V.ReferencedName as PropertyKey, W, GetThisValue($, V));
     if (IsAbrupt(succeeded)) return succeeded;
-    if (!succeeded && V.Strict) return Throw('TypeError');
+    if (!succeeded && V.Strict) return $.throw('TypeError');
     return UNUSED;
   } else {
     const base = V.Base;
