@@ -32,7 +32,7 @@ declare global {
     NumberData?: number;
     BigIntData?: bigint;
     SymbolData?: symbol;
-    ErrorData?: Val;  // TODO - what type???
+    ErrorData?: string; // NOTE: spec just has undefined but we repurpose
   }
 }
 
@@ -827,8 +827,8 @@ export const errorObject: Plugin = {
         const O = yield* OrdinaryCreateFromConstructor($, newTarget, '%Error.prototype', {
           // NOTE: spec requires [[ErrorData]] = undefined, but that's
           // harder to identify robustly.  It's never used aside from
-          // detecting presence, so we just set it to true instead.
-          ErrorData: true,
+          // detecting presence, so we just set it to a string instead.
+          ErrorData: '',
         });
         if (IsAbrupt(O)) return O;
         if (message != null) {

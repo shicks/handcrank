@@ -86,7 +86,7 @@ export class VM {
     if (!prototype) throw new Error(`No such error: ${name}`);
     const error = OrdinaryObjectCreate({
       Prototype: prototype,
-      ErrorData: true,
+      ErrorData: '',
     }, {
       message: propWC(message),
     });
@@ -120,10 +120,9 @@ export class VM {
         frames.push(`\n    at ${func ? String(func) : '<anonymous>'}${lineCol}`);
       }
     }
-    O.OwnProps.set(
-      'stack',
-      propWC(String((O.OwnProps.get('message')?.Value) ?? '') + frames.join('')),
-    );
+    const stack = String((O.OwnProps.get('message')?.Value) ?? '') + frames.join('');
+    O.OwnProps.set('stack', propWC(stack));
+    O.ErrorData = stack;
   }
 
   // NOTE: this helper method is typically more useful than the "recurse"
@@ -312,9 +311,7 @@ export function DebugString(v: Val|ReferenceRecord): string {
   if (typeof v === 'string') return JSON.stringify(v);
   if (typeof v === 'bigint') return `${String(v)}n`;
   if (v instanceof Obj) {
-    if (v.ErrorData) {
-      return v.OwnProps.get('stack')?.Value as string ?? 'Error';
-    }
+    if (v.ErrorData != null) return v.ErrorData || 'Error';
     return '[Object]'; // TODO
   }
   return String(v);
