@@ -6,7 +6,7 @@ import { EMPTY, UNRESOLVABLE, UNUSED } from './enums';
 import { EnvironmentRecord } from './environment_record';
 import { GetGlobalObject } from './execution_context';
 import { PropertyKey, Val } from './val';
-import { ECR, VM } from './vm';
+import { DebugString, ECR, VM } from './vm';
 
 declare type PrivateName = {__privatename__: true};
 declare const PrivateName: any;
@@ -146,7 +146,9 @@ interface PrivateReferenceRecord extends ReferenceRecord {
  */
 export function* GetValue($: VM, V: ReferenceRecord|Val): ECR<Val> {
   if (!(V instanceof ReferenceRecord)) return V;
-  if (IsUnresolvableReference(V)) return $.throw('ReferenceError');
+  if (IsUnresolvableReference(V)) {
+    return $.throw('ReferenceError', `${DebugString(V)} is not defined`);
+  }
   if (IsPropertyReference(V)) {
     const baseObj = ToObject($, V.Base);
     if (IsAbrupt(baseObj)) return baseObj;

@@ -9,9 +9,10 @@ import { ParseScript, ScriptEvaluation } from './script_record';
 import * as ESTree from 'estree';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { EnvironmentRecord } from './environment_record';
-import { propWC } from './property_descriptor';
+import { HasValueField, propWC } from './property_descriptor';
 import { Assert } from './assert';
 import { IsFunc } from './func';
+import { ToString } from './abstract_conversion';
 
 export type EvalGen<T> = Generator<undefined, T, undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
@@ -121,7 +122,10 @@ export class VM {
         frames.push(`\n    at ${func ? String(func) : '<anonymous>'}${lineCol}`);
       }
     }
-    const stack = String((O.OwnProps.get('message')?.Value) ?? '') + frames.join('');
+    const name = findValueProp(O, 'name');
+    const msg = findValueProp(O, 'message');
+    const stack = `${String(name)}: ${String(msg)}${frames.join('')}`;
+    // const stack = String((O.OwnProps.get('message')?.Value) ?? '') + frames.join('');
     O.OwnProps.set('stack', propWC(stack));
     O.ErrorData = stack;
   }
@@ -304,7 +308,7 @@ export function DebugString(v: Val|ReferenceRecord): string {
     if (v.Base instanceof EnvironmentRecord) {
       return String(v.ReferencedName);
     } else if (UNRESOLVABLE.is(v.Base)) {
-      return `%UNRESOLVABLE%.${String(v.ReferencedName)}`;
+      return String(v.ReferencedName);
     } else {
       return `${DebugString(v.Base)}.${String(v.ReferencedName)}`;
     }
@@ -320,4 +324,13 @@ export function DebugString(v: Val|ReferenceRecord): string {
     return '[Object]'; // TODO
   }
   return String(v);
+}
+
+function findValueProp(o: Obj|null|undefined, p: string): Val {
+  if (!o) return undefined;
+  if (o.OwnProps.has(p)) {
+    const desc = o.OwnProps.get(p)!;
+    return HasValueField(desc) ? desc.Value : undefined;
+  }
+  return findValueProp(o.Prototype, p);
 }
