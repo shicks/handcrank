@@ -11,6 +11,7 @@ import { Obj, OrdinaryObjectCreate } from './obj';
 import { EnvironmentRecord } from './environment_record';
 import { propWC } from './property_descriptor';
 import { Assert } from './assert';
+import { IsFunc } from './func';
 
 export type EvalGen<T> = Generator<undefined, T, undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
@@ -312,6 +313,10 @@ export function DebugString(v: Val|ReferenceRecord): string {
   if (typeof v === 'bigint') return `${String(v)}n`;
   if (v instanceof Obj) {
     if (v.ErrorData != null) return v.ErrorData || 'Error';
+    if (IsFunc(v)) {
+      const name = v.OwnProps.get('name');
+      return name ? String(name) : v.InternalName || '(anonymous)';
+    }
     return '[Object]'; // TODO
   }
   return String(v);

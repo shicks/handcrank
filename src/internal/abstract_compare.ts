@@ -60,6 +60,26 @@ export function IsExtensible($: VM, O: Obj): CR<boolean> {
   return O.IsExtensible($);
 }
 
+/**
+ * 7.2.6 IsIntegralNumber ( argument )
+ *
+ * The abstract operation IsIntegralNumber takes argument argument (an
+ * ECMAScript language value) and returns a Boolean. It determines if
+ * argument is a finite integral Number value. It performs the
+ * following steps when called:
+ *
+ * 1. If argument is not a Number, return false.
+ * 2. If argument is not finite, return false.
+ * 3. If truncate(ℝ(argument)) ≠ ℝ(argument), return false.
+ * 4. Return true.
+ */
+export function IsIntegralNumber(argument: Val): boolean {
+  // if (typeof argument !== 'number') return false;
+  // if (!Number.isFinite(argument)) return false;
+  // if (Math.trunc(argument) !== argument) return false;
+  // return true;
+  return Number.isInteger(argument);
+}
 
 /**
  * 7.2.7 IsPropertyKey ( argument )
@@ -78,7 +98,16 @@ export function IsPropertyKey(argument: Val): argument is string|symbol {
   return t === 'string' || t === 'symbol';
 }
 
-
+/**
+ * IsArrayIndex ( argument )
+ *
+ * NOTE: This is not in the spec.
+ */
+export function IsArrayIndex(argument: Val): boolean {
+  if (typeof argument !== 'string') return false;
+  const n = Number(argument);
+  return Number.isSafeInteger(n) && n >= 0 && String(n) === argument;
+}
 
 /**
  * 7.2.10 SameValue ( x, y )

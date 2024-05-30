@@ -14,12 +14,12 @@
  * from other types.
  */
 
-import { IsCallable } from './abstract_compare';
+import { IsCallable, SameValue } from './abstract_compare';
 import { Call, Get, GetMethod } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { NUMBER, STRING } from './enums';
-import { Obj } from './obj';
+import { Obj, OrdinaryObjectCreate } from './obj';
 import { PropertyKey, Val } from './val';
 import { ECR, VM } from './vm';
 
@@ -160,8 +160,8 @@ export function* ToNumeric($: VM, value: Val): ECR<number|bigint> {
  * 6. If argument is a String, return StringToNumber(argument).
  * 7. Assert: argument is an Object.
  * 8. Let primValue be ? ToPrimitive(argument, number).
- * 10. Return ? ToNumber(primValue).
  * 9. Assert: primValue is not an Object.
+ * 10. Return ? ToNumber(primValue).
  */
 export function* ToNumber($: VM, argument: Val): ECR<number> {
   if (argument instanceof Obj) {
@@ -173,6 +173,234 @@ export function* ToNumber($: VM, argument: Val): ECR<number> {
     return $.throw('TypeError');
   }
   return Number(argument);
+}
+
+/**
+ * 7.1.5 ToIntegerOrInfinity ( argument )
+ *
+ * The abstract operation ToIntegerOrInfinity takes argument argument
+ * (an ECMAScript language value) and returns either a normal
+ * completion containing either an integer, +∞, or -∞, or a throw
+ * completion. It converts argument to an integer representing its
+ * Number value with fractional part truncated, or to +∞ or -∞ when
+ * that Number value is infinite. It performs the following steps when
+ * called:
+ * 
+ * 1. Let number be ? ToNumber(argument).
+ * 2. If number is one of NaN, +0𝔽, or -0𝔽, return 0.
+ * 3. If number is +∞𝔽, return +∞.
+ * 4. If number is -∞𝔽, return -∞.
+ * 5. Return truncate(ℝ(number)).
+ *
+ * NOTE: 𝔽(ToIntegerOrInfinity(x)) never returns -0𝔽 for any value of
+ * x. The truncation of the fractional part is performed after
+ * converting x to a mathematical value.
+ */
+export function* ToIntegerOrInfinity($: VM, argument: Val): ECR<number> {
+  const number = yield* ToNumber($, argument);
+  if (IsAbrupt(number)) return number;
+  return ToIntegerOrInfinityInternal(number);
+}
+export function ToIntegerOrInfinityInternal(number: number): number {
+  if (Number.isNaN(number) || number === 0) return 0;
+  if (number === Infinity || number === -Infinity) return number;
+  return Math.trunc(number);
+}
+
+/**
+ * 7.1.6 ToInt32 ( argument )
+ *
+ * The abstract operation ToInt32 takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing an integral Number or a throw completion. It converts
+ * argument to one of 2^32 integral Number values in the inclusive
+ * interval from 𝔽(-2^31) to 𝔽(2^31 - 1). It performs the following
+ * steps when called:
+ *
+ * 1. Let number be ? ToNumber(argument).
+ * 2. If number is not finite or number is either +0𝔽 or -0𝔽, return +0𝔽.
+ * 3. Let int be truncate(ℝ(number)).
+ * 4. Let int32bit be int modulo 2^32.
+ * 5. If int32bit ≥ 2^31, return 𝔽(int32bit - 2^32); otherwise return
+ *    𝔽(int32bit).
+ *
+ * NOTE: Given the above definition of ToInt32:
+ *   - The ToInt32 abstract operation is idempotent: if applied to a
+ *     result that it produced, the second application leaves that
+ *     value unchanged.
+ *   - ToInt32(ToUint32(x)) is the same value as ToInt32(x) for all
+ *     values of x. (It is to preserve this latter property that +∞𝔽
+ *     and -∞𝔽 are mapped to +0𝔽.)
+ *   - ToInt32 maps -0𝔽 to +0𝔽.
+ */
+export function* ToInt32($: VM, argument: Val): ECR<number> {
+  const number = yield* ToNumber($, argument);
+  if (IsAbrupt(number)) return number;
+  return number >> 0;
+}
+
+/**
+ * 7.1.7 ToUint32 ( argument )
+ *
+ * The abstract operation ToUint32 takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing an integral Number or a throw completion. It converts
+ * argument to one of 2^32 integral Number values in the inclusive
+ * interval from +0𝔽 to 𝔽(2^32 - 1). It performs the following steps
+ * when called:
+ * 
+ * 1. Let number be ? ToNumber(argument).
+ * 2. If number is not finite or number is either +0𝔽 or -0𝔽, return +0𝔽.
+ * 3. Let int be truncate(ℝ(number)).
+ * 4. Let int32bit be int modulo 2^32.
+ * 5. Return 𝔽(int32bit).
+ *
+ * NOTE: Given the above definition of ToUint32:
+ *   - Step 5 is the only difference between ToUint32 and ToInt32.
+ *   - The ToUint32 abstract operation is idempotent: if applied to a
+ *     result that it produced, the second application leaves that
+ *     value unchanged.
+ *   - ToUint32(ToInt32(x)) is the same value as ToUint32(x) for all
+ *     values of x. (It is to preserve this latter property that +∞𝔽
+ *     and -∞𝔽 are mapped to +0𝔽.)
+ *   - ToUint32 maps -0𝔽 to +0𝔽.
+ */
+export function* ToUint32($: VM, argument: Val): ECR<number> {
+  const number = yield* ToNumber($, argument);
+  if (IsAbrupt(number)) return number;
+  return number >>> 0;
+}
+
+/**
+ * 7.1.8 ToInt16 ( argument )
+ *
+ * The abstract operation ToInt16 takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing an integral Number or a throw completion. It converts
+ * argument to one of 2^16 integral Number values in the inclusive
+ * interval from 𝔽(-2^15) to 𝔽(2^15 - 1). It performs the following
+ * steps when called:
+ *
+ * 1. Let number be ? ToNumber(argument).
+ * 2. If number is not finite or number is either +0𝔽 or -0𝔽, return +0𝔽.
+ * 3. Let int be truncate(ℝ(number)).
+ * 4. Let int16bit be int modulo 2^16.
+ * 5. If int16bit ≥ 2^15, return 𝔽(int16bit - 2^16); otherwise return
+ *    𝔽(int16bit).
+ */
+export function* ToInt16($: VM, argument: Val): ECR<number> {
+  const number = yield* ToNumber($, argument);
+  if (IsAbrupt(number)) return number;
+  return (number << 16) >> 16;
+}
+
+/**
+ * 7.1.9 ToUint16 ( argument )
+ *
+ * The abstract operation ToUint16 takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing an integral Number or a throw completion. It converts
+ * argument to one of 2^16 integral Number values in the inclusive
+ * interval from +0𝔽 to 𝔽(2^16 - 1). It performs the following steps
+ * when called:
+ *
+ * 1. Let number be ? ToNumber(argument).
+ * 2. If number is not finite or number is either +0𝔽 or -0𝔽, return +0𝔽.
+ * 3. Let int be truncate(ℝ(number)).
+ * 4. Let int16bit be int modulo 2^16.
+ * 5. Return 𝔽(int16bit).
+ *
+ * NOTE: Given the above definition of ToUint16:
+ *   - The substitution of 2^16 for 2^32 in step 4 is the only
+ *     difference between ToUint32 and ToUint16.
+ *   - ToUint16 maps -0𝔽 to +0𝔽.
+ */
+export function* ToUint16($: VM, argument: Val): ECR<number> {
+  const number = yield* ToNumber($, argument);
+  if (IsAbrupt(number)) return number;
+  return (number << 16) >>> 16;
+}
+
+/**
+ * 7.1.10 ToInt8 ( argument )
+ *
+ * The abstract operation ToInt8 takes argument argument (an ECMAScript
+ * language value) and returns either a normal completion containing an
+ * integral Number or a throw completion. It converts argument to one
+ * of 2^8 integral Number values in the inclusive interval from -128𝔽 to
+ * 127𝔽. It performs the following steps when called:
+ *
+ * 1. Let number be ? ToNumber(argument).
+ * 2. If number is not finite or number is either +0𝔽 or -0𝔽, return +0𝔽.
+ * 3. Let int be truncate(ℝ(number)).
+ * 4. Let int8bit be int modulo 2^8.
+ * 5. If int8bit ≥ 2^7, return 𝔽(int8bit - 2^8); otherwise return 𝔽(int8bit).
+ */
+export function* ToInt8($: VM, argument: Val): ECR<number> {
+  const number = yield* ToNumber($, argument);
+  if (IsAbrupt(number)) return number;
+  return (number << 24) >> 24;
+}
+
+/**
+ * 7.1.11 ToUint8 ( argument )
+ *
+ * The abstract operation ToUint8 takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing an integral Number or a throw completion. It converts
+ * argument to one of 2^8 integral Number values in the inclusive
+ * interval from +0𝔽 to 255𝔽. It performs the following steps when
+ * called:
+ * 
+ * 1. Let number be ? ToNumber(argument).
+ * 2. If number is not finite or number is either +0𝔽 or -0𝔽, return +0𝔽.
+ * 3. Let int be truncate(ℝ(number)).
+ * 4. Let int8bit be int modulo 2^8.
+ * 5. Return 𝔽(int8bit).
+ */
+export function* ToUint8($: VM, argument: Val): ECR<number> {
+  const number = yield* ToNumber($, argument);
+  if (IsAbrupt(number)) return number;
+  return (number << 24) >>> 24;
+}
+
+/**
+ * 7.1.12 ToUint8Clamp ( argument )
+ *
+ * The abstract operation ToUint8Clamp takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing an integral Number or a throw completion. It converts
+ * argument to one of 2^8 integral Number values in the inclusive
+ * interval from +0𝔽 to 255𝔽. It performs the following steps when
+ * called:
+ * 
+ * 1. Let number be ? ToNumber(argument).
+ * 2. If number is NaN, return +0𝔽.
+ * 3. If ℝ(number) ≤ 0, return +0𝔽.
+ * 4. If ℝ(number) ≥ 255, return 255𝔽.
+ * 5. Let f be floor(ℝ(number)).
+ * 6. If f + 0.5 < ℝ(number), return 𝔽(f + 1).
+ * 7. If ℝ(number) < f + 0.5, return 𝔽(f).
+ * 8. If f is odd, return 𝔽(f + 1).
+ * 9. Return 𝔽(f).
+ *
+ * NOTE: Unlike the other ECMAScript integer conversion abstract
+ * operation, ToUint8Clamp rounds rather than truncates non-integral
+ * values and does not convert +∞𝔽 to +0𝔽. ToUint8Clamp does “round
+ * half to even” tie-breaking. This differs from Math.round which does
+ * “round half up” tie-breaking.
+ */
+export function* ToUint8Clamp($: VM, argument: Val): ECR<number> {
+  const number = yield* ToNumber($, argument);
+  if (IsAbrupt(number)) return number;
+  if (Number.isNaN(number)) return 0;
+  if (number <= 0) return 0;
+  if (number >= 255) return 255;
+  const f = Math.floor(number);
+  if (f + 0.5 < number) return f + 1;
+  if (number < f + 0.5) return f;
+  if (f & 1) return f + 1;
+  return f;
 }
 
 /**
@@ -237,9 +465,21 @@ export function* ToString($: VM, argument: Val): ECR<string> {
  *            objects.
  * Object:    Return argument.
  */
-export function ToObject(_$: VM, argument: Val): CR<Obj> {
+export function ToObject($: VM, argument: Val): CR<Obj> {
   if (argument instanceof Obj) return argument;
-  throw new Error('not implemented');
+  if (argument == null) return $.throw('TypeError', 'Cannot convert undefined or null to object');
+  switch (typeof argument) {
+    case 'boolean': return makeWrapper($, '%Boolean.prototype%', {BooleanData: argument});
+    case 'number': return makeWrapper($, '%Number.prototype%', {NumberData: argument});
+    case 'string': return makeWrapper($, '%String.prototype%', {StringData: argument});
+    case 'symbol': return makeWrapper($, '%Symbol.prototype%', {SymbolData: argument});
+    case 'bigint': return makeWrapper($, '%BigInt.prototype%', {BigIntData: argument});
+  }
+}
+function makeWrapper($: VM, proto: string, slots: ObjectSlots): CR<Obj> {
+  const Prototype = $.getIntrinsic(proto);
+  if (!Prototype) return $.throw('TypeError', `${proto} not defined`);
+  return OrdinaryObjectCreate({...slots, Prototype});
 }
 
 /**
@@ -264,34 +504,75 @@ export function* ToPropertyKey($: VM, argument: Val): ECR<PropertyKey> {
 }
 
 /**
-7.1.20 ToLength ( argument )
+ * 7.1.20 ToLength ( argument )
+ *
+ * The abstract operation ToLength takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing an integral Number or a throw completion. It clamps
+ * argument to an integral Number suitable for use as the length of an
+ * array-like object. It performs the following steps when called:
+ *
+ * 1. Let len be ? ToIntegerOrInfinity(argument).
+ * 2. If len ≤ 0, return +0𝔽.
+ * 3. Return 𝔽(min(len, 253 - 1)).
+ */
+export function* ToLength($: VM, argument: Val): ECR<number> {
+  const len = yield* ToIntegerOrInfinity($, argument);
+  if (IsAbrupt(len)) return len;
+  if (len <= 0) return 0;
+  return Math.min(len, 2**53 - 1);
+}
 
-The abstract operation ToLength takes argument argument (an ECMAScript language value) and returns either a normal completion containing an integral Number or a throw completion. It clamps argument to an integral Number suitable for use as the length of an array-like object. It performs the following steps when called:
+/**
+ * 7.1.21 CanonicalNumericIndexString ( argument )
+ *
+ * The abstract operation CanonicalNumericIndexString takes argument
+ * argument (a String) and returns a Number or undefined. If argument
+ * is either "-0" or exactly matches the result of ToString(n) for
+ * some Number value n, it returns the respective Number
+ * value. Otherwise, it returns undefined. It performs the following
+ * steps when called:
+ *
+ * 1. If argument is "-0", return -0𝔽.
+ * 2. Let n be ! ToNumber(argument).
+ * 3. If ! ToString(n) is argument, return n.
+ * 4. Return undefined.
+ *
+ * A canonical numeric string is any String value for which the
+ * CanonicalNumericIndexString abstract operation does not return
+ * undefined.
+ */
+export function CanonicalNumericIndexString(argument: string): number|undefined {
+  if (argument === '-0') return -0;
+  const n = Number(argument);
+  return argument === String(n) ? n : undefined;
+}
 
-1. 1. Let len be ? ToIntegerOrInfinity(argument).
-2. 2. If len ≤ 0, return +0𝔽.
-3. 3. Return 𝔽(min(len, 253 - 1)).
-7.1.21 CanonicalNumericIndexString ( argument )
-
-The abstract operation CanonicalNumericIndexString takes argument argument (a String) and returns a Number or undefined. If argument is either "-0" or exactly matches the result of ToString(n) for some Number value n, it returns the respective Number value. Otherwise, it returns undefined. It performs the following steps when called:
-
-1. 1. If argument is "-0", return -0𝔽.
-2. 2. Let n be ! ToNumber(argument).
-3. 3. If ! ToString(n) is argument, return n.
-4. 4. Return undefined.
-
-A canonical numeric string is any String value for which the CanonicalNumericIndexString abstract operation does not return undefined.
-
-7.1.22 ToIndex ( value )
-
-The abstract operation ToIndex takes argument value (an ECMAScript language value) and returns either a normal completion containing a non-negative integer or a throw completion. It converts value to a non-negative integer if the corresponding decimal representation, as a String, is an integer index. It performs the following steps when called:
-
-1. 1. If value is undefined, then
-a. a. Return 0.
-2. 2. Else,
-a. a. Let integer be ? ToIntegerOrInfinity(value).
-b. b. Let clamped be ! ToLength(𝔽(integer)).
-c. c. If SameValue(𝔽(integer), clamped) is false, throw a RangeError exception.
-d. d. Assert: 0 ≤ integer ≤ 253 - 1.
-e. e. Return integer.
-/**/
+/**
+ * 7.1.22 ToIndex ( value )
+ *
+ * The abstract operation ToIndex takes argument value (an ECMAScript
+ * language value) and returns either a normal completion containing a
+ * non-negative integer or a throw completion. It converts value to a
+ * non-negative integer if the corresponding decimal representation,
+ * as a String, is an integer index. It performs the following steps
+ * when called:
+ *
+ * 1. If value is undefined, then
+ *     a. Return 0.
+ * 2. Else,
+ *     a. Let integer be ? ToIntegerOrInfinity(value).
+ *     b. Let clamped be ! ToLength(𝔽(integer)).
+ *     c. If SameValue(𝔽(integer), clamped) is false, throw a RangeError exception.
+ *     d. Assert: 0 ≤ integer ≤ 253 - 1.
+ *     e. Return integer.
+ */
+export function* ToIndex($: VM, value: Val): ECR<number> {
+  if (value == null) return 0;
+  const integer = yield* ToIntegerOrInfinity($, value);
+  if (IsAbrupt(integer)) return integer;
+  const clamped = CastNotAbrupt(yield* ToLength($, integer));
+  if (!SameValue(clamped, integer)) return $.throw('RangeError');
+  Assert(0 <= integer && integer <= 2**53 - 1);
+  return integer;
+}

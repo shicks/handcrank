@@ -4,6 +4,7 @@
  */
 
 import { IsCallable } from "./abstract_compare";
+import { ToObject } from "./abstract_conversion";
 import { Assert } from "./assert";
 import { InstanceofOperator } from "./binary_operators";
 import { CR, IsAbrupt } from "./completion_record";
@@ -15,7 +16,6 @@ import { RealmRecord } from "./realm_record";
 import { PropertyKey, Val } from "./val";
 import { DebugString, ECR, VM, just } from "./vm";
 
-declare const ToObject: any;
 declare const ValidateNonRevokedProxy: any;
 declare global {
   interface ObjectSlots {

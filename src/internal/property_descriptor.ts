@@ -247,7 +247,17 @@ export function propC(v: Val): PropertyDescriptor {
   };
 }
 
-/** Returns a non-writabe, non-enumerable, non-configurable property descriptor. */
+/** Returns frozen enumerable property descriptor. */
+export function propE(v: Val): PropertyDescriptor {
+  return {
+    Value: v,
+    Writable: false,
+    Enumerable: true,
+    Configurable: false,
+  };
+}
+
+/** Returns a non-enumerable frozen property descriptor. */
 export function prop0(v: Val): PropertyDescriptor {
   return {
     Value: v,

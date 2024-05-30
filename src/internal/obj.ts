@@ -1,4 +1,4 @@
-import { IsExtensible, IsPropertyKey, SameValue } from './abstract_compare';
+import { IsArrayIndex, IsExtensible, IsPropertyKey, SameValue } from './abstract_compare';
 import { Call, CreateDataProperty, Get, GetFunctionRealm } from './abstract_object';
 import { Assert } from './assert';
 import { CR, IsAbrupt } from './completion_record';
@@ -27,81 +27,6 @@ export abstract class Obj extends Slots<ObjectSlots>() {
   abstract OwnProps: Map<PropertyKey, PropertyDescriptor>;
 
   // Required internal methods for all objects
-  abstract GetPrototypeOf(_$: VM): CR<Obj|null>;
-  abstract SetPrototypeOf(_$: VM, V: Obj|null): CR<boolean>;
-  abstract IsExtensible(_$: VM): CR<boolean>;
-  abstract PreventExtensions(_$: VM): CR<boolean>;
-  abstract GetOwnProperty(_$: VM, P: PropertyKey): CR<PropertyDescriptor|undefined>;
-  abstract DefineOwnProperty($: VM, P: PropertyKey, Desc: PropertyDescriptor): CR<boolean>;
-  abstract HasProperty($: VM, P: PropertyKey): CR<boolean>;
-  abstract Get($: VM, P: PropertyKey, Receiver: Val): ECR<Val>;
-  abstract Set($: VM, P: PropertyKey, V: Val, Receiver: Val): ECR<boolean>;
-  abstract Delete($: VM, P: PropertyKey): CR<boolean>;
-  abstract OwnPropertyKeys(_$: VM): CR<PropertyKey[]>;
-}
-
-/**
- * 10.1 Ordinary Object Internal Methods and Internal Slots
- *
- * All ordinary objects have an internal slot called
- * [[Prototype]]. The value of this internal slot is either null or an
- * object and is used for implementing inheritance. Assume a property
- * named P is missing from an ordinary object O but exists on its
- * [[Prototype]] object. If P refers to a data property on the
- * [[Prototype]] object, O inherits it for get access, making it
- * behave as if P was a property of O. If P refers to a writable data
- * property on the [[Prototype]] object, set access of P on O creates
- * a new data property named P on O. If P refers to a non-writable
- * data property on the [[Prototype]] object, set access of P on O
- * fails. If P refers to an accessor property on the [[Prototype]]
- * object, the accessor is inherited by O for both get access and set
- * access.
- *
- * Every ordinary object has a Boolean-valued [[Extensible]] internal
- * slot which is used to fulfill the extensibility-related internal
- * method invariants specified in 6.1.7.3. Namely, once the value of
- * an object's [[Extensible]] internal slot has been set to false, it
- * is no longer possible to add properties to the object, to modify
- * the value of the object's [[Prototype]] internal slot, or to
- * subsequently change the value of [[Extensible]] to true.
- *
- * In the following algorithm descriptions, assume O is an ordinary
- * object, P is a property key value, V is any ECMAScript language
- * value, and Desc is a Property Descriptor record.
- *
- * Each ordinary object internal method delegates to a similarly-named
- * abstract operation. If such an abstract operation depends on
- * another internal method, then the internal method is invoked on O
- * rather than calling the similarly-named abstract operation
- * directly. These semantics ensure that exotic objects have their
- * overridden internal methods invoked when ordinary object internal
- * methods are applied to them.
- *
- * NOTE: This definition is a base class shell.  It is critical that
- * this file have no value imports to avoid cycles, since it must
- * always be imported BEFORE any concrete `Obj` subclasses.
- */
-export type OrdinaryObject = InstanceType<ReturnType<typeof OrdinaryObject>>;
-export const OrdinaryObject = memoize(() => class OrdinaryObject extends Obj {
-  override OwnProps = new Map<PropertyKey, PropertyDescriptor>();
-
-  declare Extensible: boolean;
-  declare Prototype: Obj|null;
-
-  constructor(
-    slots: ObjectSlots = {},
-    props: Record<PropertyKey, PropertyDescriptor> = {},
-  ) {
-    super();
-    for (const [k, v] of Object.entries(slots)) {
-      (this as any)[k] = v;
-    }
-    for (const [k, v] of Object.entries(props)) {
-      this.OwnProps.set(k as PropertyKey, v);
-    }
-    this.Extensible ??= true;
-    this.Prototype ??= null;
-  }
 
   /**
    * 10.1.1 [[GetPrototypeOf]] ( )
@@ -257,6 +182,70 @@ export const OrdinaryObject = memoize(() => class OrdinaryObject extends Obj {
   OwnPropertyKeys(_$: VM): CR<PropertyKey[]> {
     return OrdinaryOwnPropertyKeys(this);
   }
+}
+
+/**
+ * 10.1 Ordinary Object Internal Methods and Internal Slots
+ *
+ * All ordinary objects have an internal slot called
+ * [[Prototype]]. The value of this internal slot is either null or an
+ * object and is used for implementing inheritance. Assume a property
+ * named P is missing from an ordinary object O but exists on its
+ * [[Prototype]] object. If P refers to a data property on the
+ * [[Prototype]] object, O inherits it for get access, making it
+ * behave as if P was a property of O. If P refers to a writable data
+ * property on the [[Prototype]] object, set access of P on O creates
+ * a new data property named P on O. If P refers to a non-writable
+ * data property on the [[Prototype]] object, set access of P on O
+ * fails. If P refers to an accessor property on the [[Prototype]]
+ * object, the accessor is inherited by O for both get access and set
+ * access.
+ *
+ * Every ordinary object has a Boolean-valued [[Extensible]] internal
+ * slot which is used to fulfill the extensibility-related internal
+ * method invariants specified in 6.1.7.3. Namely, once the value of
+ * an object's [[Extensible]] internal slot has been set to false, it
+ * is no longer possible to add properties to the object, to modify
+ * the value of the object's [[Prototype]] internal slot, or to
+ * subsequently change the value of [[Extensible]] to true.
+ *
+ * In the following algorithm descriptions, assume O is an ordinary
+ * object, P is a property key value, V is any ECMAScript language
+ * value, and Desc is a Property Descriptor record.
+ *
+ * Each ordinary object internal method delegates to a similarly-named
+ * abstract operation. If such an abstract operation depends on
+ * another internal method, then the internal method is invoked on O
+ * rather than calling the similarly-named abstract operation
+ * directly. These semantics ensure that exotic objects have their
+ * overridden internal methods invoked when ordinary object internal
+ * methods are applied to them.
+ *
+ * NOTE: This definition is a base class shell.  It is critical that
+ * this file have no value imports to avoid cycles, since it must
+ * always be imported BEFORE any concrete `Obj` subclasses.
+ */
+export type OrdinaryObject = InstanceType<ReturnType<typeof OrdinaryObject>>;
+export const OrdinaryObject = memoize(() => class OrdinaryObject extends Obj {
+  override OwnProps = new Map<PropertyKey, PropertyDescriptor>();
+
+  declare Extensible: boolean;
+  declare Prototype: Obj|null;
+
+  constructor(
+    slots: ObjectSlots = {},
+    props: Record<PropertyKey, PropertyDescriptor> = {},
+  ) {
+    super();
+    for (const [k, v] of Object.entries(slots)) {
+      (this as any)[k] = v;
+    }
+    for (const [k, v] of Object.entries(props)) {
+      this.OwnProps.set(k as PropertyKey, v);
+    }
+    this.Extensible ??= true;
+    this.Prototype ??= null;
+  }
 });
 
 
@@ -334,7 +323,8 @@ export function OrdinarySetPrototypeOf(O: Obj, V: Obj|null): boolean {
  *
  * 1. Return O.[[Extensible]].
  */
-export function OrdinaryIsExtensible(O: OrdinaryObject): boolean {
+export function OrdinaryIsExtensible(O: Obj): boolean {
+  Assert(O.Extensible != null);
   return O.Extensible;
 }
 
@@ -348,7 +338,8 @@ export function OrdinaryIsExtensible(O: OrdinaryObject): boolean {
  * 1. Set O.[[Extensible]] to false.
  * 2. Return true.
  */
-export function OrdinaryPreventExtensions(O: OrdinaryObject): true {
+export function OrdinaryPreventExtensions(O: Obj): true {
+  Assert(O.Extensible != null);
   O.Extensible = false;
   return true;
 }
@@ -801,7 +792,7 @@ export function OrdinaryOwnPropertyKeys(O: Obj): PropertyKey[] {
   for (const key of O.OwnProps.keys()) {
     if (typeof key === 'symbol') {
       symbols.push(key);
-    } else if (key === '0' || /^[1-9][0-9]*$/.test(key)) {
+    } else if (IsArrayIndex(key)) {
       indices.push(Number(key));
     } else {
       names.push(key);

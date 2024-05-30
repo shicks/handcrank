@@ -8,12 +8,12 @@
       (save-excursion
         (previous-line)
         (cond
-         ((looking-at " *\\* ")
+         ((looking-at " *\\* ?")
           (setq comment (match-string 0)))
-         ((looking-at " *// ")
+         ((looking-at " *// ?")
           (setq comment (match-string 0)))
          (t
-          (setq comment "// "))))
+          (setq comment "// ?"))))
       ;; Look for "#. #." and delete one
       (when (looking-at "[0-9a-iv]+\\. [0-9a-iv]+\\. ")
         (delete-char (/ (length (match-string 0)) 2)))
@@ -33,7 +33,7 @@
   (fill-paragraph)
   (previous-line)
   (delete-char 1)
-  (re-search-forward " *[*/]+ " (line-end-position))
+  (re-search-forward " *[*/]+ ?" (line-end-position))
   ;; Find any indent...?
   (let ((indent ""))
     (when (looking-at "[0-9a-iv]+\\. ")

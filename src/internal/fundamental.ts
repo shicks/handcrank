@@ -6,11 +6,12 @@
  */
 
 import { SameValue } from './abstract_compare';
-import { ToBoolean, ToObject, ToPropertyKey, ToString } from './abstract_conversion';
+import { ToBoolean, ToInt32, ToIntegerOrInfinity, ToNumeric, ToObject, ToPropertyKey, ToString } from './abstract_conversion';
 import { Get, HasOwnProperty, HasProperty, Invoke } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { UNUSED } from './enums';
+import { StringCreate } from './exotic_string';
 import { BuiltinFunction, BuiltinFunctionBehavior, CreateBuiltinFunction, Func, IsFunc, getter, method } from './func';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObject, OrdinaryObjectCreate } from './obj';
 import { prop0, propC, propWC } from './property_descriptor';
@@ -281,10 +282,15 @@ export const objectConstructor: Plugin = {
     CreateIntrinsics(realm, stagedGlobals) {
       const objectPrototype = realm.Intrinsics.get('%Object.prototype%')!;
       const functionPrototype = realm.Intrinsics.get('%Function.prototype%')!;
-      const objectCtor = CreateBuiltinFunction({
-        *Call($, _, [val]) { return ToObject($, val); },
-        *Construct() { return OrdinaryObjectCreate(objectPrototype); },
-      }, 1, 'Object', realm, functionPrototype);
+      const objectCtor = CreateBuiltinFunction(
+        wrapperBehavior(function*($, [value], NewTarget) {
+          if (NewTarget !== undefined && NewTarget !== $.getRunningContext().Function) {
+            return yield* OrdinaryCreateFromConstructor($, NewTarget, '%Object.prototype%');
+          }
+          if (value == null) return OrdinaryObjectCreate(objectPrototype);
+          return ToObject($, value);
+        }),
+        1, 'Object', realm, functionPrototype);
       objectCtor.OwnProps.set('prototype', propWC(objectPrototype));
       objectPrototype.OwnProps.set('constructor', propWC(objectCtor));
 
@@ -383,7 +389,6 @@ function makeWrapper(
  *     instance with a [[BooleanData]] internal slot.
  */
 export const booleanObject: Plugin = {
-  // We could make these ordinary functions that just assume intrinsics are defined?
   id: 'booleanObject',
   deps: [objectAndFunctionPrototype],
   realm: {
@@ -401,16 +406,16 @@ export const booleanObject: Plugin = {
        * 5. Return O.
        */
       const [booleanCtor, booleanPrototype] =
-          makeWrapper(
-            realm, 'Boolean', '%Object.prototype',
-            wrapperBehavior(function*($, [value], NewTarget) {
-              const b = ToBoolean(value);
-              if (NewTarget == null) return b;
-              return yield* OrdinaryCreateFromConstructor(
-                $, NewTarget, '%Boolean.prototype%', {
-                  BooleanData: b,
-                });
-            }));
+        makeWrapper(
+          realm, 'Boolean', '%Object.prototype',
+          wrapperBehavior(function*($, [value], NewTarget) {
+            const b = ToBoolean(value);
+            if (NewTarget == null) return b;
+            return yield* OrdinaryCreateFromConstructor(
+              $, NewTarget, '%Boolean.prototype%', {
+                BooleanData: b,
+              });
+          }));
       stagedGlobals.set('Boolean', propWC(booleanCtor));
 
       /**
@@ -653,25 +658,6 @@ export const symbolObject: Plugin = {
         return $.throw('TypeError', `Symbol.prototype${method} requires that 'this' be a Symbol`);
       }
 
-      /**
-       * 20.4.3.3.1 SymbolDescriptiveString ( sym )
-       *
-       * The abstract operation SymbolDescriptiveString takes
-       * argument sym (a Symbol) and returns a String. It performs
-       * the following steps when called:
-       * 
-       * 1. Let desc be sym's [[Description]] value.
-       * 2. If desc is undefined, set desc to the empty String.
-       * 3. Assert: desc is a String.
-       * 4. Return the string-concatenation of "Symbol(", desc, and ")".
-       */
-      function SymbolDescriptiveString(sym: symbol): string {
-        const desc = sym.description;
-        if (desc == null) return 'Symbol()';
-        Assert(typeof desc === 'string');
-        return `Symbol(${desc})`;
-      }
-
       defineProperties(realm, symbolPrototype, {
         /**
          * 20.4.3.2 get Symbol.prototype.description
@@ -750,6 +736,25 @@ export const symbolObject: Plugin = {
     },
   },
 };
+
+/**
+ * 20.4.3.3.1 SymbolDescriptiveString ( sym )
+ *
+ * The abstract operation SymbolDescriptiveString takes
+ * argument sym (a Symbol) and returns a String. It performs
+ * the following steps when called:
+ * 
+ * 1. Let desc be sym's [[Description]] value.
+ * 2. If desc is undefined, set desc to the empty String.
+ * 3. Assert: desc is a String.
+ * 4. Return the string-concatenation of "Symbol(", desc, and ")".
+ */
+function SymbolDescriptiveString(sym: symbol): string {
+  const desc = sym.description;
+  if (desc == null) return 'Symbol()';
+  Assert(typeof desc === 'string');
+  return `Symbol(${desc})`;
+}
 
 /**
  * 20.5 Error Objects
@@ -877,7 +882,9 @@ export const errorObject: Plugin = {
          */
         'toString': method(function*($, O) {
           if (!(O instanceof Obj)) {
-            return $.throw('TypeError', `Method Error.prototype.toString called on incompatible receiver ${DebugString(O)}`);
+            return $.throw('TypeError',
+                           `Method Error.prototype.toString called on incompatible receiver ${
+                            DebugString(O)}`);
           }
           let name = yield* Get($, O, 'name');
           if (IsAbrupt(name)) return name;
@@ -1025,6 +1032,8 @@ export const errorObject: Plugin = {
         throwTypeError.OwnProps.set('name', prop0(''));
         return throwTypeError;
       })())
+
+      // TODO - 20.5.7 AggregateError Objects
     },
   },
 };
@@ -1058,6 +1067,518 @@ export function* InstallErrorCause($: VM, O: Obj, options: Val): ECR<UNUSED> {
   return UNUSED;
 }
 
+/**
+ * 21.1 Number Objects
+ *
+ * 21.1.1 The Number Constructor
+ *
+ * The Number constructor:
+ *   - is %Number%.
+ *   - is the initial value of the "Number" property of the global object.
+ *   - creates and initializes a new Number object when called as a constructor.
+ *   - performs a type conversion when called as a function rather than as a constructor.
+ *   - may be used as the value of an extends clause of a class
+ *     definition. Subclass constructors that intend to inherit the
+ *     specified Number behaviour must include a super call to the
+ *     Number constructor to create and initialize the subclass
+ *     instance with a [[NumberData]] internal slot.
+ */
+export const numberObject: Plugin = {
+  id: 'numberObject',
+  deps: [objectAndFunctionPrototype],
+  realm: {
+    CreateIntrinsics(realm, stagedGlobals) {
+
+      /**
+       * 19.2.4 parseFloat ( string )
+       *
+       * This function produces a Number value dictated by
+       * interpretation of the contents of the string argument as a
+       * decimal literal.
+       *
+       * It is the %parseFloat% intrinsic object.
+       *
+       * It performs the following steps when called:
+       * 
+       * 1. Let inputString be ? ToString(string).
+       * 2. Let trimmedString be ! TrimString(inputString, start).
+       * 3. Let trimmed be StringToCodePoints(trimmedString).
+       * 4. Let trimmedPrefix be the longest prefix of trimmed that
+       *    satisfies the syntax of a StrDecimalLiteral, which might be
+       *    trimmed itself. If there is no such prefix, return NaN.
+       * 5. Let parsedNumber be ParseText(trimmedPrefix, StrDecimalLiteral).
+       * 6. Assert: parsedNumber is a Parse Node.
+       * 7. Return StringNumericValue of parsedNumber.
+       *
+       * NOTE: This function may interpret only a leading portion of
+       * string as a Number value; it ignores any code units that
+       * cannot be interpreted as part of the notation of a decimal
+       * literal, and no indication is given that any such code units
+       * were ignored.
+       */
+      const parseFloatIntrinsic = CreateBuiltinFunction({
+        *Call($, _, [string]) {
+          const inputString = yield* ToString($, string);
+          if (IsAbrupt(inputString)) return inputString;
+          return Number.parseFloat(inputString);
+        },
+      }, 1, 'parseFloat', realm, realm.Intrinsics.get('%Function.prototype%')!);
+      realm.Intrinsics.set('%parseFloat%', parseFloatIntrinsic);
+
+      /**
+       * 19.2.5 parseInt ( string, radix )
+       *
+       * This function produces an integral Number dictated by
+       * interpretation of the contents of string according to the
+       * specified radix. Leading white space in string is ignored. If
+       * radix coerces to 0 (such as when it is undefined), it is
+       * assumed to be 10 except when the number representation begins
+       * with "0x" or "0X", in which case it is assumed to be 16. If
+       * radix is 16, the number representation may optionally begin
+       * with "0x" or "0X".
+       *
+       * It is the %parseInt% intrinsic object.
+       *
+       * It performs the following steps when called:
+       * 
+       * 1. Let inputString be ? ToString(string).
+       * 2. Let S be ! TrimString(inputString, start).
+       * 3. Let sign be 1.
+       * 4. If S is not empty and the first code unit of S is the code
+       *    unit 0x002D (HYPHEN-MINUS), set sign to -1.
+       * 5. If S is not empty and the first code unit of S is either
+       *    the code unit 0x002B (PLUS SIGN) or the code unit 0x002D
+       *    (HYPHEN-MINUS), set S to the substring of S from index 1.
+       * 6. Let R be ℝ(? ToInt32(radix)).
+       * 7. Let stripPrefix be true.
+       * 8. If R ≠ 0, then
+       *     a. If R < 2 or R > 36, return NaN.
+       *     b. If R ≠ 16, set stripPrefix to false.
+       * 9. Else,
+       *     a. Set R to 10.
+       * 10. If stripPrefix is true, then
+       *     a. If the length of S is at least 2 and the first two code
+       *        units of S are either "0x" or "0X", then
+       *         i. Set S to the substring of S from index 2.
+       *         ii. Set R to 16.
+       * 11. If S contains a code unit that is not a radix-R digit,
+       *     let end be the index within S of the first such code unit;
+       *     otherwise, let end be the length of S.
+       * 12. Let Z be the substring of S from 0 to end.
+       * 13. If Z is empty, return NaN.
+       * 14. Let mathInt be the integer value that is represented by Z
+       *     in radix-R notation, using the letters A-Z and a-z for digits
+       *     with values 10 through 35. (However, if R = 10 and Z contains
+       *     more than 20 significant digits, every significant digit
+       *     after the 20th may be replaced by a 0 digit, at the option of
+       *     the implementation; and if R is not one of 2, 4, 8, 10, 16,
+       *     or 32, then mathInt may be an implementation-approximated
+       *     integer representing the integer value denoted by Z in
+       *     radix-R notation.)
+       * 15. If mathInt = 0, then
+       *     a. If sign = -1, return -0𝔽.
+       *     b. Return +0𝔽.
+       * 16. Return 𝔽(sign × mathInt).
+       *
+       * NOTE: This function may interpret only a leading portion of
+       * string as an integer value; it ignores any code units that
+       * cannot be interpreted as part of the notation of an integer,
+       * and no indication is given that any such code units were
+       * ignored.
+       */
+      const parseIntIntrinsic = CreateBuiltinFunction({
+        *Call($, _, [string, radix]) {
+          const inputString = yield* ToString($, string);
+          if (IsAbrupt(inputString)) return inputString;
+          let R = yield* ToInt32($, radix);
+          if (IsAbrupt(R)) return R;
+          return Number.parseInt(inputString, R);
+        },
+      }, 2, 'parseInt', realm, realm.Intrinsics.get('%Function.prototype%')!);
+      realm.Intrinsics.set('%parseInt%', parseIntIntrinsic);
+
+      function adapt(fn: (arg: number) => Val) {
+        return method(function*(_$, _, value) {
+          return fn(Number(value));
+        });
+      }
+
+      /**
+       * 21.1.1.1 Number ( value )
+       *
+       * This function performs the following steps when called:
+       * 
+       * 1. If value is present, then
+       *     a. Let prim be ? ToNumeric(value).
+       *     b. If prim is a BigInt, let n be 𝔽(ℝ(prim)).
+       *     c. Otherwise, let n be prim.
+       * 2. Else,
+       *     a. Let n be +0𝔽.
+       * 3. If NewTarget is undefined, return n.
+       * 4. Let O be ? OrdinaryCreateFromConstructor(NewTarget,
+       *    "%Number.prototype%", « [[NumberData]] »).
+       * 5. Set O.[[NumberData]] to n.
+       * 6. Return O.
+       */
+      const [numberCtor, numberPrototype] =
+        makeWrapper(
+          realm, 'Number', '%Object.prototype',
+          wrapperBehavior(function*($, [value], NewTarget) {
+            let n = 0;
+            if (value != null) {
+              const prim = yield* ToNumeric($, value);
+              if (IsAbrupt(prim)) return prim;
+              n = Number(prim);
+            }
+            if (NewTarget == null) return n;
+            return yield* OrdinaryCreateFromConstructor(
+              $, NewTarget, '%Number.prototype%', {
+                NumberData: n,
+              });
+          }));
+      stagedGlobals.set('Number', propWC(numberCtor));
+
+      /**
+       * 21.1.2 Properties of the Number Constructor
+       *
+       * The Number constructor:
+       *   - has a [[Prototype]] internal slot whose value is
+       *     %Function.prototype%.
+       *   - has the following properties:
+       */
+      defineProperties(realm, numberCtor, {
+        /** 21.1.2.1 Number.EPSILON */
+        'EPSILON': prop0(Number.EPSILON),
+
+        /** 21.1.2.2 Number.isFinite ( number ) */
+        'isFinite': adapt(Number.isFinite),
+
+        /** 21.1.2.3 Number.isInteger ( number ) */
+        'isInteger': adapt(Number.isInteger),
+
+        /** 21.1.2.4 Number.isNaN ( number ) */
+        'isNaN': adapt(Number.isNaN),
+
+        /** 21.1.2.5 Number.isSafeInteger ( number ) */
+        'isSafeInteger': adapt(Number.isSafeInteger),
+
+        /** 21.1.2.6 Number.MAX_SAFE_INTEGER */
+        'MAX_SAFE_INTEGER': prop0(Number.MAX_SAFE_INTEGER),
+
+        /** 21.1.2.7 Number.MAX_VALUE */
+        'MAX_VALUE': prop0(Number.MAX_VALUE),
+
+        /** 21.1.2.8 Number.MIN_SAFE_INTEGER */
+        'MIN_SAFE_INTEGER': prop0(Number.MIN_SAFE_INTEGER),
+
+        /** 21.1.2.9 Number.MIN_VALUE */
+        'MIN_VALUE': prop0(Number.MIN_VALUE),
+
+        /** 21.1.2.10 Number.NaN */
+        'NaN': prop0(Number.NaN),
+
+        /** 21.1.2.11 Number.NEGATIVE_INFINITY */
+        'NEGATIVE_INFINITY': prop0(Number.NEGATIVE_INFINITY),
+
+        /**
+         * 21.1.2.12 Number.parseFloat ( string )
+         * 
+         * The initial value of the "parseFloat" property is %parseFloat%.
+         */
+        'parseFloat': propWC(parseFloatIntrinsic),
+
+        /**
+         * 21.1.2.13 Number.parseInt ( string, radix )
+         * 
+         * The initial value of the "parseInt" property is %parseInt%.
+         */
+        'parseInt': propWC(parseIntIntrinsic),
+
+        /** 21.1.2.14 Number.POSITIVE_INFINITY */
+        'POSITIVE_INFINITY': prop0(Number.POSITIVE_INFINITY),
+      });
+
+      /**
+       * (21.1.3) The abstract operation thisNumberValue takes argument
+       * value. It performs the following steps when called:
+       * 
+       * 1. If value is a Number, return value.
+       * 2. If value is an Object and value has a [[NumberData]] internal slot, then
+       *     a. Let n be value.[[NumberData]].
+       *     b. Assert: n is a Number.
+       *     c. Return n.
+       * 3. Throw a TypeError exception.
+       *
+       * The phrase “this Number value” within the specification of a
+       * method refers to the result returned by calling the abstract
+       * operation thisNumberValue with the this value of the method
+       * invocation passed as the argument.
+       */
+      function thisNumberValue($: VM, value: Val, method: string): CR<number> {
+        if (typeof value === 'number') return value;
+        if (value instanceof Obj && value.NumberData != null) {
+          Assert(typeof value.NumberData === 'number');
+          return value.NumberData;
+        }
+        return $.throw('TypeError', `Number.prototype${method} requires that 'this' be a Number`);
+      }
+
+      /**
+       * 21.1.3 Properties of the Number Prototype Object
+       *
+       * The Number prototype object:
+       *   - is %Number.prototype%.
+       *   - is an ordinary object.
+       *   - is itself a Number object; it has a [[NumberData]] internal
+       *     slot with the value +0𝔽.
+       *   - has a [[Prototype]] internal slot whose value is %Object.prototype%.
+       *
+       * Unless explicitly stated otherwise, the methods of the Number
+       * prototype object defined below are not generic and the this
+       * value passed to them must be either a Number value or an
+       * object that has a [[NumberData]] internal slot that has been
+       * initialized to a Number value.
+       */
+      defineProperties(realm, numberPrototype, {
+        /**
+         * 21.1.3.2 Number.prototype.toExponential ( fractionDigits )
+         *
+         * This method returns a String containing this Number value
+         * represented in decimal exponential notation with one digit
+         * before the significand\'s decimal point and fractionDigits
+         * digits after the significand\'s decimal point. If
+         * fractionDigits is undefined, it includes as many
+         * significand digits as necessary to uniquely specify the
+         * Number (just like in ToString except that in this case the
+         * Number is always output in exponential notation).
+         *
+         * It performs the following steps when called:
+         * 
+         * 1. Let x be ? thisNumberValue(this value).
+         * 2. Let f be ? ToIntegerOrInfinity(fractionDigits).
+         * 3. Assert: If fractionDigits is undefined, then f is 0.
+         * 4. If x is not finite, return Number::toString(x, 10).
+         * 5. If f < 0 or f > 100, throw a RangeError exception.
+         * ... (elided since we just defer to the host at this point) ...
+         */
+        'toExponential': method(function*($, thisValue, fractionDigits) {
+          const x = thisNumberValue($, thisValue, '.toExponential');
+          if (IsAbrupt(x)) return x;
+          const f = yield* ToIntegerOrInfinity($, fractionDigits);
+          if (IsAbrupt(f)) return f;
+          Assert(fractionDigits != null || f === 0);
+          if (Number.isFinite(x)) {
+            if (f < 0 || f > 100) {
+              return $.throw('RangeError', 'toExponential() argument must be between 0 and 100');
+            }
+          }
+          return x.toExponential(f);
+        }),
+
+        /**
+         * 21.1.3.3 Number.prototype.toFixed ( fractionDigits )
+         *
+         * NOTE 1: This method returns a String containing this Number
+         * value represented in decimal fixed-point notation with
+         * fractionDigits digits after the decimal point. If
+         * fractionDigits is undefined, 0 is assumed.
+         *
+         * It performs the following steps when called:
+         * 
+         * 1. Let x be ? thisNumberValue(this value).
+         * 2. Let f be ? ToIntegerOrInfinity(fractionDigits).
+         * 3. Assert: If fractionDigits is undefined, then f is 0.
+         * 4. If f is not finite, throw a RangeError exception.
+         * 5. If f < 0 or f > 100, throw a RangeError exception.
+         * ... (elided since we just defer to the host at this point) ...
+         */
+        'toFixed': method(function*($, thisValue, fractionDigits) {
+          const x = thisNumberValue($, thisValue, '.toFixed');
+          if (IsAbrupt(x)) return x;
+          const f = yield* ToIntegerOrInfinity($, fractionDigits);
+          if (IsAbrupt(f)) return f;
+          Assert(fractionDigits != null || f === 0);
+          if (!Number.isFinite(f) || f < 0 || f > 100) {
+            return $.throw('RangeError', 'toFixed() digits argument must be between 0 and 100');
+          }
+          return x.toFixed(f);
+        }),
+
+        /**
+         * 21.1.3.4 Number.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] )
+         *
+         * An ECMAScript implementation that includes the ECMA-402
+         * Internationalization API must implement this method as
+         * specified in the ECMA-402 specification. If an ECMAScript
+         * implementation does not include the ECMA-402 API the
+         * following specification of this method is used:
+         *
+         * This method produces a String value that represents this
+         * Number value formatted according to the conventions of the
+         * host environment's current locale. This method is
+         * implementation-defined, and it is permissible, but not
+         * encouraged, for it to return the same thing as toString.
+         *
+         * The meanings of the optional parameters to this method are
+         * defined in the ECMA-402 specification; implementations that
+         * do not include ECMA-402 support must not use those
+         * parameter positions for anything else.
+         */
+        'toLocaleString': method(function*($, thisValue) {
+          const x = thisNumberValue($, thisValue, '.toLocaleString');
+          if (IsAbrupt(x)) return x;
+          return String(x);
+        }),
+
+        /**
+         * 21.1.3.5 Number.prototype.toPrecision ( precision )
+         *
+         * This method returns a String containing this Number value
+         * represented either in decimal exponential notation with one
+         * digit before the significand\'s decimal point and precision
+         * - 1 digits after the significand\'s decimal point or in
+         * decimal fixed notation with precision significant
+         * digits. If precision is undefined, it calls ToString
+         * instead.
+         *
+         * It performs the following steps when called:
+         * 
+         * 1. Let x be ? thisNumberValue(this value).
+         * 2. If precision is undefined, return ! ToString(x).
+         * 3. Let p be ? ToIntegerOrInfinity(precision).
+         * 4. If x is not finite, return Number::toString(x, 10).
+         * 5. If p < 1 or p > 100, throw a RangeError exception.
+         * ... (elided since we just defer to the host at this point) ...
+         */
+        'toPrecision': method(function*($, thisValue, precision) {
+          const x = thisNumberValue($, thisValue, '.toPrecision');
+          if (IsAbrupt(x)) return x;
+          if (precision == null) return String(x);
+          const p = yield* ToIntegerOrInfinity($, precision);
+          if (IsAbrupt(p)) return p;
+          if (!Number.isFinite(x)) return String(x);
+          if (p < 1 || p > 100) {
+            return $.throw('RangeError', 'toPrecision() argument must be between 1 and 100');
+          }
+          return x.toPrecision(p);
+        }),
+
+        /**
+         * 21.1.3.6 Number.prototype.toString ( [ radix ] )
+         *
+         * NOTE: The optional radix should be an integral Number value
+         * in the inclusive interval from 2𝔽 to 36𝔽. If radix is
+         * undefined then 10𝔽 is used as the value of radix.
+         *
+         * This method performs the following steps when called:
+         * 
+         * 1. Let x be ? thisNumberValue(this value).
+         * 2. If radix is undefined, let radixMV be 10.
+         * 3. Else, let radixMV be ? ToIntegerOrInfinity(radix).
+         * 4. If radixMV is not in the inclusive interval from 2 to
+         *    36, throw a RangeError exception.
+         * 5. Return Number::toString(x, radixMV).
+         *
+         * This method is not generic; it throws a TypeError exception if
+         * its this value is not a Number or a Number object. Therefore, it
+         * cannot be transferred to other kinds of objects for use as a method.
+         *
+         * The "length" property of this method is 1𝔽.
+         */
+        'toString': method(function*($, thisValue, radix) {
+          const x = thisNumberValue($, thisValue, '.toString');
+          if (IsAbrupt(x)) return x;
+          let radixMV = 10;
+          if (radix != null) {
+            const r = yield* ToIntegerOrInfinity($, radix);
+            if (IsAbrupt(r)) return r;
+            radixMV = r;
+          }
+          if (radixMV < 2 || radixMV > 36) {
+            return $.throw('RangeError', 'toString() radix argument must be between 2 and 36');
+          }
+          return x.toString(radixMV);
+        }),
+
+        /**
+         * 21.1.3.7 Number.prototype.valueOf ( )
+         *
+         * 1. Return ? thisNumberValue(this value).
+         */
+        'valueOf': method(function*($, thisValue) {
+          return thisNumberValue($, thisValue, '.valueOf');
+        }),
+      });
+    },
+  },
+};
+
+// TODO - BigInt object 21.2
+// TODO - Math object 21.3
+// TODO - Date object 21.4
+
+/**
+ * 22.1 String Objects
+ *
+ * 22.1.1 The String Constructor
+ *
+ * The String constructor:
+ *   - is %String%.
+ *   - is the initial value of the "String" property of the global object.
+ *   - creates and initializes a new String object when called as a constructor.
+ *   - performs a type conversion when called as a function rather than as a constructor.
+ *   - may be used as the value of an extends clause of a class
+ *     definition. Subclass constructors that intend to inherit the
+ *     specified String behaviour must include a super call to the
+ *     String constructor to create and initialize the subclass
+ *     instance with a [[StringData]] internal slot.
+ */
+export const stringObject: Plugin = {
+  id: 'stringObject',
+  deps: [objectAndFunctionPrototype],
+  realm: {
+    CreateIntrinsics(realm, stagedGlobals) {
+      /**
+       * 22.1.1.1 String ( value )
+       *
+       * This function performs the following steps when called:
+       * 
+       * 1. If value is not present, let s be the empty String.
+       * 2. Else,
+       *     a. If NewTarget is undefined and value is a Symbol,
+       *        return SymbolDescriptiveString(value).
+       *     b. Let s be ? ToString(value).
+       * 3. If NewTarget is undefined, return s.
+       * 4. Return StringCreate(s,
+       *    ? GetPrototypeFromConstructor(NewTarget, "%String.prototype%")).
+       */
+      const [stringCtor, stringPrototype] =
+        makeWrapper(
+          realm, 'String', '%Object.prototype%',
+          wrapperBehavior(function*($, [value], NewTarget) {
+            let s = '';
+            if (value != null) {
+              if (NewTarget == null && typeof value === 'symbol') {
+                return SymbolDescriptiveString(value);
+              }
+              const crs = yield* ToString($, value);
+              if (IsAbrupt(crs)) return crs;
+              s = crs;
+            }
+            if (NewTarget == null) return s;
+            return StringCreate(s, NewTarget);
+          }));
+      stagedGlobals.set('String', propWC(stringCtor));
+
+      // TODO - 22.1.2 Properties of the String Constructor
+      // TODO - 22.1.3 Properties of the String Prototype Object
+
+    },
+  },
+};
+
+// TODO - figure out how to make these things more plug-and-play/optional?
+//      - maybe they get separated into separate files?
 
 /**/
 
@@ -1069,5 +1590,7 @@ export const fundamental: Plugin = {
     booleanObject,
     symbolObject,
     errorObject,
+    numberObject,
+    stringObject,
   ],
 }
