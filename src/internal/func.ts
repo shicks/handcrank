@@ -1723,10 +1723,12 @@ function* ArgumentListEvaluation(
  */
 export function method(
   fn: ($: VM, thisValue: Val, ...params: Val[]) => ECR<Val>,
+  length = fn.length - 2,
+  specifiedName?: string,
 ): (realm: RealmRecord, name: string) => PropertyDescriptor {
   return (realm, name) => propWC(CreateBuiltinFunction({
     Call($, thisObj, argumentsList) { return fn($, thisObj, ...argumentsList); },
-  }, fn.length - 2, name, realm, realm.Intrinsics.get('%Function.prototype%')!));
+  }, length, specifiedName ?? name, realm, realm.Intrinsics.get('%Function.prototype%')!));
 }
 
 /**

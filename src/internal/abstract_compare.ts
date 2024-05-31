@@ -10,6 +10,54 @@ declare const ToPrimitive: any;
 declare const ToNumeric: any;
 
 /**
+ * 7.2.1 RequireObjectCoercible ( argument )
+ * 
+ * The abstract operation RequireObjectCoercible takes argument
+ * argument (an ECMAScript language value) and returns either a normal
+ * completion containing an ECMAScript language value or a throw
+ * completion. It throws an error if argument is a value that cannot
+ * be converted to an Object using ToObject. It is defined by Table
+ * 14:
+ * 
+ * Table 14: RequireObjectCoercible Results
+ * Argument Type	Result
+ * Undefined	Throw a TypeError exception.
+ * Null	Throw a TypeError exception.
+ * Boolean	Return argument.
+ * Number	Return argument.
+ * String	Return argument.
+ * Symbol	Return argument.
+ * BigInt	Return argument.
+ * Object	Return argument.
+ */
+export function RequireObjectCoercible($: VM, argument: Val): CR<Val> {
+  if (argument == null) {
+    return $.throw('TypeError', 'Value cannot be converted to an object');
+  }
+  return argument;
+}
+
+/**
+ * 7.2.2 IsArray ( argument )
+ * 
+ * The abstract operation IsArray takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing a Boolean or a throw completion. It performs the
+ * following steps when called:
+ * 
+ * 1. If argument is not an Object, return false.
+ * 2. If argument is an Array exotic object, return true.
+ * 3. If argument is a Proxy exotic object, then
+ *     a. Perform ? ValidateNonRevokedProxy(argument).
+ *     b. Let proxyTarget be argument.[[ProxyTarget]].
+ *     c. Return ? IsArray(proxyTarget).
+ * 4. Return false.
+ */
+export function IsArray($: VM, argument: Val): CR<boolean> {
+  throw new Error('NOT IMPLEMENTED: IsArray');
+}
+
+/**
  * 7.2.3 IsCallable ( argument )
  *
  * The abstract operation IsCallable takes argument argument (an

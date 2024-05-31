@@ -8,7 +8,7 @@ import { StrictNode } from '../tree';
 import { ToPropertyKey } from '../abstract_conversion';
 import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from '../statements';
 import { Evaluation_AssignmentExpression } from '../assignment';
-import { Evaluation_CallExpression, Evaluation_NewExpression } from '../func';
+import { Evaluation_CallExpression, Evaluation_NewExpression, InstantiateOrdinaryFunctionExpression } from '../func';
 
 // type Plugin<ExtraIntrinsics = never> = {[K in Intrinsics|Globals]: Intrinsics|($: VM) => Generator<Intrinsic, K extends `%${string}%` ? Obj : Val|PropertyDescriptor, Obj>} & {Evaluate?(on: fn): ...};
 // export const basic: Plugin = {
@@ -93,7 +93,7 @@ export const basic: Plugin = {
       });
       on('AssignmentExpression', (n) => Evaluation_AssignmentExpression($, n));
       on('FunctionDeclaration', (n) => just(EMPTY));
-      //on('FunctionExpression', (n) => Evaluate_FunctionExpression($, n));
+      on('FunctionExpression', (n) => just(InstantiateOrdinaryFunctionExpression($, n)));
       on('ReturnStatement', function*(n) {
         // 14.10.1 Runtime Semantics: Evaluation
         //
@@ -112,6 +112,17 @@ export const basic: Plugin = {
         if (IsAbrupt(exprValue)) return exprValue;
         //if (GetGeneratorKind() === 'async') {
         return new Abrupt(CompletionType.Return, exprValue, EMPTY);
+      });
+      on('ThrowStatement', function*(n) {
+        // 14.14.1 Runtime Semantics: Evaluation
+        //
+        // ThrowStatement : throw Expression ;
+        // 1. Let exprRef be ? Evaluation of Expression.
+        // 2. Let exprValue be ? GetValue(exprRef).
+        // 3. Return ThrowCompletion(exprValue).
+        const exprValue = yield* $.evaluateValue(n.argument);
+        if (IsAbrupt(exprValue)) return exprValue;
+        return new Abrupt(CompletionType.Throw, exprValue, EMPTY);
       });
       on('CallExpression', (n) => Evaluation_CallExpression($, n));
       on('NewExpression', (n) => Evaluation_NewExpression($, n));

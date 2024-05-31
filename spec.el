@@ -12,11 +12,17 @@
           (setq comment (match-string 0)))
          ((looking-at " *// ?")
           (setq comment (match-string 0)))
+         ((looking-at "\\( *\\)/\\*\\*")
+          (setq comment (concat (match-string 1) " * ")))
          (t
           (setq comment "// ?"))))
+      (when (not (string-match " $" comment))
+        (setq comment (concat comment " ")))
       ;; Look for "#. #." and delete one
       (when (looking-at "[0-9a-iv]+\\. [0-9a-iv]+\\. ")
-        (delete-char (/ (length (match-string 0)) 2)))
+        (delete-char (/ (length (match-string 0)) 2))
+        (when (looking-at "[iv]") (save-excursion (insert "        ")))
+        (when (looking-at "[a-hj-uw-z]") (save-excursion (insert "    "))))
       (when (not (looking-at " *[*/]"))
         (insert comment))
       ;; Fill long lines
