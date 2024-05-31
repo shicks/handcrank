@@ -1,13 +1,10 @@
+import { StringToBigInt, ToNumeric, ToPrimitive } from './abstract_conversion';
 import { CR, IsAbrupt } from './completion_record';
 import { BOOLEAN, NUMBER, OBJECT } from './enums';
 import { Func } from './func';
 import { Obj } from './obj';
 import { Type, Val } from './val';
-import { VM } from './vm';
-
-declare const StringToBigInt: any;
-declare const ToPrimitive: any;
-declare const ToNumeric: any;
+import { ECR, VM } from './vm';
 
 /**
  * 7.2.1 RequireObjectCoercible ( argument )
@@ -53,7 +50,7 @@ export function RequireObjectCoercible($: VM, argument: Val): CR<Val> {
  *     c. Return ? IsArray(proxyTarget).
  * 4. Return false.
  */
-export function IsArray($: VM, argument: Val): CR<boolean> {
+export function IsArray(_$: VM, _argument: Val): CR<boolean> {
   throw new Error('NOT IMPLEMENTED: IsArray');
 }
 
@@ -279,17 +276,17 @@ export function SameValueZero(x: Val, y: Val): boolean {
  * lexicographic ordering by code unit differs from ordering by code
  * point for Strings containing surrogate pairs.
  */
-export function IsLessThan($: VM, x: Val, y: Val, LeftFirst: boolean): CR<boolean|undefined> {
+export function* IsLessThan($: VM, x: Val, y: Val, LeftFirst: boolean): ECR<boolean|undefined> {
   let px: CR<Val>, py: CR<Val>;
   if (LeftFirst) {
-    px = ToPrimitive($, x, NUMBER);
+    px = yield* ToPrimitive($, x, NUMBER);
     if (IsAbrupt(px)) return px;
-    py = ToPrimitive($, y, NUMBER);
+    py = yield* ToPrimitive($, y, NUMBER);
     if (IsAbrupt(py)) return py;
   } else {
-    py = ToPrimitive($, y, NUMBER);
+    py = yield* ToPrimitive($, y, NUMBER);
     if (IsAbrupt(py)) return py;
-    px = ToPrimitive($, x, NUMBER);
+    px = yield* ToPrimitive($, x, NUMBER);
     if (IsAbrupt(px)) return px;
   }
   if (typeof px === 'string' && typeof py === 'string') {
@@ -307,9 +304,9 @@ export function IsLessThan($: VM, x: Val, y: Val, LeftFirst: boolean): CR<boolea
   }
   // NOTE: Because px and py are primitive values, evaluation order
   // is not important.
-  const nx = ToNumeric(px);
+  const nx = yield* ToNumeric($, px);
   if (IsAbrupt(nx)) return nx;
-  const ny = ToNumeric(py);
+  const ny = yield* ToNumeric($, py);
   if (IsAbrupt(ny)) return ny;
   if (nx !== nx || ny !== ny) return undefined;
   return nx < ny;
@@ -349,7 +346,7 @@ export function IsLessThan($: VM, x: Val, y: Val, LeftFirst: boolean): CR<boolea
  *     b. If ℝ(x) = ℝ(y), return true; otherwise return false.
  * 14. Return false.
  */
-export function IsLooselyEqual($: VM, x: Val, y:Val): CR<boolean> {
+export function* IsLooselyEqual($: VM, x: Val, y:Val): ECR<boolean> {
   const tx = Type(x);
   const ty = Type(y);
   if (tx === ty) return IsStrictlyEqual(x, y);
@@ -367,13 +364,13 @@ export function IsLooselyEqual($: VM, x: Val, y:Val): CR<boolean> {
   }
   // Figure out which value is the object and make it primitive.
   if (OBJECT.is(ty)) {
-    const py = ToPrimitive($, y);
+    const py = yield* ToPrimitive($, y);
     if (IsAbrupt(py)) return py;
-    return IsLooselyEqual($, x, py);
+    return yield* IsLooselyEqual($, x, py);
   } else {
-    const px = ToPrimitive($, x);
+    const px = yield* ToPrimitive($, x);
     if (IsAbrupt(px)) return px;
-    return IsLooselyEqual($, px, y);
+    return yield* IsLooselyEqual($, px, y);
   }
 }
 

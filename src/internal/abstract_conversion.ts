@@ -404,6 +404,71 @@ export function* ToUint8Clamp($: VM, argument: Val): ECR<number> {
 }
 
 /**
+ * 7.1.13 ToBigInt ( argument )
+ * 
+ * The abstract operation ToBigInt takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing a BigInt or a throw completion. It converts argument to
+ * a BigInt value, or throws if an implicit conversion from Number
+ * would be required. It performs the following steps when called:
+ * 
+ * 1. Let prim be ? ToPrimitive(argument, number).
+ * 2. Return the value that prim corresponds below:
+ *     Undefined: Throw a TypeError exception.
+ *     Null:      Throw a TypeError exception.
+ *     Boolean:   Return 1n if prim is true and 0n if prim is false.
+ *     BigInt:    Return prim.
+ *     Number:    Throw a TypeError exception.
+ *     String:    1. Let n be StringToBigInt(prim).
+ *                2. If n is undefined, throw a SyntaxError exception.
+ *                3. Return n.
+ *     Symbol:    Throw a TypeError exception.
+ */
+export function* ToBigInt($: VM, argument: Val): ECR<bigint> {
+  const prim = yield* ToPrimitive($, argument, NUMBER);
+  if (IsAbrupt(prim)) return prim;
+  switch (typeof prim) {
+    case 'object': // null
+    case 'undefined':
+    case 'number':
+      return $.throw('TypeError'); // TODO - message?
+    case 'symbol':
+      return $.throw('TypeError'); // TODO - message?
+    case 'boolean':
+      return prim ? 1n : 0n;
+    case 'string': {
+      const n = StringToBigInt(prim);
+      if (n == undefined) return $.throw('SyntaxError', `Cannot convert ${prim} to a BigInt`);
+      return n;
+    }
+    case 'bigint':
+      return prim;
+  }
+}
+
+/**
+ * 7.1.14 StringToBigInt ( str )
+ * 
+ * The abstract operation StringToBigInt takes argument str (a String)
+ * and returns a BigInt or undefined. It performs the following steps
+ * when called:
+ * 
+ * 1. Let text be StringToCodePoints(str).
+ * 2. Let literal be ParseText(text, StringIntegerLiteral).
+ * 3. If literal is a List of errors, return undefined.
+ * 4. Let mv be the MV of literal.
+ * 5. Assert: mv is an integer.
+ * 6. Return ℤ(mv).
+ */
+export function StringToBigInt(str: string): bigint|undefined {
+  try {
+    return BigInt(str);
+  } catch (err) {
+    return undefined;
+  }
+}
+
+/**
  * 7.1.17 ToString ( argument )
  *
  * The abstract operation ToString takes argument argument (an

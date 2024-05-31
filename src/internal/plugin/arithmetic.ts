@@ -9,6 +9,7 @@ export const arithmetic: Plugin = {
   syntax: {
     Evaluation($, on) {
       on('BinaryExpression', (n) => Evaluate_BinaryExpression($, n));
+      //on('UnaryExpression', (n) => Evaluate_BinaryExpression($, n));
     },
   },
 
