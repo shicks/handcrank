@@ -160,7 +160,7 @@ export function* Evaluation_AssignmentExpression($: VM, n: AssignmentExpression)
     rval = yield* ApplyStringOrNumericBinaryOperator($, lval, compoundOp, rval);
     if (IsAbrupt(rval)) return rval;
   }
-  const result = PutValue($, lref, rval);
+  const result = yield* PutValue($, lref, rval);
   if (IsAbrupt(result)) return result;
   return rval;
 }

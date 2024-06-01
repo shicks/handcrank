@@ -5,7 +5,7 @@ import { UNUSED } from './enums';
 import { GlobalEnvironmentRecord } from './environment_record';
 import { ExecutionContext } from './execution_context';
 import { Obj, OrdinaryObjectCreate } from './obj';
-import { PropertyDescriptor } from './property_descriptor';
+import { PropertyDescriptor, methodName } from './property_descriptor';
 import { VM } from './vm';
 
 /**
@@ -236,7 +236,7 @@ export function defineProperties(
 ): void {
   for (const k of Reflect.ownKeys(props)) {
     const v = props[k];
-    const desc = typeof v === 'function' ? v(realm, typeof k === 'symbol' ? `[${k.description}]` : k) : v;
+    const desc = typeof v === 'function' ? v(realm, methodName(k)) : v;
     obj.OwnProps.set(k, desc);
   }
 }

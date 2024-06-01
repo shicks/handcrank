@@ -73,10 +73,10 @@ export function* Evaluation_ComparisonExpression(
   switch (opText) {
     case '===': return IsStrictlyEqual(lval, rval);
     case '!==': return fmap(IsStrictlyEqual(lval, rval), x => !x);
-    case '==': return IsLooselyEqual($, lval, rval);
+    case '==': return yield* IsLooselyEqual($, lval, rval);
     case '!=': return fmap(IsLooselyEqual($, lval, rval), x => !x);
-    case '<': return fmap(IsLessThan($, lval, rval, true), x => x ?? false);
-    case '>': return fmap(IsLessThan($, rval, lval, false), x => x ?? false);
+    case '<': return fmap(yield* IsLessThan($, lval, rval, true), x => x ?? false);
+    case '>': return fmap(yield* IsLessThan($, rval, lval, false), x => x ?? false);
     case '<=': return fmap(IsLessThan($, rval, lval, false), x => !x ?? false);
     case '>=': return fmap(IsLessThan($, lval, rval, true), x => !x ?? false);
     case 'in': {

@@ -9,6 +9,7 @@ import { ToPropertyKey } from '../abstract_conversion';
 import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from '../statements';
 import { Evaluation_AssignmentExpression } from '../assignment';
 import { Evaluation_CallExpression, Evaluation_NewExpression, InstantiateOrdinaryFunctionExpression } from '../func';
+import { Evaluation_ObjectExpression } from '../obj';
 
 // type Plugin<ExtraIntrinsics = never> = {[K in Intrinsics|Globals]: Intrinsics|($: VM) => Generator<Intrinsic, K extends `%${string}%` ? Obj : Val|PropertyDescriptor, Obj>} & {Evaluate?(on: fn): ...};
 // export const basic: Plugin = {
@@ -55,8 +56,8 @@ export const basic: Plugin = {
       });
       on('ThisExpression', () => just(ResolveThisBinding($)));
       on('Identifier', (n) => just(ResolveBinding($, n.name)));
+      on('ObjectExpression', (n) => Evaluation_ObjectExpression($, n));
       on('ArrayExpression', (n) => {throw'13.2.4.2'});
-      on('ObjectExpression', (n) => {throw'13.2.5.4'});
       //on('Literal', when(n.value instanceof RegExp) (n) => {throw'13.2.7.3'});
       on('TemplateLiteral', (n) => {throw'13.2.8.6'});
       /** 13.3.2.1 MemberExpression */
@@ -93,7 +94,7 @@ export const basic: Plugin = {
       });
       on('AssignmentExpression', (n) => Evaluation_AssignmentExpression($, n));
       on('FunctionDeclaration', (n) => just(EMPTY));
-      on('FunctionExpression', (n) => just(InstantiateOrdinaryFunctionExpression($, n)));
+      on('FunctionExpression', (n) => InstantiateOrdinaryFunctionExpression($, n));
       on('ReturnStatement', function*(n) {
         // 14.10.1 Runtime Semantics: Evaluation
         //

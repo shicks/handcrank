@@ -5,7 +5,7 @@ import { IsAbrupt } from './completion_record';
 import { UNUSED } from './enums';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { slots } from './slots';
-import { Val } from './val';
+import { PropertyKey, Val } from './val';
 import { ECR, VM } from './vm';
 
 export type PropertyRecord = Record<PropertyKey, PropertyDescriptor>;
@@ -265,4 +265,8 @@ export function prop0(v: Val): PropertyDescriptor {
     Enumerable: false,
     Configurable: false,
   };
+}
+
+export function methodName(k: PropertyKey): string {
+  return typeof k === 'symbol' ? `[${k.description}]` : k
 }

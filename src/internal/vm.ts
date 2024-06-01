@@ -12,7 +12,6 @@ import { EnvironmentRecord } from './environment_record';
 import { HasValueField, propWC } from './property_descriptor';
 import { Assert } from './assert';
 import { IsFunc } from './func';
-import { ToString } from './abstract_conversion';
 
 export type EvalGen<T> = Generator<undefined, T, undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
@@ -151,7 +150,11 @@ export class VM {
     if (typeof script === 'string') {
       const source = script;
       if (!this.esprima) throw new Error(`no parser`);
-      script = this.esprima.parseScript(source) as ESTree.Program;
+      try {
+        script = this.esprima.parseScript(source) as ESTree.Program;
+      } catch (err) {
+        return this.throw('SyntaxError', err.message);
+      }
       preprocess(script, {sourceFile: filename, sourceText: source});
 
       // script = this.esprima.parseScript(source, {loc: true}, (n: Node, meta: Metadata) => {
@@ -238,6 +241,11 @@ export class VM {
       };
       register(this, on);
     }
+  }
+
+  isJsonParse() {
+    // TODO - look thru execution context stack to figure this out...
+    return false;
   }
 }
 

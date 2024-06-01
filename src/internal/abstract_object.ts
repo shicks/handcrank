@@ -7,11 +7,11 @@ import { IsCallable } from "./abstract_compare";
 import { ToObject } from "./abstract_conversion";
 import { Assert } from "./assert";
 import { InstanceofOperator } from "./binary_operators";
-import { CR, IsAbrupt } from "./completion_record";
+import { CR, CastNotAbrupt, IsAbrupt } from "./completion_record";
 import { UNUSED } from "./enums";
 import { Func } from "./func";
 import { Obj } from "./obj";
-import { PropertyDescriptor, propWEC } from "./property_descriptor";
+import { PropertyDescriptor, propWC, propWEC } from "./property_descriptor";
 import { RealmRecord } from "./realm_record";
 import { PropertyKey, Val } from "./val";
 import { DebugString, ECR, VM, just } from "./vm";
@@ -171,10 +171,85 @@ export function CreateDataProperty($: VM, O: Obj, P: PropertyKey, V: Val): CR<bo
  * not already exist. If it does exist, DefinePropertyOrThrow is
  * guaranteed to complete normally.
  */
+export function CreateMethodProperty(
+  $: VM,
+  O: Obj,
+  P: PropertyKey,
+  V: Val,
+): UNUSED {
+  Assert(O.Extensible);
+  const newDesc = propWC(V);
+  return CastNotAbrupt(DefinePropertyOrThrow($, O, P, newDesc));
+}
 
+/**
+ * 7.3.7 CreateDataPropertyOrThrow ( O, P, V )
+ * 
+ * The abstract operation CreateDataPropertyOrThrow takes arguments O
+ * (an Object), P (a property key), and V (an ECMAScript language
+ * value) and returns either a normal completion containing unused or
+ * a throw completion. It is used to create a new own property of an
+ * object. It throws a TypeError exception if the requested property
+ * update cannot be performed. It performs the following steps when
+ * called:
+ * 
+ * 1. Let success be ? CreateDataProperty(O, P, V).
+ * 2. If success is false, throw a TypeError exception.
+ * 3. Return unused.
+ * 
+ * NOTE: This abstract operation creates a property whose attributes
+ * are set to the same defaults used for properties created by the
+ * ECMAScript language assignment operator. Normally, the property
+ * will not already exist. If it does exist and is not configurable or
+ * if O is not extensible, [[DefineOwnProperty]] will return false
+ * causing this operation to throw a TypeError exception.
+ */
+export function CreateDataPropertyOrThrow(
+  $: VM,
+  O: Obj,
+  P: PropertyKey,
+  V: Val,
+): CR<UNUSED> {
+  const success = CreateDataProperty($, O, P, V);
+  if (IsAbrupt(success)) return success;
+  if (!success) return $.throw('TypeError');
+  return UNUSED;
+}
 
-
-
+/**
+ * 7.3.8 CreateNonEnumerableDataPropertyOrThrow ( O, P, V )
+ * 
+ * The abstract operation CreateNonEnumerableDataPropertyOrThrow takes
+ * arguments O (an Object), P (a property key), and V (an ECMAScript
+ * language value) and returns unused. It is used to create a new
+ * non-enumerable own property of an ordinary object. It performs the
+ * following steps when called:
+ * 
+ * 1. Assert: O is an ordinary, extensible object with no
+ *    non-configurable properties.
+ * 2. Let newDesc be the PropertyDescriptor {
+ *    [[Value]]: V, [[Writable]]: true,
+ *    [[Enumerable]]: false, [[Configurable]]: true}.
+ * 3. Perform ! DefinePropertyOrThrow(O, P, newDesc).
+ * 4. Return unused.
+ * 
+ * NOTE: This abstract operation creates a property whose attributes
+ * are set to the same defaults used for properties created by the
+ * ECMAScript language assignment operator except it is not
+ * enumerable. Normally, the property will not already exist. If it
+ * does exist, DefinePropertyOrThrow is guaranteed to complete
+ * normally.
+ */
+export function CreateNonEnumerableDataPropertyOrThrow(
+  $: VM,
+  O: Obj,
+  P: PropertyKey,
+  V: Val,
+): UNUSED {
+  Assert(O.Extensible);
+  const newDesc = propWC(V);
+  return CastNotAbrupt(DefinePropertyOrThrow($, O, P, newDesc));
+}
 
 /**
  * 7.3.9 DefinePropertyOrThrow ( O, P, desc )
@@ -451,4 +526,55 @@ export function GetFunctionRealm($: VM, obj: Func): CR<RealmRecord> {
     return GetFunctionRealm($, obj.ProxyTarget as Func);
   }
   return $.getRealm()!;
+}
+
+/**
+ * 7.3.26 CopyDataProperties ( target, source, excludedItems )
+ * 
+ * The abstract operation CopyDataProperties takes arguments target
+ * (an Object), source (an ECMAScript language value), and
+ * excludedItems (a List of property keys) and returns either a normal
+ * completion containing unused or a throw completion. It performs the
+ * following steps when called:
+ * 
+ * 1. If source is either undefined or null, return unused.
+ * 2. Let from be ! ToObject(source).
+ * 3. Let keys be ? from.[[OwnPropertyKeys]]().
+ * 4. For each element nextKey of keys, do
+ *     a. Let excluded be false.
+ *     b. For each element e of excludedItems, do
+ *         i. If SameValue(e, nextKey) is true, then
+ *             1. Set excluded to true.
+ *     c. If excluded is false, then
+ *         i. Let desc be ? from.[[GetOwnProperty]](nextKey).
+ *         ii. If desc is not undefined and desc.[[Enumerable]] is true, then
+ *             1. Let propValue be ? Get(from, nextKey).
+ *             2. Perform ! CreateDataPropertyOrThrow(target, nextKey, propValue).
+ * 5. Return unused.
+ * 
+ * NOTE: The target passed in here is always a newly created object
+ * which is not directly accessible in case of an error being thrown.
+ */
+export function* CopyDataProperties(
+  $: VM,
+  target: Obj,
+  source: Val,
+  excludedItems?: Set<PropertyKey>,
+): ECR<UNUSED> {
+  if (source == null) return UNUSED;
+  const from = CastNotAbrupt(ToObject($, source));
+  const keys = from.OwnPropertyKeys($);
+  if (IsAbrupt(keys)) return keys;
+  for (const nextKey of keys) {
+    if (excludedItems?.has(nextKey)) continue;
+    const desc = from.GetOwnProperty($, nextKey);
+    if (IsAbrupt(desc)) return desc;
+    if (desc != null && desc.Enumerable) {
+      const propValue = yield* Get($, from, nextKey);
+      if (IsAbrupt(propValue)) return propValue;
+      // TODO - we could probably optimize this with a direct set?
+      CastNotAbrupt(CreateDataPropertyOrThrow($, target, nextKey, propValue));
+    }
+  }
+  return UNUSED;
 }

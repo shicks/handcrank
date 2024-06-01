@@ -6,8 +6,8 @@
  */
 
 import { IsCallable, IsIntegralNumber, RequireObjectCoercible, SameValue } from './abstract_compare';
-import { ToBoolean, ToInt32, ToIntegerOrInfinity, ToLength, ToNumber, ToNumeric, ToObject, ToPropertyKey, ToString, ToUint16, ToUint32 } from './abstract_conversion';
-import { Call, Get, GetMethod, HasOwnProperty, HasProperty, Invoke } from './abstract_object';
+import { ToBoolean, ToInt32, ToIntegerOrInfinity, ToLength, ToNumber, ToNumeric, ToObject, ToPropertyKey, ToString, ToUint16 } from './abstract_conversion';
+import { Call, Get, GetMethod, HasOwnProperty, HasProperty, Invoke, OrdinaryHasInstance } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { UNUSED } from './enums';
@@ -24,6 +24,7 @@ import { DebugString, ECR, Plugin, VM } from './vm';
 function IsArray(..._args: unknown[]) { return false; }
 function IsRegExp(..._args: unknown[]) { return false; }
 declare const RegExpCreate: any;
+function PrepareForTailCall(...args: unknown[]) {}
 
 
 /** Slots for basic data type wrapper objects. */
@@ -240,6 +241,190 @@ export const objectAndFunctionPrototype: Plugin = {
       });
 
       defineProperties(realm, functionPrototype, {
+        /**
+         * 20.2.3.1 Function.prototype.apply ( thisArg, argArray )
+         *
+         * This method performs the following steps when called:
+         * 
+         * 1. Let func be the this value.
+         * 2. If IsCallable(func) is false, throw a TypeError exception.
+         * 3. If argArray is either undefined or null, then
+         *     a. Perform PrepareForTailCall().
+         *     b. Return ? Call(func, thisArg).
+         * 4. Let argList be ? CreateListFromArrayLike(argArray).
+         * 5. Perform PrepareForTailCall().
+         * 6. Return ? Call(func, thisArg, argList).
+         * 
+         * NOTE 1: The thisArg value is passed without modification as
+         * the this value. This is a change from Edition 3, where an
+         * undefined or null thisArg is replaced with the global
+         * object and ToObject is applied to all other values and that
+         * result is passed as the this value. Even though the thisArg
+         * is passed without modification, non-strict functions still
+         * perform these transformations upon entry to the function.
+         * 
+         * NOTE 2: If func is either an arrow function or a bound
+         * function exotic object, then the thisArg will be ignored by
+         * the function [[Call]] in step 6.
+         */
+        'apply': method(function*($, thisValue, thisArg, argArray) {
+          throw new Error('NOT IMPLEMENTED: ARRAY');
+          // const func = thisValue;
+          // if (!IsCallable(func)) throw new TypeError('Function.prototype.apply called on non-callable');
+          // if (argArray == null) {
+          //   return yield* Call($, func, thisArg);
+          // }
+          // const argList = yield* CreateListFromArrayLike($, argArray);
+          // return yield* Call($, func, thisArg, argList);
+        }),
+
+        /**
+         * 20.2.3.2 Function.prototype.bind ( thisArg, ...args )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let Target be the this value.
+         * 2. If IsCallable(Target) is false, throw a TypeError exception.
+         * 3. Let F be ? BoundFunctionCreate(Target, thisArg, args).
+         * 4. Let L be 0.
+         * 5. Let targetHasLength be ? HasOwnProperty(Target, "length").
+         * 6. If targetHasLength is true, then
+         *     a. Let targetLen be ? Get(Target, "length").
+         *     b. If targetLen is a Number, then
+         *         i. If targetLen is +∞𝔽, set L to +∞.
+         *         ii. Else if targetLen is -∞𝔽, set L to 0.
+         *         iii. Else,
+         *             1. Let targetLenAsInt be ! ToIntegerOrInfinity(targetLen).
+         *             2. Assert: targetLenAsInt is finite.
+         *             3. Let argCount be the number of elements in args.
+         *             4. Set L to max(targetLenAsInt - argCount, 0).
+         * 7. Perform SetFunctionLength(F, L).
+         * 8. Let targetName be ? Get(Target, "name").
+         * 9. If targetName is not a String, set targetName to the empty String.
+         * 10. Perform SetFunctionName(F, targetName, "bound").
+         * 11. Return F.
+         * 
+         * NOTE 1: Function objects created using
+         * Function.prototype.bind are exotic objects. They also do
+         * not have a "prototype" property.
+         * 
+         * NOTE 2: If Target is either an arrow function or a bound
+         * function exotic object, then the thisArg passed to this
+         * method will not be used by subsequent calls to F.
+         */
+        'bind': method(function*($, thisValue, thisArg, ...args) {
+          throw new Error('NOT IMPLEMENTED: BIND EXOTIC');
+        }),
+
+        /**
+         * 20.2.3.3 Function.prototype.call ( thisArg, ...args )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let func be the this value.
+         * 2. If IsCallable(func) is false, throw a TypeError exception.
+         * 3. Perform PrepareForTailCall().
+         * 4. Return ? Call(func, thisArg, args).
+         * 
+         * NOTE 1: The thisArg value is passed without modification as
+         * the this value. This is a change from Edition 3, where an
+         * undefined or null thisArg is replaced with the global
+         * object and ToObject is applied to all other values and that
+         * result is passed as the this value. Even though the thisArg
+         * is passed without modification, non-strict functions still
+         * perform these transformations upon entry to the function.
+         *
+         * NOTE 2: If func is either an arrow function or a bound
+         * function exotic object, then the thisArg will be ignored by
+         * the function [[Call]] in step 4.
+         */
+        'call': method(function*($, thisValue, thisArg, ...args) {
+          const func = thisValue;
+          if (!IsCallable(func)) return $.throw('TypeError', 'not a function');
+          PrepareForTailCall($);
+          return yield* Call($, func, thisArg, args);
+        }),
+
+        /**
+         * 20.2.3.5 Function.prototype.toString ( )
+         *          
+         * This method performs the following steps when called:
+         * 
+         * 1. Let func be the this value.
+         * 2. If func is an Object, func has a [[SourceText]] internal
+         *    slot, func.[[SourceText]] is a sequence of Unicode code
+         *    points, and HostHasSourceTextAvailable(func) is true, then
+         *     a. Return CodePointsToString(func.[[SourceText]]).
+         * 3. If func is a built-in function object, return an
+         *    implementation-defined String source code representation of
+         *    func. The representation must have the syntax of a
+         *    NativeFunction. Additionally, if func has an
+         *    [[InitialName]] internal slot and func.[[InitialName]] is a
+         *    String, the portion of the returned String that would be
+         *    matched by NativeFunctionAccessoropt PropertyName must be
+         *    the value of func.[[InitialName]].
+         * 4. If func is an Object and IsCallable(func) is true,
+         *    return an implementation-defined String source code
+         *    representation of func. The representation must have the
+         *    syntax of a NativeFunction.
+         * 5. Throw a TypeError exception.
+         */
+        'toString': method(function*($, thisValue) {
+          const func = thisValue;
+          if (func instanceof Obj) {
+            if (typeof func.SourceText === 'string'
+                // && HostHasSourceTextAvailable(func)
+               ) {
+              return func.SourceText;
+            }
+            if (typeof func.InitialName === 'string') {
+              return `function ${func.InitialName}() { [native code] }`;
+            }
+            if (IsCallable(func)) {
+              // TODO - not sure if this is correct?
+              return `function() { [unavailable] }`;
+            }
+          }
+          return $.throw('TypeError',
+                         `Function.prototype.toString requires that 'this' be a function`);
+        }),
+
+        /**
+         * 20.2.3.6 Function.prototype [ @@hasInstance ] ( V )
+         *
+         * This method performs the following steps when called:
+         * 
+         * 1. Let F be the this value.
+         * 2. Return ? OrdinaryHasInstance(F, V).
+         * 
+         * This property has the attributes { [[Writable]]: false,
+         * [[Enumerable]]: false, [[Configurable]]: false }.
+         * 
+         * NOTE: This is the default implementation of @@hasInstance
+         * that most functions inherit. @@hasInstance is called by the
+         * instanceof operator to determine whether a value is an
+         * instance of a specific constructor. An expression such as
+         * 
+         *     v instanceof F
+         * 
+         * evaluates as
+         * 
+         *     F[@@hasInstance](v)
+         * 
+         * A constructor function can control which objects are
+         * recognized as its instances by instanceof by exposing a
+         * different @@hasInstance method on the function.
+         * 
+         * This property is non-writable and non-configurable to
+         * prevent tampering that could be used to globally expose
+         * the target function of a bound function.
+         *
+         * The value of the "name" property of this method is
+         * "[Symbol.hasInstance]".
+         */
+        [Symbol.hasInstance]: {...method(function*($, thisValue, V) {
+          return yield* OrdinaryHasInstance($, thisValue, V);
+        }), Writable: false, Enumerable: false, Configurable: false},
       });
     },
   },

@@ -123,7 +123,7 @@ export function* NamedEvaluation(
     } else if (node.generator) { // generator
       return InstantiateGeneratorFunctionExpression($, node, name);
     } else { // ordinary function
-      return InstantiateOrdinaryFunctionExpression($, node, name);
+      return yield* InstantiateOrdinaryFunctionExpression($, node, name);
     }
   }
 }

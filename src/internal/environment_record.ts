@@ -93,7 +93,7 @@ export abstract class EnvironmentRecord {
    * value N is the text of the bound name. V is the value for the
    * binding and is a value of any ECMAScript language type.
    */
-  abstract InitializeBinding($: VM, N: string, V: Val): CR<UNUSED>;
+  abstract InitializeBinding($: VM, N: string, V: Val): ECR<UNUSED>;
   /**
    * SetMutableBinding(N, V, S) - Set the value of an already existing
    * mutable binding in an Environment Record. The String value N is
@@ -102,7 +102,7 @@ export abstract class EnvironmentRecord {
    * flag. If S is true and the binding cannot be set throw a
    * TypeError exception.
    */
-  abstract SetMutableBinding($: VM, N: string, V: Val, S: boolean): CR<UNUSED>;
+  abstract SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED>;
   /**
    * GetBindingValue(N, S) - Returns the value of an already existing
    * binding from an Environment Record. The String value N is the
@@ -280,7 +280,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * V. An uninitialized binding for N must already exist. It performs
    * the following steps when called:
    */
-  override InitializeBinding(_$: VM, N: string, V: Val): CR<UNUSED> {
+  override *InitializeBinding(_$: VM, N: string, V: Val): ECR<UNUSED> {
     Assert(this.bindings.has(N));
     const binding = this.bindings.get(N)!;
     Assert(!binding.Initialized);
@@ -303,11 +303,11 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * binding is an immutable binding, a TypeError is thrown if S is
    * true. It performs the following steps when called:
    */
-  override SetMutableBinding($: VM, N: string, V: Val, S: boolean): CR<UNUSED> {
+  override *SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
     if (!this.bindings.has(N)) {
       if (S) return $.throw('ReferenceError');
       Assert(!IsAbrupt(this.CreateMutableBinding($, N, true)));
-      Assert(!IsAbrupt(this.InitializeBinding($, N, V)));
+      Assert(!IsAbrupt(yield* this.InitializeBinding($, N, V)));
       return UNUSED;
     }
 
@@ -513,13 +513,13 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    * of the current binding of the identifier whose name is N to the
    * value V. It performs the following steps when called:
    */
-  override InitializeBinding($: VM, N: string, V: Val): CR<UNUSED> {
+  override *InitializeBinding($: VM, N: string, V: Val): ECR<UNUSED> {
     // NOTE: In this specification, all uses of CreateMutableBinding
     // for Object Environment Records are immediately followed by a
     // call to InitializeBinding for the same name. Hence, this
     // specification does not explicitly track the initialization
     // state of bindings in Object Environment Records.
-    const result = this.SetMutableBinding($, N, V, false);
+    const result = yield* this.SetMutableBinding($, N, V, false);
     if (IsAbrupt(result)) return result;
     return UNUSED;
   }
@@ -537,12 +537,12 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    * currently writable, error handling is determined by S. It
    * performs the following steps when called:
    */
-  override SetMutableBinding($: VM, N: string, V: Val, S: boolean): CR<UNUSED> {
+  override *SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
     const bindingObject = this.BindingObject;
     const stillExists = HasProperty($, bindingObject, N);
     if (IsAbrupt(stillExists)) return stillExists;
     if (!stillExists && S) return $.throw('ReferenceError');
-    const result = Set$($, bindingObject, N, V, S);
+    const result = yield* Set$($, bindingObject, N, V, S);
     if (IsAbrupt(result)) return result;
     return UNUSED;
   }
@@ -906,14 +906,14 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * value V. An uninitialized binding for N must already exist. It
    * performs the following steps when called:
    */
-  override InitializeBinding($: VM, N: string, V: Val): CR<UNUSED> {
+  override *InitializeBinding($: VM, N: string, V: Val): ECR<UNUSED> {
     const DclRec = this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
-      return CastNotAbrupt(DclRec.InitializeBinding($, N, V));
+      return CastNotAbrupt(yield* DclRec.InitializeBinding($, N, V));
     }
     // Assert: If the binding exists, it must be in the Object Environment Record.
     const ObjRec = this.ObjectRecord;
-    return ObjRec.InitializeBinding($, N, V);
+    return yield* ObjRec.InitializeBinding($, N, V);
   }
 
   /**
@@ -930,13 +930,13 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * error handling is determined by S. It performs the following
    * steps when called:
    */
-  override SetMutableBinding($: VM, N: string, V: Val, S: boolean): CR<UNUSED> {
+  override *SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
     const DclRec = this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
-      return DclRec.SetMutableBinding($, N, V, S);
+      return yield* DclRec.SetMutableBinding($, N, V, S);
     }
     const ObjRec = this.ObjectRecord;
-    return ObjRec.SetMutableBinding($, N, V, S);
+    return yield* ObjRec.SetMutableBinding($, N, V, S);
   }
 
   /**
@@ -1156,7 +1156,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    *     a. Append N to envRec.[[VarNames]].
    * 7. Return unused.
    */
-  CreateGlobalVarBinding ($: VM, N: string, D: boolean): CR<UNUSED> {
+  *CreateGlobalVarBinding($: VM, N: string, D: boolean): ECR<UNUSED> {
     const globalObject = this.ObjectRecord.BindingObject;
     const hasProperty = HasOwnProperty($, globalObject, N);
     if (IsAbrupt(hasProperty)) return hasProperty;
@@ -1165,7 +1165,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
     if (!hasProperty && extensible) {
       let result = this.ObjectRecord.CreateMutableBinding($, N, D);
       if (IsAbrupt(result)) return result;
-      result = this.ObjectRecord.InitializeBinding($, N, undefined);
+      result = yield* this.ObjectRecord.InitializeBinding($, N, undefined);
       if (IsAbrupt(result)) return result;
     }
     if (!this.VarNames.has(N)) this.VarNames.add(N);
@@ -1191,7 +1191,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * InitializeBinding concrete method would do and if globalObject is
    * a Proxy will produce the same sequence of Proxy trap calls.
    */
-  CreateGlobalFunctionBinding($: VM, N: string, V: Val, D: boolean): CR<UNUSED> {
+  *CreateGlobalFunctionBinding($: VM, N: string, V: Val, D: boolean): ECR<UNUSED> {
     const globalObject = this.ObjectRecord.BindingObject;
     const existingProp = globalObject.GetOwnProperty($, N);
     if (IsAbrupt(existingProp)) return existingProp;
@@ -1203,7 +1203,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
       if (IsAbrupt(result)) return result;
     }
     {
-      const result = Set$($, globalObject, N, V, false);
+      const result = yield* Set$($, globalObject, N, V, false);
       if (IsAbrupt(result)) return result;
     }
     if (!this.VarNames.has(N)) this.VarNames.add(N);

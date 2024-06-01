@@ -49,7 +49,7 @@ export function* Evaluation_BlockStatement($: VM, n: BlockStatement): EvalGen<CR
   const context = $.getRunningContext();
   const oldEnv = context.LexicalEnvironment || null;
   const blockEnv = new DeclarativeEnvironmentRecord(oldEnv);
-  BlockDeclarationInstantiation($, n.body, blockEnv);
+  yield* BlockDeclarationInstantiation($, n.body, blockEnv);
   context.LexicalEnvironment = blockEnv;
   let blockValue: CR<Val> = yield* $.evaluateValue(n.body[0]);
   try {
@@ -82,11 +82,11 @@ export function* Evaluation_BlockStatement($: VM, n: BlockStatement): EvalGen<CR
  *
  * It performs the following steps when called:
  */
-export function BlockDeclarationInstantiation(
+export function* BlockDeclarationInstantiation(
   $: VM,
   code: Node|Node[], // narrow?
   env: EnvironmentRecord,
-): UNUSED {
+): EvalGen<UNUSED> {
   // 1. Let declarations be the LexicallyScopedDeclarations of code.
   const declarations = LexicallyScopedDeclarations(code);
   // 2. Let privateEnv be the running execution context's PrivateEnvironment.
@@ -111,7 +111,7 @@ export function BlockDeclarationInstantiation(
       const [fn, ...rest] = BoundNames(d);
       Assert(fn != null && !rest.length);
       const fo = InstantiateFunctionObject($, env, privateEnv, d);
-      CastNotAbrupt(env.InitializeBinding($, fn, fo));
+      CastNotAbrupt(yield* env.InitializeBinding($, fn, fo));
     }
   }
   // 4. Return unused.
@@ -162,7 +162,7 @@ export function* Evaluation_LexicalDeclaration($: VM, n: VariableDeclaration): E
         const lhs = CastNotAbrupt(ResolveBinding($, binding.id.name));
         if (binding.init == null) {
           // LexicalBinding : BindingIdentifier
-          CastNotAbrupt(InitializeReferencedBinding($, lhs, undefined));
+          CastNotAbrupt(yield* InitializeReferencedBinding($, lhs, undefined));
           break;
         } else {
           // LexicalBinding : BindingIdentifier Initializer
@@ -173,7 +173,7 @@ export function* Evaluation_LexicalDeclaration($: VM, n: VariableDeclaration): E
             value = yield* $.evaluateValue(binding.init);
           }
           if (IsAbrupt(value)) return value;
-          CastNotAbrupt(InitializeReferencedBinding($, lhs, value));
+          CastNotAbrupt(yield* InitializeReferencedBinding($, lhs, value));
         }
         break;
       }
@@ -253,7 +253,8 @@ export function* Evaluation_VariableStatement($: VM, n: VariableDeclaration): Ev
             value = yield* $.evaluateValue(binding.init);
           }
           if (IsAbrupt(value)) return value;
-          CastNotAbrupt(PutValue($, lhs, value));
+          debugger;
+          CastNotAbrupt(yield* PutValue($, lhs, value));
         }
         break;
       }

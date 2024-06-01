@@ -94,7 +94,7 @@ export function* ScriptEvaluation($: VM, scriptRecord: ScriptRecord): ECR<Val> {
   $.executionStack.push(scriptContext);
   const script = scriptRecord.ECMAScriptCode;
   let result: CR<UNUSED|Val> =
-    GlobalDeclarationInstantiation($, script, globalEnv);
+    yield* GlobalDeclarationInstantiation($, script, globalEnv);
   if (!IsAbrupt(result)) { // NOTE: does not rethrow!
     result = yield* $.evaluateValue(script);
   }
@@ -144,11 +144,11 @@ export function* ScriptEvaluation($: VM, scriptRecord: ScriptRecord): ECR<Val> {
  * directly created on the global object result in global bindings
  * that may be shadowed by let/const/class declarations.
  */
-export function GlobalDeclarationInstantiation(
+export function* GlobalDeclarationInstantiation(
   $: VM,
   script: ESTree.Program,
   env: GlobalEnvironmentRecord,
-): CR<UNUSED> {
+): ECR<UNUSED> {
   // 1. Let lexNames be the LexicallyDeclaredNames of script.
   // NOTE: To enforce the early error in 14.2.1, that lexNames
   // and varNames are disjoint, we make lexNames a set and
@@ -175,7 +175,6 @@ export function GlobalDeclarationInstantiation(
   // 4. For each element name of varNames, do
   for (const name of varNames) {
     //   a. If env.HasLexicalDeclaration(name) is true, throw a SyntaxError exception.
-    debugger;
     if (env.HasLexicalDeclaration($, name)) {
       return $.throw('SyntaxError',
                    `Identifier '${name}' has already been declared`);
@@ -270,13 +269,13 @@ export function GlobalDeclarationInstantiation(
     //   b. Let fo be InstantiateFunctionObject of f with arguments env and privateEnv.
     const fo = InstantiateFunctionObject($, env, privateEnv, f);
     //   c. Perform ? env.CreateGlobalFunctionBinding(fn, fo, false).
-    const result = env.CreateGlobalFunctionBinding($, fn, fo, false);
+    const result = yield* env.CreateGlobalFunctionBinding($, fn, fo, false);
     if (IsAbrupt(result)) return result;
   }
   // 17. For each String vn of declaredVarNames, do
   //     a. Perform ? env.CreateGlobalVarBinding(vn, false).
   for (const vn of declaredVarNames) {
-    const result = env.CreateGlobalVarBinding($, vn, false);
+    const result = yield* env.CreateGlobalVarBinding($, vn, false);
     if (IsAbrupt(result)) return result;
   }
   // 18. Return unused.

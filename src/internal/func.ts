@@ -504,11 +504,11 @@ export function InstantiateOrdinaryFunctionObject(
  * cannot be referenced from and does not affect the scope enclosing
  * the FunctionExpression.
  */
-export function InstantiateOrdinaryFunctionExpression(
+export function* InstantiateOrdinaryFunctionExpression(
   $: VM,
   node: ESTree.FunctionExpression,
   name?: PropertyKey|PrivateName,
-): Func {
+): EvalGen<Func> {
   const sourceText = GetSourceText(node);
   const privateEnv = $.getRunningContext().PrivateEnvironment!;
   
@@ -542,7 +542,10 @@ export function InstantiateOrdinaryFunctionExpression(
   SetFunctionName($, closure, name);
   MakeConstructor(closure);
   if (node.id != null) {
-    CastNotAbrupt(env.InitializeBinding($, name as string, closure));
+    // NOTE: we've already checked that the name is declarable in this scope
+    // and should have given an early error - therefore, we shouldn't be
+    // running into any setters that might need to execute.
+    CastNotAbrupt(yield* env.InitializeBinding($, name as string, closure));
   }
   return closure;
 }
@@ -831,7 +834,7 @@ export function SetFunctionLength($: VM, F: Func, length: number): UNUSED {
  * FunctionDeclarationInstantiation. All other bindings are
  * initialized during evaluation of the function body.
  */
-export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsList: Val[]): EvalGen<CR<UNUSED>> {
+export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsList: Val[]): ECR<UNUSED> {
   // It performs the following steps when called:
   // 1. Let calleeContext be the running execution context.
   const calleeContext = $.getRunningContext();
@@ -940,7 +943,7 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
     //           1. Perform ! env.InitializeBinding(paramName, undefined).
     if (!alreadyDeclared) {
       CastNotAbrupt(env.CreateMutableBinding($, paramName, false));
-      if (hasDuplicates) CastNotAbrupt(env.InitializeBinding($, paramName, undefined));
+      if (hasDuplicates) CastNotAbrupt(yield* env.InitializeBinding($, paramName, undefined));
     }
   }
   // 23. Else (if argumentsObjectNeeded is false),
@@ -967,7 +970,7 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
     //       i. Perform ! env.CreateMutableBinding("arguments", false).
     else CastNotAbrupt(env.CreateMutableBinding($, 'arguments', false));
     //   e. Perform ! env.InitializeBinding("arguments", ao).
-    CastNotAbrupt(env.InitializeBinding($, 'arguments', ao));
+    CastNotAbrupt(yield* env.InitializeBinding($, 'arguments', ao));
     //   f. Let parameterBindings be the list-concatenation of
     //      parameterNames and « "arguments" ».
     parameterBindings = [...parameterNames, 'arguments'];
@@ -1005,8 +1008,8 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
         const lhs = ResolveBinding($, name, hasDuplicates ? env : undefined);
         if (IsAbrupt(lhs)) return lhs;
         const result = hasDuplicates ?
-          PutValue($, lhs, argumentsList[argIndex++]) :
-          InitializeReferencedBinding($, lhs, argumentsList[argIndex++]);
+          yield* PutValue($, lhs, argumentsList[argIndex++]) :
+          yield* InitializeReferencedBinding($, lhs, argumentsList[argIndex++]);
         if (IsAbrupt(result)) return result;
         break;
       }
@@ -1036,7 +1039,7 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
       //         2. Perform ! env.CreateMutableBinding(n, false).
       //         3. Perform ! env.InitializeBinding(n, undefined).
       CastNotAbrupt(env.CreateMutableBinding($, n, false));
-      CastNotAbrupt(env.InitializeBinding($, n, undefined));
+      CastNotAbrupt(yield* env.InitializeBinding($, n, undefined));
     }
     //   d. Let varEnv be env.
     varEnv = env;
@@ -1066,7 +1069,7 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
         undefined :
         CastNotAbrupt(yield* env.GetBindingValue($, n, false));
       //         5. Perform ! varEnv.InitializeBinding(n, initialValue).
-      CastNotAbrupt(varEnv.InitializeBinding($, n, initialValue));
+      CastNotAbrupt(yield* varEnv.InitializeBinding($, n, initialValue));
       //         6. NOTE: A var with the same name as a formal parameter initially
       //            has the same value as the corresponding initialized parameter.
     }
@@ -1116,7 +1119,7 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
     const [fn, ...rest] = BoundNames(f);
     Assert(fn != null && !rest.length);
     const fo = InstantiateFunctionObject($, lexEnv, privateEnv, f);
-    CastNotAbrupt(varEnv.SetMutableBinding($, fn, fo, false));
+    CastNotAbrupt(yield* varEnv.SetMutableBinding($, fn, fo, false));
   }
 
   // 37. Return unused.

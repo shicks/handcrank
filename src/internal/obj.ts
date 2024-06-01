@@ -1,12 +1,15 @@
 import { IsArrayIndex, IsExtensible, IsPropertyKey, SameValue } from './abstract_compare';
-import { Call, CreateDataProperty, Get, GetFunctionRealm } from './abstract_object';
+import { ToPropertyKey } from './abstract_conversion';
+import { Call, CopyDataProperties, CreateDataProperty, Get, GetFunctionRealm } from './abstract_object';
 import { Assert } from './assert';
-import { CR, IsAbrupt } from './completion_record';
-import type { Func } from './func';
-import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor, propWEC } from './property_descriptor';
+import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
+import { IsFunc, type Func } from './func';
+import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor, methodName, propC, propWEC } from './property_descriptor';
 import { Slots, hasAnyFields, memoize } from './slots';
+import { GetSourceText, IsAnonymousFunctionDefinition, NamedEvaluation } from './static/functions';
 import { PropertyKey, Val } from './val';
 import { ECR, VM } from './vm';
+import * as ESTree from 'estree';
 
 declare global {
   /**
@@ -925,4 +928,174 @@ export function* GetPrototypeFromConstructor(
   return proto;
 }
 
-/**/
+/**
+ * 13.2.5.4 Runtime Semantics: Evaluation
+ *
+ * ObjectLiteral : { }
+ * 1. Return OrdinaryObjectCreate(%Object.prototype%).
+ * 
+ * ObjectLiteral :
+ *   { PropertyDefinitionList }
+ *   { PropertyDefinitionList , }
+ * 1. Let obj be OrdinaryObjectCreate(%Object.prototype%).
+ * 2. Perform ? PropertyDefinitionEvaluation of PropertyDefinitionList
+ *    with argument obj.
+ * 3. Return obj.
+ * 
+ * LiteralPropertyName : IdentifierName
+ * 1. Return StringValue of IdentifierName.
+ * 
+ * LiteralPropertyName : StringLiteral
+ * 1. Return the SV of StringLiteral.
+ * 
+ * LiteralPropertyName : NumericLiteral
+ * 1. Let nbr be the NumericValue of NumericLiteral.
+ * 2. Return ! ToString(nbr).
+ * 
+ * ComputedPropertyName : [ AssignmentExpression ]
+ * 1. Let exprValue be ? Evaluation of AssignmentExpression.
+ * 2. Let propName be ? GetValue(exprValue).
+ * 3. Return ? ToPropertyKey(propName).
+ * 
+ * 13.2.5.5 Runtime Semantics: PropertyDefinitionEvaluation
+ * 
+ * The syntax-directed operation PropertyDefinitionEvaluation takes
+ * argument object (an Object) and returns either a normal completion
+ * containing unused or an abrupt completion. It is defined piecewise
+ * over the following productions:
+ * 
+ * PropertyDefinitionList : PropertyDefinitionList , PropertyDefinition
+ * 1. Perform ? PropertyDefinitionEvaluation of PropertyDefinitionList
+ *    with argument object.
+ * 2. Perform ? PropertyDefinitionEvaluation of PropertyDefinition
+ *    with argument object.
+ * 3. Return unused.
+ * 
+ * PropertyDefinition : ... AssignmentExpression
+ * 1. Let exprValue be ? Evaluation of AssignmentExpression.
+ * 2. Let fromValue be ? GetValue(exprValue).
+ * 3. Let excludedNames be a new empty List.
+ * 4. Perform ? CopyDataProperties(object, fromValue, excludedNames).
+ * 5. Return unused.
+ * 
+ * PropertyDefinition : IdentifierReference
+ * 1. Let propName be StringValue of IdentifierReference.
+ * 2. Let exprValue be ? Evaluation of IdentifierReference.
+ * 3. Let propValue be ? GetValue(exprValue).
+ * 4. Assert: object is an ordinary, extensible object with no
+ *    non-configurable properties.
+ * 5. Perform ! CreateDataPropertyOrThrow(object, propName, propValue).
+ * 6. Return unused.
+ * 
+ * PropertyDefinition : PropertyName : AssignmentExpression
+ * 1. Let propKey be ? Evaluation of PropertyName.
+ * 2. If this PropertyDefinition is contained within a Script that is
+ *    being evaluated for JSON.parse (see step 7 of JSON.parse), then
+ *     a. Let isProtoSetter be false.
+ * 3. Else if propKey is "__proto__" and IsComputedPropertyKey of
+ *    PropertyName is false, then
+ *     a. Let isProtoSetter be true.
+ * 4. Else,
+ *     a. Let isProtoSetter be false.
+ * 5. If IsAnonymousFunctionDefinition(AssignmentExpression) is true
+ *    and isProtoSetter is false, then
+ *     a. Let propValue be ? NamedEvaluation of AssignmentExpression
+ *     with argument propKey.
+ * 6. Else,
+ *     a. Let exprValueRef be ? Evaluation of AssignmentExpression.
+ *     b. Let propValue be ? GetValue(exprValueRef).
+ * 7. If isProtoSetter is true, then
+ *     a. If propValue is an Object or propValue is null, then
+ *         i. Perform ! object.[[SetPrototypeOf]](propValue).
+ *     b. Return unused.
+ * 8. Assert: object is an ordinary, extensible object with no
+ *    non-configurable properties.
+ * 9. Perform ! CreateDataPropertyOrThrow(object, propKey, propValue).
+ * 10. Return unused.
+ * 
+ * PropertyDefinition : MethodDefinition
+ * 1. Perform ? MethodDefinitionEvaluation of MethodDefinition (15.4.5)
+ *    with arguments object and true.
+ * 2. Return unused.
+ */
+export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression): ECR<Obj> {
+  const obj = OrdinaryObjectCreate();
+  for (const prop of n.properties) {
+    if (prop.type === 'Property') {
+      // Property includes computed, short-hand, etc
+      let isProtoSetter = false;
+      let key: PropertyKey;
+      let propValue: CR<Val>;
+      if (prop.computed) {
+        const result = yield* $.evaluateValue(prop.key);
+        if (IsAbrupt(result)) return result;
+        const kr = yield* ToPropertyKey($, result);
+        if (IsAbrupt(kr)) return kr;
+        key = kr;
+        propValue = yield* $.evaluateValue(prop.value);
+      } else {
+        if (prop.key.type === 'Identifier') {
+          key = prop.key.name;
+        } else if (prop.key.type === 'Literal') {
+          key = String(prop.key.value);
+        } else {
+          throw new Error(`bad key type for non-computed property: ${(prop as any).type}`);
+        }
+        if (key === '__proto__' && !$.isJsonParse()) {
+          isProtoSetter = true;
+        }
+        if (IsAnonymousFunctionDefinition(prop.value) && !isProtoSetter) {
+          propValue = yield* NamedEvaluation($, prop.value as any, key);
+        } else {
+          propValue = yield* $.evaluateValue(prop.value);
+        }
+      }
+      if (IsAbrupt(propValue)) return propValue;
+      if (prop.method) {
+        Assert(IsFunc(propValue));
+        propValue.SourceText = GetSourceText(prop); // fix source text
+        if (prop.kind === 'get') {
+          propValue.InternalName = 'get ' + methodName(key);
+          propValue.OwnProps.set('name', propC(key));
+          Assert(!propValue.FormalParameters?.length);
+          const desc = obj.OwnProps.get(key);
+          if (IsAccessorDescriptor(desc)) {
+            obj.OwnProps.set(key, {...desc, Get: propValue});
+          } else {
+            obj.OwnProps.set(key, {Get: propValue, Enumerable: true, Configurable: true});
+          }
+          continue;
+        } else if (prop.kind === 'set') {
+          propValue.InternalName = 'set ' + methodName(key);
+          propValue.OwnProps.set('name', propC(key));
+          Assert(propValue.FormalParameters!.length === 1);
+          const desc = obj.OwnProps.get(key);
+          if (IsAccessorDescriptor(desc)) {
+            obj.OwnProps.set(key, {...desc, Set: propValue});
+          } else {
+            obj.OwnProps.set(key, {Set: propValue, Enumerable: true, Configurable: true});
+          }
+          continue;
+        } else {
+          propValue.InternalName = 'set ' + methodName(key);
+          propValue.OwnProps.set('name', propC(key));
+        }
+      } else if (isProtoSetter) {
+        if (propValue instanceof Obj || propValue === null) {
+          CastNotAbrupt(obj.SetPrototypeOf($, propValue));
+        }
+        continue;
+      }
+      obj.OwnProps.set(key, propWEC(propValue));
+    } else if (prop.type === 'SpreadElement') {
+      // Spread element
+      const fromValue = yield* $.evaluateValue(prop.argument);
+      if (IsAbrupt(fromValue)) return fromValue;
+      const result = yield* CopyDataProperties($, obj, fromValue);
+      if (IsAbrupt(result)) return result;
+    } else {
+      throw new Error(`unknown property type: ${(prop as any).type}`);
+    }
+  }
+  return obj;
+}
