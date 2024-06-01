@@ -312,6 +312,8 @@ type SyntaxHandlers = {[O in keyof SyntaxOp]: SyntaxHandlerMap<O>};
 //export type Plugin = (spi: PluginSPI) => void;
 
 export function DebugString(v: Val|ReferenceRecord): string {
+  // TODO - consider adding an optional `color = false` argument
+  //  - color null bright white, undefined dark gray, num/bool yellow, strings green, objs cyan
   if (v instanceof ReferenceRecord) {
     if (v.Base instanceof EnvironmentRecord) {
       return String(v.ReferencedName);
@@ -326,10 +328,11 @@ export function DebugString(v: Val|ReferenceRecord): string {
   if (v instanceof Obj) {
     if (v.ErrorData != null) return v.ErrorData || 'Error';
     if (IsFunc(v)) {
-      const name = v.OwnProps.get('name');
-      return name ? String(name) : v.InternalName || '(anonymous)';
+      const name = v.OwnProps.get('name')?.Value;
+      return `[Function: ${name ? String(name) : v.InternalName || '(anonymous)'}]`;
     }
-    return '[Object]'; // TODO
+    // TODO - consider printing props? maybe even slots?
+    return '[Object]';
   }
   return String(v);
 }

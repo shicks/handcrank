@@ -61,6 +61,9 @@ export enum CompletionType {
  * value other than normal.
  */
 export function IsAbrupt(x: CR<unknown>): x is Abrupt {
+  if (x && typeof (x as Generator).next === 'function') {
+    throw new Error('IsAbrupt on generator: forgot to yield?');
+  }
   return x instanceof Abrupt;
 }
 

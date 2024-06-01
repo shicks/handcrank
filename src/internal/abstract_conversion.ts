@@ -170,7 +170,7 @@ export function* ToNumber($: VM, argument: Val): ECR<number> {
     Assert(!(primValue instanceof Obj));
     return yield* ToNumber($, primValue);
   } else if (typeof argument === 'symbol' || typeof argument === 'bigint') {
-    return $.throw('TypeError');
+    return $.throw('TypeError', `Cannot convert a ${typeof argument} value to a number`);
   }
   return Number(argument);
 }

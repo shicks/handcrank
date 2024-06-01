@@ -1,7 +1,7 @@
 import { ArrowFunctionExpression, ClassExpression, FunctionExpression, Node } from 'estree';
 import { PrivateName } from '../private_environment_record';
 import { CR, IsAbrupt } from '../completion_record';
-import { Func, InstantiateOrdinaryFunctionExpression } from '../func';
+import { Func, InstantiateArrowFunctionExpression, InstantiateOrdinaryFunctionExpression } from '../func';
 import { EvalGen, VM } from '../vm';
 import { Source } from '../tree';
 import { PropertyKey } from '../val';
@@ -12,7 +12,6 @@ import { UNUSED } from '../enums';
 
 declare const ClassDefinitionEvaluation: any;
 declare const InstantiateAsyncArrowFunctionExpression: any;
-declare const InstantiateArrowFunctionExpression: any;
 declare const InstantiateAsyncGeneratorFunctionExpression: any;
 declare const InstantiateAsyncFunctionExpression: any;
 declare const InstantiateGeneratorFunctionExpression: any;

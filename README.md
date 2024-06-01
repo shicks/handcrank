@@ -45,4 +45,6 @@ A JavaScript virtual machine that runs on ESTree syntax trees (e.g. tesprima, et
     [x] Object literals
     [ ] Array literals
     [ ] Destructuring
-    [ ] ++ and -- operators
+    [x] binary operators
+    [x] unary operators
+    [x] ++ and -- operators

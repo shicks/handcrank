@@ -1,10 +1,10 @@
-import { CR, CastNotAbrupt, IsAbrupt, ThrowCompletion } from './completion_record';
+import { Abrupt, CR, CastNotAbrupt, CompletionType, IsAbrupt, ThrowCompletion } from './completion_record';
 import { DebugString, ECR, EvalGen, VM } from './vm';
 import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, STRICT, UNINITIALIZED, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
 import { PropertyDescriptor, PropertyRecord, propC, propWC } from './property_descriptor';
 import { Assert } from './assert';
-import { Call, Construct, DefinePropertyOrThrow } from './abstract_object';
+import { Call, Construct } from './abstract_object';
 import * as ESTree from 'estree';
 import { RealmRecord } from './realm_record';
 import { ScriptRecord } from './script_record';
@@ -154,28 +154,6 @@ declare global {
     // Slot for builtin function object
 
     InitialName?: string;
-
-    ////////////////////////////////////////////////////////////////
-    // Slot for bound function exotic objects (10.4.1)
-
-    /**
-     * [[BoundTargetFunction]], a callable Object - The wrapped
-     * function object.
-     */
-    BoundTargetFunction?: Func;
-
-    /**
-     * [[BoundThis]], an ECMAScript language value - The value that is
-     * always passed as the this value when calling the wrapped function.
-     */
-    BoundThis?: Val;
-
-    /**
-     * [[BoundArguments]], a List of ECMAScript language values - A list
-     * of values whose elements are used as the first arguments to any
-     * call to the wrapped function.
-     */
-    BoundArguments?: Val[];
   }
 
   // // Slot for exotic mapped arguments object
@@ -348,7 +326,7 @@ export const OrdinaryFunction = memoize(() => class OrdinaryFunction extends Ord
    * stack in step 7 it must not be destroyed if it is suspended and
    * retained for later resumption by an accessible Generator.
    */
-  *Call($: VM, thisArgument: Val, argumentsList: Val[]): EvalGen<CR<Val>> {
+  *Call($: VM, thisArgument: Val, argumentsList: Val[]): ECR<Val> {
     //const callerContext = $.getRunningContext();
     const calleeContext = PrepareForOrdinaryCall($, this, undefined);
     Assert(calleeContext === $.getRunningContext());
@@ -455,7 +433,7 @@ export function InstantiateOrdinaryFunctionObject(
                                    sourceText(node) || '(no source)',
                                    node.params, node.body,
                                    NON_LEXICAL_THIS, env, privateEnv);
-  SetFunctionName($, F, (node as ESTree.FunctionExpression).id?.name || 'default');
+  SetFunctionName(F, (node as ESTree.FunctionExpression).id?.name || 'default');
   MakeConstructor($, F);
   return F;
 }
@@ -539,7 +517,7 @@ export function* InstantiateOrdinaryFunctionExpression(
     env,
     privateEnv,
   );
-  SetFunctionName($, closure, name);
+  SetFunctionName(closure, name);
   MakeConstructor(closure);
   if (node.id != null) {
     // NOTE: we've already checked that the name is declarable in this scope
@@ -555,6 +533,60 @@ function sourceText(node: Node): string {
   if (!source) return '';
   const range = node.range || [(node as any).start, (node as any).end];
   return source.sourceText?.substring(range[0], range[1]) || '';
+}
+
+/**
+ * 15.3.4 Runtime Semantics: InstantiateArrowFunctionExpression
+ * 
+ * The syntax-directed operation InstantiateArrowFunctionExpression
+ * takes optional argument name (a property key or a Private Name) and
+ * returns a function object. It is defined piecewise over the
+ * following productions:
+ * 
+ * ArrowFunction : ArrowParameters => ConciseBody
+ * 1. If name is not present, set name to "".
+ * 2. Let env be the LexicalEnvironment of the running execution context.
+ * 3. Let privateEnv be the running execution context\'s PrivateEnvironment.
+ * 4. Let sourceText be the source text matched by ArrowFunction.
+ * 5. Let closure be OrdinaryFunctionCreate(%Function.prototype%,
+ *    sourceText, ArrowParameters, ConciseBody, lexical-this, env,
+ *    privateEnv).
+ * 6. Perform SetFunctionName(closure, name).
+ * 7. Return closure.
+ * 
+ * NOTE: An ArrowFunction does not define local bindings for
+ * arguments, super, this, or new.target. Any reference to arguments,
+ * super, this, or new.target within an ArrowFunction must resolve to
+ * a binding in a lexically enclosing environment. Typically this will
+ * be the Function Environment of an immediately enclosing
+ * function. Even though an ArrowFunction may contain references to
+ * super, the function object created in step 5 is not made into a
+ * method by performing MakeMethod. An ArrowFunction that references
+ * super is always contained within a non-ArrowFunction and the
+ * necessary state to implement super is accessible via the env that
+ * is captured by the function object of the ArrowFunction.
+ */
+export function InstantiateArrowFunctionExpression(
+  $: VM,
+  node: ESTree.ArrowFunctionExpression,
+  name?: PropertyKey|PrivateName,
+): Func {
+  const sourceText = GetSourceText(node);
+  const privateEnv = $.getRunningContext().PrivateEnvironment!;
+  const env = $.getRunningContext().LexicalEnvironment!;
+  if (!name) name = '';
+  const closure = OrdinaryFunctionCreate(
+    $,
+    $.getIntrinsic('%Function.prototype%'),
+    sourceText,
+    node.params,
+    node.body,
+    LEXICAL_THIS,
+    env,
+    privateEnv,
+  );
+  SetFunctionName(closure, name);
+  return closure;
 }
 
 /**
@@ -699,7 +731,7 @@ export function OrdinaryCallBindThis($: VM, F: Func, calleeContext: ExecutionCon
 export function* EvaluateBody(
   $: VM, functionObject: Func, argumentsList: Val[],
   node: ESTree.BlockStatement|ESTree.Expression
-): EvalGen<CR<Val>> {
+): ECR<Val> {
   // TODO - check for generator and/or async, which will probably be different
   // subtypes of Function.
   if (functionObject.ECMAScriptCode) {
@@ -721,8 +753,9 @@ export function* EvaluateBody(
     return yield* $.evaluateValue(node);
   }
   // TODO - other types?
-  throw '';
+  throw new Error(`Unknown function type`);
 }
+
 /**
  * 10.2.1.4 OrdinaryCallEvaluateBody ( F, argumentsList )
  *
@@ -735,9 +768,14 @@ export function* EvaluateBody(
  * 1. Return ? EvaluateBody of F.[[ECMAScriptCode]] with arguments F
  *    and argumentsList.
  */
-export function* OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]): EvalGen<CR<Val>> {
+export function* OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]): ECR<Val> {
   Assert(F.ECMAScriptCode);
-  return yield* EvaluateBody($, F, argumentsList, F.ECMAScriptCode);
+  const result = yield* EvaluateBody($, F, argumentsList, F.ECMAScriptCode);
+  if (!IsAbrupt(result) && F.ECMAScriptCode.type !== 'BlockStatement') {
+    // Handle concise bodies
+    return new Abrupt(CompletionType.Return, result, EMPTY);
+  }
+  return result;
 }
 
 /**
@@ -767,8 +805,11 @@ export function* OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]):
  *    [[Configurable]]: true }).
  * 7. Return unused.
  */
-export function SetFunctionName($: VM, F: Func,
-                                name: PropertyKey|PrivateName, prefix?: string): UNUSED {
+export function SetFunctionName(
+  F: Func,
+  name: PropertyKey|PrivateName,
+  prefix?: string,
+): UNUSED {
   Assert(F.Extensible && !F.OwnProps.has('name'));
   if (typeof name === 'symbol') {
     const description = name.description;
@@ -783,10 +824,12 @@ export function SetFunctionName($: VM, F: Func,
   if (prefix) {
     name = `${prefix} ${String(name)}`;
   }
-  // if (F instanceof BuiltinFunction) {
-  //   F.InitialName = name;
-  // }
-  CastNotAbrupt(DefinePropertyOrThrow($, F, 'name', propC(name)));
+  if (F instanceof BuiltinFunction()) {
+    F.InitialName = name;
+  }
+  F.OwnProps.set('name', propC(name));
+  F.InternalName = name;
+  // CastNotAbrupt(DefinePropertyOrThrow($, F, 'name', propC(name)));
   return UNUSED;
 }
 
@@ -805,10 +848,11 @@ export function SetFunctionName($: VM, F: Func,
  *    [[Configurable]]: true }).
  * 3. Return unused.
  */
-export function SetFunctionLength($: VM, F: Func, length: number): UNUSED {
+export function SetFunctionLength(F: Func, length: number): UNUSED {
   Assert(F.Extensible);
   Assert(!F.OwnProps.has('length'));
-  CastNotAbrupt(DefinePropertyOrThrow($, F, 'length', propC(length)));
+  F.OwnProps.set('length', propC(length));
+  // CastNotAbrupt(DefinePropertyOrThrow($, F, 'length', propC(length)));
   return UNUSED;
 }
 

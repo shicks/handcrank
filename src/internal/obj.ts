@@ -3,7 +3,7 @@ import { ToPropertyKey } from './abstract_conversion';
 import { Call, CopyDataProperties, CreateDataProperty, Get, GetFunctionRealm } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { IsFunc, type Func } from './func';
+import { IsFunc, SetFunctionName, type Func } from './func';
 import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor, methodName, propC, propWEC } from './property_descriptor';
 import { Slots, hasAnyFields, memoize } from './slots';
 import { GetSourceText, IsAnonymousFunctionDefinition, NamedEvaluation } from './static/functions';
@@ -23,6 +23,9 @@ declare global {
     Extensible?: boolean;
   }
 }
+
+export type RequiredSlots<K extends keyof ObjectSlots>
+  = {[T in K]-?: ObjectSlots[T]&({}|null)} & ObjectSlots;
 
 export abstract class Obj extends Slots<ObjectSlots>() {
 
@@ -1055,8 +1058,7 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
         Assert(IsFunc(propValue));
         propValue.SourceText = GetSourceText(prop); // fix source text
         if (prop.kind === 'get') {
-          propValue.InternalName = 'get ' + methodName(key);
-          propValue.OwnProps.set('name', propC(key));
+          SetFunctionName(propValue, methodName(key), 'get');
           Assert(!propValue.FormalParameters?.length);
           const desc = obj.OwnProps.get(key);
           if (IsAccessorDescriptor(desc)) {
@@ -1066,8 +1068,7 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
           }
           continue;
         } else if (prop.kind === 'set') {
-          propValue.InternalName = 'set ' + methodName(key);
-          propValue.OwnProps.set('name', propC(key));
+          SetFunctionName(propValue, methodName(key), 'set');
           Assert(propValue.FormalParameters!.length === 1);
           const desc = obj.OwnProps.get(key);
           if (IsAccessorDescriptor(desc)) {

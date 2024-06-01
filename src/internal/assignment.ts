@@ -20,18 +20,18 @@
 //    one of
 //      *= /= %= += -= <<= >>= >>>= &= ^= |= **=
 
-import { AssignmentExpression, MemberExpression, Pattern } from "estree";
-import { CR, IsAbrupt } from "./completion_record";
-import { IsAnonymousFunctionDefinition, NamedEvaluation } from "./static/functions";
-import { EvalGen, VM } from "./vm";
-import { Val } from "./val";
-import { GetValue, PutValue } from "./reference_record";
-import { EMPTY } from "./enums";
-import { Assert } from "./assert";
-import { ToBoolean } from "./abstract_conversion";
-import { ApplyStringOrNumericBinaryOperator, SHORT_CIRCUIT_OPS, STRNUM_OPS } from "./binary_operators";
-import { HasOwnProperty } from "./abstract_object";
-import { IsCallable } from "./abstract_compare";
+import { IsCallable } from './abstract_compare';
+import { ToBoolean } from './abstract_conversion';
+import { HasOwnProperty } from './abstract_object';
+import { ApplyStringOrNumericBinaryOperator, SHORT_CIRCUIT_OPS, STRNUM_OPS } from './arithmetic';
+import { Assert } from './assert';
+import { CR, IsAbrupt } from './completion_record';
+import { EMPTY } from './enums';
+import { GetValue, PutValue } from './reference_record';
+import { IsAnonymousFunctionDefinition, NamedEvaluation } from './static/functions';
+import { Val } from './val';
+import { EvalGen, VM } from './vm';
+import { AssignmentExpression, MemberExpression, Pattern } from 'estree';
 
 /**
  * 13.15.2 Runtime Semantics: Evaluation

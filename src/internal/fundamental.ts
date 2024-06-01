@@ -11,8 +11,9 @@ import { Call, Get, GetMethod, HasOwnProperty, HasProperty, Invoke, OrdinaryHasI
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { UNUSED } from './enums';
+import { BoundFunctionCreate } from './exotic_bind';
 import { StringCreate } from './exotic_string';
-import { BuiltinFunction, BuiltinFunctionBehavior, CreateBuiltinFunction, Func, IsFunc, getter, method } from './func';
+import { BuiltinFunction, BuiltinFunctionBehavior, CreateBuiltinFunction, Func, IsFunc, SetFunctionLength, SetFunctionName, getter, method } from './func';
 import { GetPrototypeFromConstructor, Obj, OrdinaryCreateFromConstructor, OrdinaryObject, OrdinaryObjectCreate } from './obj';
 import { prop0, propC, propWC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
@@ -48,7 +49,8 @@ export const objectAndFunctionPrototype: Plugin = {
       // to create the builtin functions.
       const objectPrototype = OrdinaryObjectCreate();
       realm.Intrinsics.set('%Object.prototype%', objectPrototype);
-      const functionPrototype = OrdinaryObjectCreate({Prototype: objectPrototype});
+      const functionPrototype = CreateBuiltinFunction(
+        {*Call() { return undefined; }}, 0, '', realm, objectPrototype);
       realm.Intrinsics.set('%Function.prototype%', functionPrototype);
 
       // Now populate the methods.
@@ -313,7 +315,27 @@ export const objectAndFunctionPrototype: Plugin = {
          * method will not be used by subsequent calls to F.
          */
         'bind': method(function*($, thisValue, thisArg, ...args) {
-          throw new Error('NOT IMPLEMENTED: BIND EXOTIC');
+          const Target = thisValue;
+          if (!IsCallable(Target)) return $.throw('TypeError', 'not a function');
+          const F = BoundFunctionCreate($, Target, thisArg, args);
+          if (IsAbrupt(F)) return F;
+          let L = 0;
+          if (typeof Target.OwnProps?.get('length')?.Value === 'number') {
+            L = Target.OwnProps!.get('length')!.Value as number - args.length;
+          } else if (HasOwnProperty($, Target, 'length')) {
+            const targetLen = yield* Get($, Target, 'length');
+            if (typeof targetLen === 'number') {
+              if (targetLen === +Infinity) {
+                L = +Infinity;
+              } else {
+                const targetLenAsInt = CastNotAbrupt(yield* ToIntegerOrInfinity($, targetLen));
+                L = Math.max(targetLenAsInt - args.length, 0);
+              }
+            }
+          }
+          SetFunctionLength(F, L);
+          SetFunctionName(F, 'bound');
+          return F;
         }),
 
         /**

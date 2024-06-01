@@ -1,6 +1,6 @@
 import { DebugString, VM, run } from './internal/vm';
-import { basic } from './internal/plugin/basic';
-import { arithmetic } from './internal/plugin/arithmetic';
+import { syntax } from './internal/syntax';
+import { arithmetic } from './internal/arithmetic';
 import * as esprima from 'esprima-next';
 import * as readline from 'readline';
 import { fundamental } from './internal/fundamental';
@@ -11,7 +11,7 @@ export const vm = new VM({
   parseModule(source) { return esprima.parseModule(source, {loc: true, range: true}); },
 });
 vm.install(fundamental);
-vm.install(basic);
+vm.install(syntax);
 vm.install(arithmetic);
 
 if (process.argv.length > 2) {
@@ -32,7 +32,8 @@ if (process.argv.length > 2) {
         console.dir(cr);
       }
     } else {
-      console.log(DebugString(cr));
+      const s = DebugString(cr);
+      console.log(s);
     }
     rl.question('> ', loop);
   }

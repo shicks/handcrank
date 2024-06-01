@@ -1,42 +1,20 @@
-import { Plugin, just } from '../vm';
-import { EMPTY, NOT_APPLICABLE } from '../enums';
-import { Val } from '../val';
-import { Abrupt, CR, CompletionType, IsAbrupt } from '../completion_record';
-import { ResolveBinding, ResolveThisBinding } from '../execution_context';
-import { ReferenceRecord } from '../reference_record';
-import { StrictNode } from '../tree';
-import { ToPropertyKey } from '../abstract_conversion';
-import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from '../statements';
-import { Evaluation_AssignmentExpression } from '../assignment';
-import { Evaluation_CallExpression, Evaluation_NewExpression, InstantiateOrdinaryFunctionExpression } from '../func';
-import { Evaluation_ObjectExpression } from '../obj';
+import { Plugin, just } from './vm';
+import { EMPTY, NOT_APPLICABLE } from './enums';
+import { Val } from './val';
+import { Abrupt, CR, CompletionType, IsAbrupt } from './completion_record';
+import { ResolveBinding, ResolveThisBinding } from './execution_context';
+import { ReferenceRecord } from './reference_record';
+import { StrictNode } from './tree';
+import { ToPropertyKey } from './abstract_conversion';
+import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from './statements';
+import { Evaluation_AssignmentExpression } from './assignment';
+import { Evaluation_CallExpression, Evaluation_NewExpression, InstantiateArrowFunctionExpression, InstantiateOrdinaryFunctionExpression } from './func';
+import { Evaluation_ObjectExpression } from './obj';
 
-// type Plugin<ExtraIntrinsics = never> = {[K in Intrinsics|Globals]: Intrinsics|($: VM) => Generator<Intrinsic, K extends `%${string}%` ? Obj : Val|PropertyDescriptor, Obj>} & {Evaluate?(on: fn): ...};
-// export const basic: Plugin = {
-//   *'undefined'() { return undefined; },
-//   *'null'() { return null; },
-//   *'Object'() {
-//     const ctor = OrdinaryFunctionCreate(yield '%ObjectPrototype%');
-//     return ctor;
-//   },
-//   *'%ObjectPrototype%' { return ... },
-//   *'Object.Prototype' { return yield '%ObjectPrototype%' },
-//      // ^ NOTE: considered part of `Object`
-//   Evaluate(on) {
-//     on(['Program'], n => n, function*($, n: Program, evaluate) {
-//       return 
-//     });
+// TODO - split out basic from advanced syntax??
 
-//       )
-//   },
-// };
-
-
-// TODO - put more ...something... into this?
-
-
-export const basic: Plugin = {
-  id: 'basic',
+export const syntax: Plugin = {
+  id: 'syntax',
 
   syntax: {
     Evaluation($, on) {
@@ -94,7 +72,14 @@ export const basic: Plugin = {
       });
       on('AssignmentExpression', (n) => Evaluation_AssignmentExpression($, n));
       on('FunctionDeclaration', (n) => just(EMPTY));
-      on('FunctionExpression', (n) => InstantiateOrdinaryFunctionExpression($, n));
+      on('FunctionExpression', (n) => {
+        if (n.async || n.generator) return NOT_APPLICABLE;
+        return InstantiateOrdinaryFunctionExpression($, n);
+      });
+      on('ArrowFunctionExpression', (n) => {
+        if (n.async) return NOT_APPLICABLE;
+        return just(InstantiateArrowFunctionExpression($, n));
+      });
       on('ReturnStatement', function*(n) {
         // 14.10.1 Runtime Semantics: Evaluation
         //

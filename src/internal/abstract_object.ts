@@ -3,18 +3,18 @@
  * 7.3 Operations on Objects
  */
 
-import { IsCallable } from "./abstract_compare";
-import { ToObject } from "./abstract_conversion";
-import { Assert } from "./assert";
-import { InstanceofOperator } from "./binary_operators";
-import { CR, CastNotAbrupt, IsAbrupt } from "./completion_record";
-import { UNUSED } from "./enums";
-import { Func } from "./func";
-import { Obj } from "./obj";
-import { PropertyDescriptor, propWC, propWEC } from "./property_descriptor";
-import { RealmRecord } from "./realm_record";
-import { PropertyKey, Val } from "./val";
-import { DebugString, ECR, VM, just } from "./vm";
+import { IsCallable } from './abstract_compare';
+import { ToObject } from './abstract_conversion';
+import { Assert } from './assert';
+import { InstanceofOperator } from './arithmetic';
+import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
+import { UNUSED } from './enums';
+import { Func } from './func';
+import { Obj } from './obj';
+import { PropertyDescriptor, propWC, propWEC } from './property_descriptor';
+import { RealmRecord } from './realm_record';
+import { PropertyKey, Val } from './val';
+import { DebugString, ECR, VM, just } from './vm';
 
 declare const ValidateNonRevokedProxy: any;
 declare global {
