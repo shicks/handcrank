@@ -3,11 +3,14 @@ import { CanonicalNumericIndexString, ToIntegerOrInfinityInternal, ToNumber, ToU
 import { Construct, Get } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { IsCompatiblePropertyDescriptor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject } from './obj';
-import { HasValueField, IsDataDescriptor, PropertyDescriptor, PropertyRecord, prop0, propE } from './property_descriptor';
+import { CreateBuiltinFunction } from './func';
+import { objectAndFunctionPrototype } from './fundamental';
+import { IsCompatiblePropertyDescriptor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject, OrdinaryObjectCreate } from './obj';
+import { HasValueField, IsDataDescriptor, PropertyDescriptor, PropertyRecord, prop0, propE, propW } from './property_descriptor';
+import { RealmRecord } from './realm_record';
 import { memoize } from './slots';
 import { PropertyKey, Val } from './val';
-import { VM, run } from './vm';
+import { Plugin, VM, run } from './vm';
 
 /**
  * 10.4.2 Array Exotic Objects
@@ -244,15 +247,15 @@ function* ArraySpeciesCreate($: VM, originalArray: Obj, length: number): CR<Obj>
  */
 function ArraySetLength($: VM, A: ArrayExoticObject, Desc: PropertyDescriptor): CR<boolean> {
   if (!HasValueField(Desc)) return OrdinaryDefineOwnProperty($, A, 'length', Desc);
-  const newLenDesc = {...Desc};
 
   // TODO - DefinePropertyDescriptor -> generator???
 
   const newLen = run(ToUint32($, Desc.Value));
   if (IsAbrupt(newLen)) return newLen;
   const numberLen = run(ToNumber($, Desc.Value));
+  if (IsAbrupt(numberLen)) return numberLen;
   if (!SameValueZero(newLen, numberLen)) return $.throw('RangeError', 'Invalid array length');
-  newLenDesc.Value = newLen;
+  const newLenDesc = {...Desc, Value: newLen};
   const oldLenDesc = OrdinaryGetOwnProperty(A, 'length');
   Assert(IsDataDescriptor(oldLenDesc));
   Assert(!oldLenDesc.Configurable);
@@ -260,28 +263,288 @@ function ArraySetLength($: VM, A: ArrayExoticObject, Desc: PropertyDescriptor): 
   Assert(typeof oldLen === 'number');
   if (newLen >= oldLen) return CastNotAbrupt(OrdinaryDefineOwnProperty($, A, 'length', newLenDesc));
   if (!oldLenDesc.Writable) return false;
-  let newWritable: boolean;
-  if (!('Writable' in newLenDesc) || newLenDesc.Writable) {
-    newWritable = true;
-  } else {
-    newWritable = false;
-    newLenDesc.Writable = true;
-  }
-  const succeeded = OrdinaryDefineOwnProperty($, A, 'length', newLenDesc);
+  const succeeded = CastNotAbrupt(OrdinaryDefineOwnProperty($, A, 'length', newLenDesc));
   if (!succeeded) return false;
-  for (let i = oldLen - 1; i >= newLen; i--) {
-    const P = CanonicalNumericIndexString(i);
-    const deleteSucceeded = A.Delete(P);
+  const toDelete = findKeysAbove(CastNotAbrupt(A.OwnPropertyKeys($)), newLen);
+  while (toDelete.length) {
+    const P = toDelete.pop()!;
+    const deleteSucceeded = A.Delete($, toDelete.pop()!);
     if (!deleteSucceeded) {
-      newLenDesc.Value = i + 1;
-      if (!newWritable) newLenDesc.Writable = false;
-      const succeeded = OrdinaryDefineOwnProperty($, A, 'length', newLenDesc);
-      if (!succeeded) return false;
+      newLenDesc.Value = Number(P) + 1;
+      return false;
     }
   }
-  if (!newWritable) {
-    const succeeded = OrdinaryDefineOwnProperty($, A, 'length', {Writable: false});
-    Assert(succeeded);
-  }
   return true;
+}
+
+/**
+ * 23.1.1 The Array Constructor
+ *
+ * The Array constructor:
+ * 
+ *   - is %Array%.
+ *   - is the initial value of the "Array" property of the global object.
+ *   - creates and initializes a new Array when called as a constructor.
+ *   - also creates and initializes a new Array when called as a
+ *     function rather than as a constructor. Thus the function call
+ *     Array(…) is equivalent to the object creation expression new
+ *     Array(…) with the same arguments.
+ *   - is a function whose behaviour differs based upon the number and
+ *     types of its arguments.
+ *   - may be used as the value of an extends clause of a class
+ *     definition. Subclass constructors that intend to inherit the
+ *     exotic Array behaviour must include a super call to the Array
+ *     constructor to initialize subclass instances that are Array
+ *     exotic objects. However, most of the Array.prototype methods
+ *     are generic methods that are not dependent upon their this
+ *     value being an Array exotic object.
+ *   - has a "length" property whose value is 1𝔽.
+ */
+export const arrayObject: Plugin = {
+  iqd: 'arrayObject',
+  deps: [objectAndFunctionPrototype],
+  realm: {
+    override CreateIntrinsics(realm: RealmRecord, stagedGlobals: Map<string, Val>) {
+      
+      /**
+       * 23.1.3 Properties of the Array Prototype Object
+       * 
+       * The Array prototype object:
+       *   - is %Array.prototype%.
+       *   - is an Array exotic object and has the internal methods
+       *     specified for such objects.
+       *   - has a "length" property whose initial value is +0𝔽 and
+       *     whose attributes are { [[Writable]]: true, [[Enumerable]]:
+       *     false, [[Configurable]]: false }.
+       *   - has a [[Prototype]] internal slot whose value is %Object.prototype%.
+       * 
+       * NOTE: The Array prototype object is specified to be an Array
+       * exotic object to ensure compatibility with ECMAScript code
+       * that was created prior to the ECMAScript 2015 specification.
+       */
+      const arrayPrototype = new (ArrayExoticObject())({
+        Prototype: realm.Intrinsics.get('%Object.prototype%')!,
+      }, {
+        'length': propW(0),
+      });
+      realm.Intrinsics.set('%Array.prototype%', arrayPrototype);
+
+      /**
+       * 23.1.1.1 Array ( ...values )
+       * 
+       * This function performs the following steps when called:
+       * 
+       * 1. If NewTarget is undefined, let newTarget be the active
+       *    function object; else let newTarget be NewTarget.
+       * 2. Let proto be ? GetPrototypeFromConstructor(newTarget,
+       *    "%Array.prototype%").
+       * 3. Let numberOfArgs be the number of elements in values.
+       * 4. If numberOfArgs = 0, then
+       *     a. Return ! ArrayCreate(0, proto).
+       * 5. Else if numberOfArgs = 1, then
+       *     a. Let len be values[0].
+       *     b. Let array be ! ArrayCreate(0, proto).
+       *     c. If len is not a Number, then
+       *         i. Perform ! CreateDataPropertyOrThrow(array, "0", len).
+       *         ii. Let intLen be 1𝔽.
+       *     d. Else,
+       *         i. Let intLen be ! ToUint32(len).
+       *         ii. If SameValueZero(intLen, len) is false, throw a
+       *             RangeError exception.
+       *     e. Perform ! Set(array, "length", intLen, true).
+       *     f. Return array.
+       * 6. Else,
+       *     a. Assert: numberOfArgs ≥ 2.
+       *     b. Let array be ? ArrayCreate(numberOfArgs, proto).
+       *     c. Let k be 0.
+       *     d. Repeat, while k < numberOfArgs,
+       *         i. Let Pk be ! ToString(𝔽(k)).
+       *         ii. Let itemK be values[k].
+       *         iii. Perform ! CreateDataPropertyOrThrow(array, Pk, itemK).
+       *         iv. Set k to k + 1.
+       *     e. Assert: The mathematical value of array\'s "length"
+       *        property is numberOfArgs.
+       *     f. Return array.
+       *
+       * ---
+       *
+       * 23.1.2 Properties of the Array Constructor
+       * 
+       * The Array constructor:
+       * 
+       * has a [[Prototype]] internal slot whose value is %Function.prototype%.
+       * has the following properties:
+       * 23.1.2.1 Array.from ( items [ , mapfn [ , thisArg ] ] )
+       * 
+       * This method performs the following steps when called:
+       * 
+       * 1. Let C be the this value.
+       * 2. If mapfn is undefined, let mapping be false.
+       * 3. Else,
+       *     a. If IsCallable(mapfn) is false, throw a TypeError exception.
+       *     b. Let mapping be true.
+       * 4. Let usingIterator be ? GetMethod(items, @@iterator).
+       * 5. If usingIterator is not undefined, then
+       *     a. If IsConstructor(C) is true, then
+       *         i. Let A be ? Construct(C).
+       *     b. Else,
+       *         i. Let A be ! ArrayCreate(0).
+       *     c. Let iteratorRecord be ? GetIteratorFromMethod(items, usingIterator).
+       *     d. Let k be 0.
+       *     e. Repeat,
+       *         i. If k ≥ 253 - 1, then
+       * 1. Let error be ThrowCompletion(a newly created TypeError object).
+       * 2. Return ? IteratorClose(iteratorRecord, error).
+       *         ii. Let Pk be ! ToString(𝔽(k)).
+       *         iii. Let next be ? IteratorStep(iteratorRecord).
+       *         iv. If next is false, then
+       * 1. Perform ? Set(A, "length", 𝔽(k), true).
+       * 2. Return A.
+       *         v. Let nextValue be ? IteratorValue(next).
+       *         vi. If mapping is true, then
+       * 1. Let mappedValue be Completion(Call(mapfn, thisArg, « nextValue, 𝔽(k) »)).
+       * 2. IfAbruptCloseIterator(mappedValue, iteratorRecord).
+       *         vii. Else, let mappedValue be nextValue.
+       *         viii. Let defineStatus be
+       *         Completion(CreateDataPropertyOrThrow(A, Pk,
+       *         mappedValue)).
+       * ix. ix. IfAbruptCloseIterator(defineStatus, iteratorRecord).
+       * x. x. Set k to k + 1.
+       * 6. NOTE: items is not an Iterable so assume it is an array-like object.
+       * 7. Let arrayLike be ! ToObject(items).
+       * 8. Let len be ? LengthOfArrayLike(arrayLike).
+       * 9. If IsConstructor(C) is true, then
+       *     a. Let A be ? Construct(C, « 𝔽(len) »).
+       * 10. Else,
+       *     a. Let A be ? ArrayCreate(len).
+       * 11. Let k be 0.
+       * 12. Repeat, while k < len,
+       *     a. Let Pk be ! ToString(𝔽(k)).
+       *     b. Let kValue be ? Get(arrayLike, Pk).
+       *     c. If mapping is true, then
+       *         i. Let mappedValue be ? Call(mapfn, thisArg, « kValue, 𝔽(k) »).
+       *     d. Else, let mappedValue be kValue.
+       *     e. Perform ? CreateDataPropertyOrThrow(A, Pk, mappedValue).
+       *     f. Set k to k + 1.
+       * 13. Perform ? Set(A, "length", 𝔽(len), true).
+       * 14. Return A.
+       * 
+       * NOTE: This method is an intentionally generic factory method;
+       * it does not require that its this value be the Array
+       * constructor. Therefore it can be transferred to or inherited
+       * by any other constructors that may be called with a single numeric argument.
+       */
+      const arrayCtor = CreateBuiltinFunction({
+        *Call($, thisArg, ...arguments): CR<Obj> {
+
+
+          // TODO - verify and flesh this out
+          if (IsConstructor(this)) {
+            return yield* Construct($, this, arguments);
+          }
+          const numberOfArgs = arguments.length;
+          if (numberOfArgs === 0) {
+            return yield* ArrayCreate($, 0, this.Prototype);
+          }
+          if (numberOfArgs === 1) {
+            const len = arguments[0];
+            let array = yield* ArrayCreate($, 0, this.Prototype);
+            if (typeof len !== 'number') {
+              yield* array.CreateDataPropertyOrThrow($, '0', len);
+              const intLen = 1;
+            } else {
+              const intLen = run(ToUint32($, len));
+              if (IsAbrupt(intLen)) return intLen;
+              if (!SameValueZero(intLen, len)) return $.throw('RangeError', 'Invalid array length');
+            }
+            yield* array.Set($, 'length', intLen, true);
+            return array;
+          }
+          Assert(numberOfArgs >= 2);
+          let array = yield* ArrayCreate($, numberOfArgs, this.Prototype);
+          let k = 0;
+          while (k < numberOfArgs) {
+            const Pk = run(ToString($, k));
+            const itemK = arguments[k];
+            yield* array.CreateDataPropertyOrThrow($, Pk, itemK);
+            k++;
+          }
+          Assert(array.length === numberOfArgs);
+          return array;
+
+        }
+
+
+realm, function* Array(this: Val, ...values: Val[]): CR<Obj> {
+
+
+
+
+    },
+  },
+};
+
+
+/**
+ * Do a double-binary search to find the range of keys that are array
+ * indices and need to be deleted.
+ */
+function findKeysAbove(keys: PropertyKey[], len: number): PropertyKey[] {
+  let a = 0;
+  let c = keys.length;
+  // We have three ranges in the input:
+  //  1. [0, first) are array indexes less than len
+  //  2. [first, end) are array indexes greater than or equal to len
+  //  3. [end, keys.length) are non-array indexes
+  // To do this binary search, we maintain the following invariant:
+  //  a < first < b < end < c
+  // We therefore need to start by finding a valid b:
+  let b;
+  while (a < c) {
+    const m = (a + c) >>> 1;
+    const v = keys[m];
+    const n = (v as any) >>> 0;
+    if (v !== String(n)) {
+      // not an array index: m >= end, so move c left to (m)
+      c = m;
+    } else if (n < len) {
+      // valid index to not delete: m < first, so move a right to (m + 1)
+      a = m + 1;
+    } else {
+      // m >= first: we've found a valid b, so break
+      b = m;
+      break;
+    }
+  }
+  if (b == null) {
+    // We didn't find anything, so return an empty range.
+    return [];
+  }
+  // Now narrow between a and b to find first.
+  let first = b;
+  while (a < first) {
+    const m: number = (a + first) >>> 1;
+    const v = keys[m];
+    if (Number(v) < len) {
+      // don't delete: move a right to (m + 1)
+      a = m + 1;
+    } else {
+      // delete: move first left to (m)
+      first = m;
+    }
+  }
+  // Now narrow between b and c to find end.
+  let end = c;
+  while (b < end) {
+    const m: number = (b + end) >>> 1;
+    const v = keys[m];
+    if (v === String((v as any) >>> 0)) {
+      // array index: move b right to (m + 1)
+      b = m + 1;
+    } else {
+      // not an array: move end left to (m)
+      end = m;
+    }
+  }
+  return keys.slice(first, end);
 }

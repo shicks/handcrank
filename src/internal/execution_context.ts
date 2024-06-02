@@ -74,7 +74,7 @@ import { VM } from './vm';
  * implementation. It is impossible for ECMAScript code to directly
  * access or observe an execution context.
  */
-export class ExecutionContext {
+export abstract class ExecutionContext {
 
   // TODO - is there an ExecutionContext that isn't a CodeExecutionContext?
   //      - if so, then maybe the ctor params below are pulled out for code only
@@ -102,6 +102,14 @@ export class ExecutionContext {
     this.isRunning = true;
     // TODO ???
   }
+}
+
+/**
+ * Not in the spec, just for bookkeeping to make the superclass abstract.
+ * This is at the bottom of the stack for each realm.
+ */
+export class RootExecutionContext extends ExecutionContext {
+  constructor(Realm: RealmRecord) { super(null, null, Realm, null); }
 }
 
 /**
@@ -144,6 +152,13 @@ export class CodeExecutionContext extends ExecutionContext {
     readonly LexicalEnvironment: EnvironmentRecord,
     readonly VariableEnvironment: EnvironmentRecord,
   ) { super(ScriptOrModule, Function, Realm, PrivateEnvironment); }
+}
+
+export class BuiltinExecutionContext extends ExecutionContext {
+  // currently executing node, for stack trace purposes
+  constructor(F: Func) {
+    super(null, F, F.Realm, null);
+  }
 }
 
 export function GetLexicalEnvironment($: VM): EnvironmentRecord|undefined {

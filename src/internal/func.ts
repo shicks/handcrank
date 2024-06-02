@@ -9,11 +9,11 @@ import * as ESTree from 'estree';
 import { RealmRecord } from './realm_record';
 import { ScriptRecord } from './script_record';
 import { ModuleRecord } from './module_record';
-import { CodeExecutionContext, ExecutionContext, GetActiveScriptOrModule, ResolveBinding } from './execution_context';
+import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext, GetActiveScriptOrModule, ResolveBinding } from './execution_context';
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 import { BoundNames, IsConstantDeclaration, IsStrictMode, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
 import { ContainsExpression, ExpectedArgumentCount, GetSourceText, IsSimpleParameterList } from './static/functions';
-import { Obj, OrdinaryObject, OrdinaryObjectCreate } from './obj';
+import { Obj, OrdinaryObject, OrdinaryObjectCreate, PropertyMap } from './obj';
 import { PropertyKey, Val } from './val';
 import { Source } from './tree';
 import { ToObject } from './abstract_conversion';
@@ -165,7 +165,7 @@ export interface Func extends Obj {
 
   Prototype: Obj;
   Extensible: boolean;
-  OwnProps: Map<PropertyKey, PropertyDescriptor>;
+  OwnProps: PropertyMap;
   Realm: RealmRecord;
 
   Call?(this: Func, $: VM, thisArgument: Val, argumentsList: Val[]): EvalGen<CR<Val>>;
@@ -1247,45 +1247,16 @@ export const BuiltinFunction = memoize(() => class BuiltinFunction extends Ordin
   declare InitialName: string;
   declare CallBehavior?: CallBehavior;
   declare ConstructBehavior?: ConstructBehavior;
+  declare Call: Func['Call'];
+  declare Construct: Func['Construct'];
 
   constructor(slots: BuiltinFunctionSlots, props: PropertyRecord) {
     super(slots, props);
 
-    if (this.CallBehavior) (this as Func).Call = this.CallBehavior;
-    if (this.ConstructBehavior) (this as Func).Construct = this.ConstructBehavior;
+    if (this.CallBehavior) this.Call = wrapBehavior(this, this.CallBehavior);
+    if (this.ConstructBehavior) this.Construct = wrapBehavior(this, this.ConstructBehavior);
   }
 
-  /**
-   * 10.3.1 [[Call]] ( thisArgument, argumentsList )
-   *
-   * The [[Call]] internal method of a built-in function object F takes
-   * arguments thisArgument (an ECMAScript language value) and
-   * argumentsList (a List of ECMAScript language values) and returns
-   * either a normal completion containing an ECMAScript language value
-   * or a throw completion. It performs the following steps when called:
-   *
-   * 1. Let callerContext be the running execution context.
-   * 2. If callerContext is not already suspended, suspend callerContext.
-   * 3. Let calleeContext be a new execution context.
-   * 4. Set the Function of calleeContext to F.
-   * 5. Let calleeRealm be F.[[Realm]].
-   * 6. Set the Realm of calleeContext to calleeRealm.
-   * 7. Set the ScriptOrModule of calleeContext to null.
-   * 8. Perform any necessary implementation-defined initialization of calleeContext.
-   * 9. Push calleeContext onto the execution context stack;
-   *    calleeContext is now the running execution context.
-   * 10. Let result be the Completion Record that is the result of
-   *     evaluating F in a manner that conforms to the specification of
-   *     F. thisArgument is the this value, argumentsList provides the named
-   *     parameters, and the NewTarget value is undefined.
-   * 11. Remove calleeContext from the execution context stack and
-   *     restore callerContext as the running execution context.
-   * 12. Return ? result.
-   *
-   * NOTE: When calleeContext is removed from the execution context
-   * stack it must not be destroyed if it has been suspended and
-   * retained by an accessible Generator for later resumption.
-   */
   // Call($: VM, thisArgument: Val, argumentsList: Val[]): ECR<Val> {
   //   console.dir(this);
   //   if (this.CallBehavior) return this.CallBehavior($, thisArgument, argumentsList);
@@ -1293,25 +1264,77 @@ export const BuiltinFunction = memoize(() => class BuiltinFunction extends Ordin
   // }
 
   /**
-   * 10.3.2 [[Construct]] ( argumentsList, newTarget )
-   *
-   * The [[Construct]] internal method of a built-in function object F
-   * (when the method is present) takes arguments argumentsList (a List
-   * of ECMAScript language values) and newTarget (a constructor) and
-   * returns either a normal completion containing an Object or a throw
-   * completion. The steps performed are the same as [[Call]] (see
-   * 10.3.1) except that step 10 is replaced by:
-   *
-   * 10. Let result be the Completion Record that is the result of
-   *     evaluating F in a manner that conforms to the specification of
-   *     F. The this value is uninitialized, argumentsList provides the named
-   *     parameters, and newTarget provides the NewTarget value.
    */
   // Construct($: VM, argumentsList: Val[], newTarget: Obj): ECR<Obj> {
   //   if (this.ConstructBehavior) return this.ConstructBehavior($, argumentsList, newTarget);
   //   return (function*() { return Throw('TypeError', 'not a constructible'); })();
   // }
 });
+
+/**
+ * 10.3.1 BuiltinFunction.[[Call]] ( thisArgument, argumentsList )
+ *
+ * The [[Call]] internal method of a built-in function object F takes
+ * arguments thisArgument (an ECMAScript language value) and
+ * argumentsList (a List of ECMAScript language values) and returns
+ * either a normal completion containing an ECMAScript language value
+ * or a throw completion. It performs the following steps when called:
+ *
+ * 1. Let callerContext be the running execution context.
+ * 2. If callerContext is not already suspended, suspend callerContext.
+ * 3. Let calleeContext be a new execution context.
+ * 4. Set the Function of calleeContext to F.
+ * 5. Let calleeRealm be F.[[Realm]].
+ * 6. Set the Realm of calleeContext to calleeRealm.
+ * 7. Set the ScriptOrModule of calleeContext to null.
+ * 8. Perform any necessary implementation-defined initialization of calleeContext.
+ * 9. Push calleeContext onto the execution context stack;
+ *    calleeContext is now the running execution context.
+ * 10. Let result be the Completion Record that is the result of
+ *     evaluating F in a manner that conforms to the specification of
+ *     F. thisArgument is the this value, argumentsList provides the named
+ *     parameters, and the NewTarget value is undefined.
+ * 11. Remove calleeContext from the execution context stack and
+ *     restore callerContext as the running execution context.
+ * 12. Return ? result.
+ *
+ * NOTE: When calleeContext is removed from the execution context
+ * stack it must not be destroyed if it has been suspended and
+ * retained by an accessible Generator for later resumption.
+ *
+ * ---
+ *
+ * 10.3.2 [[Construct]] ( argumentsList, newTarget )
+ *
+ * The [[Construct]] internal method of a built-in function object F
+ * (when the method is present) takes arguments argumentsList (a List
+ * of ECMAScript language values) and newTarget (a constructor) and
+ * returns either a normal completion containing an Object or a throw
+ * completion. The steps performed are the same as [[Call]] (see
+ * 10.3.1) except that step 10 is replaced by:
+ *
+ * 10. Let result be the Completion Record that is the result of
+ *     evaluating F in a manner that conforms to the specification of
+ *     F. The this value is uninitialized, argumentsList provides the named
+ *     parameters, and newTarget provides the NewTarget value.
+ */
+function wrapBehavior<B extends CallBehavior|ConstructBehavior>(
+  F: Func,
+  behavior: B,
+): B {
+  return function*(this: BuiltinFunction, $: VM) {
+    const callerContext = $.getRunningContext();
+    callerContext.suspend();
+    const calleeContext =
+      new BuiltinExecutionContext(F);
+    try {
+      $.enterContext(calleeContext);
+      return yield* behavior.apply(this, arguments);
+    } finally {
+      $.popContext(calleeContext);
+    }
+  } as any;
+}
 
 export interface BuiltinFunctionSlots extends ObjectSlots {
   // NOTE: See 10.3.1 for details on exact correct behavior of Call

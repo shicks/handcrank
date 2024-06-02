@@ -3,7 +3,7 @@ import { Assert } from './assert';
 import { CR, IsAbrupt } from './completion_record';
 import { UNUSED } from './enums';
 import { GlobalEnvironmentRecord } from './environment_record';
-import { ExecutionContext } from './execution_context';
+import { RootExecutionContext } from './execution_context';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { PropertyDescriptor, methodName } from './property_descriptor';
 import { VM } from './vm';
@@ -194,7 +194,7 @@ export function InitializeHostDefinedRealm($: VM): CR<UNUSED> {
   // 3. Set the Function of newContext to null.
   // 4. Set the Realm of newContext to realm.
   // 5. Set the ScriptOrModule of newContext to null.
-  const newContext = new ExecutionContext(null, null, realm, null);
+  const newContext = new RootExecutionContext(realm);
   // 6. Push newContext onto the execution context stack; newContext
   //    is now the running execution context.
   $.executionStack.push(newContext);

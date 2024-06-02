@@ -99,14 +99,10 @@ export function* ScriptEvaluation($: VM, scriptRecord: ScriptRecord): ECR<Val> {
     result = yield* $.evaluateValue(script);
   }
   // 14. Suspend scriptContext and remove it from the execution context stack.
-  scriptContext.suspend();
-  Assert($.executionStack.at(-1) === scriptContext);
-  $.executionStack.pop();
   // 15. Assert: The execution context stack is not empty.
-  Assert($.executionStack.length > 0);
   // 16. Resume the context that is now on the top of the execution context
-  // stack as the running execution context.
-  $.executionStack.at(-1)!.resume();
+  //     stack as the running execution context.
+  $.popContext(scriptContext);
   // 17. Return ? result.
   return result;
 }

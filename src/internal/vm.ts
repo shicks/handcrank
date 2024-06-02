@@ -1,6 +1,6 @@
 import { CR, CastNotAbrupt, IsAbrupt, ThrowCompletion } from './completion_record';
 import { Val } from './val';
-import { CodeExecutionContext, ExecutionContext, ResolveThisBinding } from './execution_context';
+import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext, ResolveThisBinding } from './execution_context';
 import { EMPTY, NOT_APPLICABLE, UNRESOLVABLE } from './enums';
 import { NodeType, NodeMap, Node, Esprima, preprocess, Source } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
@@ -55,7 +55,9 @@ export class VM {
     context.resume();
   }
 
-  popContext() {
+  popContext(context?: ExecutionContext) {
+    Assert(this.executionStack.length > 1);
+    if (context) Assert(this.executionStack.at(-1) === context);
     this.executionStack.pop()!.suspend();
     this.getRunningContext().resume();
   }
@@ -99,7 +101,9 @@ export class VM {
     const frames: string[] = [];
     for (let i = this.executionStack.length - 1; i >= 0; i--) {
       const frame = this.executionStack[i];
-      if (frame instanceof CodeExecutionContext) {
+      if (frame instanceof BuiltinExecutionContext) {
+        frames.push(`\n    at ${frame.Function!.InitialName} (builtin)`);
+      } else if (frame instanceof CodeExecutionContext) {
         const currentNode = frame.currentNode;
         if (!currentNode) continue;
         const file = (currentNode.loc?.source as Source)?.sourceFile;

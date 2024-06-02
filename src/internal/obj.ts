@@ -792,7 +792,7 @@ export function OrdinaryDelete($: VM, O: Obj, P: PropertyKey): CR<boolean> {
  * 5. Return keys.
  */
 export function OrdinaryOwnPropertyKeys(O: Obj): PropertyKey[] {
-  return [...O.OwnProps.keys()];
+  return O.OwnProps.keys();
 }
 
 /**
@@ -1088,12 +1088,12 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
 // We add a guarantee that the keys iterate in the correct order
 // (array indices first in numerical order, then string keys in
 // order of creation, then symbols in order of creation)
-interface PropertyMap {
+export interface PropertyMap {
   set(key: PropertyKey, value: PropertyDescriptor): void;
   get(key: PropertyKey): PropertyDescriptor|undefined;
   has(key: PropertyKey): boolean;
   delete(key: PropertyKey): void;
-  keys(): Iterable<PropertyKey>;
+  keys(): PropertyKey[];
   [Symbol.iterator](): IterableIterator<[PropertyKey, PropertyDescriptor]>;
 }
 
