@@ -9,7 +9,6 @@ import { memoize } from './slots';
 import { Val } from './val';
 import { ECR, VM } from './vm';
 
-/** Slots for basic data type wrapper objects. */
 declare global {
   interface ObjectSlots extends BoundFunctionExoticSlots {}
 }

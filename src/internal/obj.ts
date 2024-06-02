@@ -1,10 +1,10 @@
-import { IsArrayIndex, IsExtensible, IsPropertyKey, SameValue } from './abstract_compare';
+import { IsExtensible, IsPropertyKey, SameValue } from './abstract_compare';
 import { ToPropertyKey } from './abstract_conversion';
 import { Call, CopyDataProperties, CreateDataProperty, Get, GetFunctionRealm } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { IsFunc, SetFunctionName, type Func } from './func';
-import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor, methodName, propC, propWEC } from './property_descriptor';
+import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor, methodName, propWEC } from './property_descriptor';
 import { Slots, hasAnyFields, memoize } from './slots';
 import { GetSourceText, IsAnonymousFunctionDefinition, NamedEvaluation } from './static/functions';
 import { PropertyKey, Val } from './val';
@@ -620,7 +620,7 @@ export function OrdinaryHasProperty($: VM, O: Obj, P: PropertyKey): CR<boolean> 
  * 10.1.8.1 OrdinaryGet ( O, P, Receiver )
  *
  * The abstract operation OrdinaryGet takes arguments O (an Object), P
- * (a property key), and Receiver (an ECMAScript language value) and
+lue) and
  * returns either a normal completion containing an ECMAScript
  * language value or a throw completion. It performs the following
  * steps when called:
@@ -1078,8 +1078,7 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
           }
           continue;
         } else {
-          propValue.InternalName = 'set ' + methodName(key);
-          propValue.OwnProps.set('name', propC(key));
+          SetFunctionName(propValue, methodName(key));
         }
       } else if (isProtoSetter) {
         if (propValue instanceof Obj || propValue === null) {

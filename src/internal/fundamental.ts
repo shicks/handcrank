@@ -1234,7 +1234,7 @@ export const errorObject: Plugin = {
        */
       realm.Intrinsics.set('%ThrowTypeError%', (() => {
         const throwTypeError = CreateBuiltinFunction({
-          *Call($) { return $.throw('TypeError'); },
+          *Call($) { return $.throw('TypeError', '%ThrowTypeError%'); },
         }, 0, '', realm, realm.Intrinsics.get('%Function.prototype%')!);
         throwTypeError.OwnProps.set('length', prop0(0));
         throwTypeError.OwnProps.set('name', prop0(''));
