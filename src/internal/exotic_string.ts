@@ -141,25 +141,16 @@ const StringExoticObject = memoize(() => class StringExoticObject extends Ordina
    */
   override OwnPropertyKeys(): CR<PropertyKey[]> {
     const keys: PropertyKey[] = [];
-    const stringKeys: PropertyKey[] = [];
-    const symbolKeys: PropertyKey[] = [];
     const str = this.StringData;
     const len = str.length;
     for (let i = 0; i < len; i++) {
       keys.push(String(i));
     }
     for (const P of this.OwnProps.keys()) {
-      if (IsArrayIndex(P)) {
-        if (ToIntegerOrInfinityInternal(Number(P)) >= len) keys.push(P);
-      } else if (typeof P === 'string') {
-        stringKeys.push(P);
-      } else if (typeof P === 'symbol') {
-        symbolKeys.push(P);
-      } else {
-        Assert(false); // should be impossible.
-      }
+      if (IsArrayIndex(P) && Number(P) < len) continue;
+      keys.push(P);
     }
-    return [...keys, ...stringKeys, ...symbolKeys];
+    return keys;
   }
 });
 

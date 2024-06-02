@@ -30,7 +30,7 @@ export type RequiredSlots<K extends keyof ObjectSlots>
 export abstract class Obj extends Slots<ObjectSlots>() {
 
   // Implementation details not in spec
-  abstract OwnProps: Map<PropertyKey, PropertyDescriptor>;
+  abstract OwnProps: PropertyMap;
 
   // Required internal methods for all objects
 
@@ -233,7 +233,7 @@ export abstract class Obj extends Slots<ObjectSlots>() {
  */
 export type OrdinaryObject = InstanceType<ReturnType<typeof OrdinaryObject>>;
 export const OrdinaryObject = memoize(() => class OrdinaryObject extends Obj {
-  override OwnProps = new Map<PropertyKey, PropertyDescriptor>();
+  override OwnProps = new SimplePropertyMap();
 
   declare Extensible: boolean;
   declare Prototype: Obj|null;
@@ -792,23 +792,7 @@ export function OrdinaryDelete($: VM, O: Obj, P: PropertyKey): CR<boolean> {
  * 5. Return keys.
  */
 export function OrdinaryOwnPropertyKeys(O: Obj): PropertyKey[] {
-  const names: string[] = [];
-  const indices: number[] = [];
-  const symbols: symbol[] = [];
-  for (const key of O.OwnProps.keys()) {
-    if (typeof key === 'symbol') {
-      symbols.push(key);
-    } else if (IsArrayIndex(key)) {
-      indices.push(Number(key));
-    } else {
-      names.push(key);
-    }
-  }
-  return [
-    ...indices.sort((a, b) => a < b ? -1 : a > b ? 1 : 0).map(String),
-    ...names,
-    ...symbols,
-  ];
+  return [...O.OwnProps.keys()];
 }
 
 /**
@@ -1098,4 +1082,40 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
     }
   }
   return obj;
+}
+
+// Superinterface of Map<PropertyKey, PropertyDescriptor>
+// We add a guarantee that the keys iterate in the correct order
+// (array indices first in numerical order, then string keys in
+// order of creation, then symbols in order of creation)
+interface PropertyMap {
+  set(key: PropertyKey, value: PropertyDescriptor): void;
+  get(key: PropertyKey): PropertyDescriptor|undefined;
+  has(key: PropertyKey): boolean;
+  delete(key: PropertyKey): void;
+  keys(): Iterable<PropertyKey>;
+  [Symbol.iterator](): IterableIterator<[PropertyKey, PropertyDescriptor]>;
+}
+
+class SimplePropertyMap implements PropertyMap {
+  obj: Record<PropertyKey, PropertyDescriptor> = Object.create(null);
+  set(key: PropertyKey, value: PropertyDescriptor) {
+    this.obj[key] = value;
+  }
+  get(key: PropertyKey) {
+    return this.obj[key];
+  }
+  has(key: PropertyKey) {
+    return key in this.obj;
+  }
+  delete(key: PropertyKey) {
+    delete this.obj[key];
+  }
+  keys() {
+    return Reflect.ownKeys(this.obj);
+  }
+  [Symbol.iterator]() {
+    type E = [PropertyKey, PropertyDescriptor];
+    return Reflect.ownKeys(this.obj).map(k => [k, this.obj[k]] as E)[Symbol.iterator]();
+  }
 }
