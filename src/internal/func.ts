@@ -4,7 +4,7 @@ import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, 
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
 import { PropertyDescriptor, PropertyRecord, propC, propWC } from './property_descriptor';
 import { Assert } from './assert';
-import { Call, Construct } from './abstract_object';
+import { Call, Construct, DefinePropertyOrThrow, InitializeInstanceElements } from './abstract_object';
 import * as ESTree from 'estree';
 import { RealmRecord } from './realm_record';
 import { ScriptRecord } from './script_record';
@@ -13,7 +13,7 @@ import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext, GetAct
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 import { BoundNames, IsConstantDeclaration, IsStrictMode, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
 import { ContainsExpression, ExpectedArgumentCount, GetSourceText, IsSimpleParameterList } from './static/functions';
-import { Obj, OrdinaryObject, OrdinaryObjectCreate, PropertyMap } from './obj';
+import { Obj, OrdinaryCreateFromConstructor, OrdinaryObject, OrdinaryObjectCreate, PropertyMap } from './obj';
 import { PropertyKey, Val } from './val';
 import { Source } from './tree';
 import { ToObject } from './abstract_conversion';
@@ -26,7 +26,6 @@ type Node = ESTree.Node;
 type PrivateElement = never;
 type ClassFieldDefinitionRecord = never;
 
-function MakeConstructor(...args: any[]): void {}
 function PrepareForTailCall(...args: any): void {}
 declare const GetIterator: any;
 declare const IteratorStep: any;
@@ -518,7 +517,7 @@ export function* InstantiateOrdinaryFunctionExpression(
     privateEnv,
   );
   SetFunctionName(closure, name);
-  MakeConstructor(closure);
+  MakeConstructor($, closure);
   if (node.id != null) {
     // NOTE: we've already checked that the name is declarable in this scope
     // and should have given an early error - therefore, we shouldn't be
@@ -776,6 +775,121 @@ export function* OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]):
     return new Abrupt(CompletionType.Return, result, EMPTY);
   }
   return result;
+}
+
+/**
+ * 10.2.2 [[Construct]] ( argumentsList, newTarget )
+ * 
+ * The [[Construct]] internal method of an ECMAScript function object
+ * F takes arguments argumentsList (a List of ECMAScript language
+ * values) and newTarget (a constructor) and returns either a normal
+ * completion containing an Object or a throw completion. It performs
+ * the following steps when called:
+ * 
+ * 1. Let callerContext be the running execution context.
+ * 2. Let kind be F.[[ConstructorKind]].
+ * 3. If kind is base, then
+ *     a. Let thisArgument be ? OrdinaryCreateFromConstructor(newTarget, "%Object.prototype%").
+ * 4. Let calleeContext be PrepareForOrdinaryCall(F, newTarget).
+ * 5. Assert: calleeContext is now the running execution context.
+ * 6. If kind is base, then
+ *     a. Perform OrdinaryCallBindThis(F, calleeContext, thisArgument).
+ *     b. Let initializeResult be Completion(InitializeInstanceElements(thisArgument, F)).
+ *     c. If initializeResult is an abrupt completion, then
+ *         i. Remove calleeContext from the execution context stack
+ *            and restore callerContext as the running execution context.
+ *         ii. Return ? initializeResult.
+ * 7. Let constructorEnv be the LexicalEnvironment of calleeContext.
+ * 8. Let result be Completion(OrdinaryCallEvaluateBody(F, argumentsList)).
+ * 9. Remove calleeContext from the execution context stack and
+ *    restore callerContext as the running execution context.
+ * 10. If result.[[Type]] is return, then
+ *     a. If result.[[Value]] is an Object, return result.[[Value]].
+ *     b. If kind is base, return thisArgument.
+ *     c. If result.[[Value]] is not undefined, throw a TypeError exception.
+ * 11. Else, ReturnIfAbrupt(result).
+ * 12. Let thisBinding be ? constructorEnv.GetThisBinding().
+ * 13. Assert: thisBinding is an Object.
+ * 14. Return thisBinding.
+ */
+export function* OrdinaryConstruct($: VM, F: Func, argumentsList: Val[], newTarget: Func): ECR<Obj> {
+  //const callerContext = $.getRunningContext();
+  const kind = F.ConstructorKind;
+  let thisArgument!: Obj;
+  if (BASE.is(kind)) {
+    const result = yield* OrdinaryCreateFromConstructor($, newTarget, '%Object.prototype%');
+    if (IsAbrupt(result)) return result;
+    thisArgument = result;
+  }
+  const calleeContext = PrepareForOrdinaryCall($, F as OrdinaryFunction, newTarget);
+  Assert(calleeContext === $.getRunningContext());
+  if (BASE.is(kind)) {
+    CastNotAbrupt(OrdinaryCallBindThis($, F, calleeContext, thisArgument));
+    const initializeResult = yield* InitializeInstanceElements($, thisArgument, F);
+    if (IsAbrupt(initializeResult)) {
+      $.popContext(calleeContext);
+      return initializeResult;
+    }
+  }
+  const constructorEnv = calleeContext.LexicalEnvironment;
+  const result = yield* OrdinaryCallEvaluateBody($, F, argumentsList);
+  $.popContext(calleeContext);
+  if (IsAbrupt(result)) {
+    if (result.Type === 'return') {
+      if (result.Value instanceof Obj) return result.Value;
+      if (BASE.is(kind)) return thisArgument;
+      if (result.Value !== undefined) {
+        return $.throw('TypeError', 'Unexpected return value');
+      }
+    }
+    return result;
+  }
+  return constructorEnv.GetThisBinding($) as CR<Obj>;
+}
+
+/**
+ * 10.2.5 MakeConstructor ( F [ , writablePrototype [ , prototype ] ] )
+ * The abstract operation MakeConstructor takes argument F (an ECMAScript function object or a built-in function object) and optional arguments writablePrototype (a Boolean) and prototype (an Object) and returns unused. It converts F into a constructor. It performs the following steps when called:
+ * 
+ * 1. If F is an ECMAScript function object, then
+ *     a. Assert: IsConstructor(F) is false.
+ *     b. Assert: F is an extensible object that does not have a "prototype" own property.
+ *     c. Set F.[[Construct]] to the definition specified in 10.2.2.
+ * 2. Else,
+ *     a. Set F.[[Construct]] to the definition specified in 10.3.2.
+ * 3. Set F.[[ConstructorKind]] to base.
+ * 4. If writablePrototype is not present, set writablePrototype to true.
+ * 5. If prototype is not present, then
+ *     a. Set prototype to OrdinaryObjectCreate(%Object.prototype%).
+ *     b. Perform ! DefinePropertyOrThrow(prototype, "constructor", PropertyDescriptor { [[Value]]: F, [[Writable]]: writablePrototype, [[Enumerable]]: false, [[Configurable]]: true }).
+ * 6. Perform ! DefinePropertyOrThrow(F, "prototype", PropertyDescriptor { [[Value]]: prototype, [[Writable]]: writablePrototype, [[Enumerable]]: false, [[Configurable]]: false }).
+ * 7. Return unused.
+ */
+export function MakeConstructor(
+  $: VM,
+  F: Func,
+  writablePrototype = true,
+  prototype?: Obj,
+): UNUSED {
+  if (F instanceof OrdinaryFunction()) {
+    Assert(!IsConstructor(F));
+    Assert(F.Extensible && !F.OwnProps.has('prototype'));
+    (F as Func).Construct = function($: VM, args: Val[], newTarget: Func) {
+      return OrdinaryConstruct($, this, args, newTarget);
+    };
+  // } else {
+  //   F.Construct = BuiltinConstruct;
+  }
+  F.ConstructorKind = BASE;
+  if (prototype == null) {
+    prototype = OrdinaryObjectCreate({
+      Prototype: $.getIntrinsic('%Object.prototype%')!,
+    }, {
+      'constructor': {...propC(F), Writable: writablePrototype},
+    });
+  }
+  F.OwnProps.set('prototype', {...propC(prototype), Writable: writablePrototype});
+  return UNUSED;
 }
 
 /**

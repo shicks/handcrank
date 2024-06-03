@@ -542,6 +542,90 @@ export const arrayObject: Plugin = {
           if (IsAbrupt(result)) return result;
           return A;
         }),
+
+        /**
+         * 23.1.2.2 Array.isArray ( arg )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Return ? IsArray(arg).
+         */
+        'isArray': method(function*($, thisValue, arg) {
+          return IsArray($, arg);
+        }),
+
+        /**
+         * 23.1.2.3 Array.of ( ...items )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let len be the number of elements in items.
+         * 2. Let lenNumber be 𝔽(len).
+         * 3. Let C be the this value.
+         * 4. If IsConstructor(C) is true, then
+         *     a. Let A be ? Construct(C, « lenNumber »).
+         * 5. Else,
+         *     a. Let A be ? ArrayCreate(len).
+         * 6. Let k be 0.
+         * 7. Repeat, while k < len,
+         *     a. Let kValue be items[k].
+         *     b. Let Pk be ! ToString(𝔽(k)).
+         *     c. Perform ? CreateDataPropertyOrThrow(A, Pk, kValue).
+         *     d. Set k to k + 1.
+         * 8. Perform ? Set(A, "length", lenNumber, true).
+         * 9. Return A.
+         * 
+         * NOTE: This method is an intentionally generic factory
+         * method; it does not require that its this value be the
+         * Array constructor. Therefore it can be transferred to or
+         * inherited by other constructors that may be called with a
+         * single numeric argument.
+         */
+        'of': method(function*($, thisValue, ...items) {
+          const len = items.length;
+          const C = thisValue;
+          const A = IsConstructor(C) ?
+            yield* Construct($, C, [len]) :
+            ArrayCreate($, len);
+          if (IsAbrupt(A)) return A;
+          for (let k = 0; k < len; k++) {
+            const createStatus = CreateDataPropertyOrThrow($, A, String(k), items[k]);
+            if (IsAbrupt(createStatus)) return createStatus;
+          }
+          const setStatus = yield* Set($, A, 'length', len, true);
+          if (IsAbrupt(setStatus)) return setStatus;
+          return A;
+        }),
+
+        // 23.1.2.4 Array.prototype
+
+        /**
+         * 23.1.2.5 get Array [ @@species ]
+         * 
+         * Array[@@species] is an accessor property whose set accessor
+         * function is undefined. Its get accessor function performs
+         * the following steps when called:
+         * 
+         * 1. Return the this value.
+         * 
+         * The value of the "name" property of this function is "get [Symbol.species]".
+         * 
+         * NOTE: Array prototype methods normally use their this
+         * value's constructor to create a derived object. However, a
+         * subclass constructor may over-ride that default behaviour
+         * by redefining its @@species property.
+         */
+        [Symbol.species]: {
+          Get: CreateBuiltinFunction(
+            {
+              *Call(_$, thisValue) {
+                return thisValue;
+              },
+            }, 0, '[Symbol.species]', realm,
+            realm.Intrinsics.get('%Function.prototype%')!, 'get'),
+          Configurable: true,
+          Enumerable: false,
+        },
       });
 
 

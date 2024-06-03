@@ -365,6 +365,7 @@ export function DebugString(
     if (circular.has(v)) return `%circular%`;
     circular.set(v, 0); // TODO - keep track and backpopulate.
     const elems = [];
+    let complex = false;
     let elided = 0;
     for (const [k, d] of v.OwnProps) {
       if (!d.Enumerable) continue;
@@ -373,11 +374,12 @@ export function DebugString(
         continue;
       }
       const key = typeof k === 'symbol' ? `[${String(k)}]` : /^[_$a-z][_$a-z0-9]*$/i.test(k) ? k : JSON.stringify(k);
+      if (d.Value instanceof Obj) complex = true;
       const val = HasValueField(d) ? DebugString(d.Value, depth - 1, circular, `${indent}  `) : '???'
       elems.push(`${key}: ${val}`);
     }
     if (elided) elems.push(`... ${elided} more`);
-    if (elems.length < 10) return `{${elems.join(', ')}}`;
+    if (!complex && elems.length < 10) return `{${elems.join(', ')}}`;
     return `{\n${indent}  ${elems.join(`,\n${indent}  `)}\n${indent}}`;
   }
   return String(v);

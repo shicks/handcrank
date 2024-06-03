@@ -17,6 +17,8 @@ import { PropertyKey, Type, Val } from './val';
 import { DebugString, ECR, VM, just } from './vm';
 import { ArrayCreate } from './exotic_array';
 
+declare const PrivateMethodOrAccessorAdd: any;
+declare const DefineField: any;
 declare const ValidateNonRevokedProxy: any;
 declare global {
   interface ObjectSlots {
@@ -667,7 +669,7 @@ export function* OrdinaryHasInstance($: VM, C: Val, O: Val): ECR<boolean> {
     return yield* InstanceofOperator($, O, BC);
   }
   if (!(O instanceof Obj)) return false;
-  const P = Get($, C, 'prototype');
+  const P = yield* Get($, C, 'prototype');
   if (IsAbrupt(P)) return P;
   if (!(P instanceof Obj)) return $.throw('TypeError');
   while (true) {
@@ -853,6 +855,41 @@ export function* CopyDataProperties(
       // TODO - we could probably optimize this with a direct set?
       CastNotAbrupt(CreateDataPropertyOrThrow($, target, nextKey, propValue));
     }
+  }
+  return UNUSED;
+}
+
+
+/////
+
+
+
+/**
+ * 7.3.34 InitializeInstanceElements ( O, constructor )
+ * 
+ * The abstract operation InitializeInstanceElements takes arguments O
+ * (an Object) and constructor (an ECMAScript function object) and
+ * returns either a normal completion containing unused or a throw
+ * completion. It performs the following steps when called:
+ * 
+ * 1. Let methods be the value of constructor.[[PrivateMethods]].
+ * 2. For each PrivateElement method of methods, do
+ *     a. Perform ? PrivateMethodOrAccessorAdd(O, method).
+ * 3. Let fields be the value of constructor.[[Fields]].
+ * 4. For each element fieldRecord of fields, do
+ *     a. Perform ? DefineField(O, fieldRecord).
+ * 5. Return unused.
+ */
+export function* InitializeInstanceElements($: VM, O: Obj, constructor: Func): ECR<UNUSED> {
+  const methods = constructor.PrivateMethods;
+  for (const method of methods || []) {
+    const success = PrivateMethodOrAccessorAdd($, O, method);
+    if (IsAbrupt(success)) return success;
+  }
+  const fields = constructor.Fields;
+  for (const fieldRecord of fields || []) {
+    const success = DefineField($, O, fieldRecord);
+    if (IsAbrupt(success)) return success;
   }
   return UNUSED;
 }

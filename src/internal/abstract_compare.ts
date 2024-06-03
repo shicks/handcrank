@@ -1,10 +1,14 @@
 import { StringToBigInt, ToNumeric, ToPrimitive } from './abstract_conversion';
 import { CR, IsAbrupt } from './completion_record';
 import { BOOLEAN, NUMBER, OBJECT } from './enums';
+import { ArrayExoticObject } from './exotic_array';
 import { Func } from './func';
 import { Obj } from './obj';
 import { Type, Val } from './val';
 import { ECR, VM } from './vm';
+
+function ProxyExoticObject() { return function() {} }
+declare const ValidateNonRevokedProxy: any;
 
 /**
  * 7.2.1 RequireObjectCoercible ( argument )
@@ -50,8 +54,17 @@ export function RequireObjectCoercible($: VM, argument: Val): CR<Val> {
  *     c. Return ? IsArray(proxyTarget).
  * 4. Return false.
  */
-export function IsArray(_$: VM, _argument: Val): CR<boolean> {
-  throw new Error('NOT IMPLEMENTED: IsArray');
+export function IsArray($: VM, argument: Val): CR<boolean> {
+  if (!(argument instanceof Obj)) return false;
+  if (argument instanceof ArrayExoticObject()) return true;
+  if (argument instanceof ProxyExoticObject()) {
+    const validateStatus = ValidateNonRevokedProxy($, argument);
+    if (IsAbrupt(validateStatus)) return validateStatus;
+    const proxyTarget = argument.ProxyTarget;
+    // @ts-expect-error - implement proxy
+    return IsArray($, proxyTarget);
+  }
+  return false;
 }
 
 /**
