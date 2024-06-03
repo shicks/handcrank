@@ -10,6 +10,7 @@ import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_Va
 import { Evaluation_AssignmentExpression } from './assignment';
 import { Evaluation_CallExpression, Evaluation_NewExpression, InstantiateArrowFunctionExpression, InstantiateOrdinaryFunctionExpression } from './func';
 import { Evaluation_ObjectExpression } from './obj';
+import { Evaluation_ArrayExpression } from './exotic_array';
 
 // TODO - split out basic from advanced syntax??
 
@@ -35,7 +36,7 @@ export const syntax: Plugin = {
       on('ThisExpression', () => just(ResolveThisBinding($)));
       on('Identifier', (n) => just(ResolveBinding($, n.name)));
       on('ObjectExpression', (n) => Evaluation_ObjectExpression($, n));
-      on('ArrayExpression', (n) => {throw'13.2.4.2'});
+      on('ArrayExpression', (n) => Evaluation_ArrayExpression($, n));
       //on('Literal', when(n.value instanceof RegExp) (n) => {throw'13.2.7.3'});
       on('TemplateLiteral', (n) => {throw'13.2.8.6'});
       /** 13.3.2.1 MemberExpression */

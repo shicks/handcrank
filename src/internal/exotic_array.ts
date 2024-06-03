@@ -1,6 +1,7 @@
+import { ArrayExpression } from 'estree';
 import { IsArray, IsArrayIndex, IsCallable, IsConstructor, IsIntegralNumber, SameValue, SameValueZero } from './abstract_compare';
 import { ToNumber, ToObject, ToUint32 } from './abstract_conversion';
-import { Call, Construct, CreateDataPropertyOrThrow, Get, GetMethod, LengthOfArrayLike, Set } from './abstract_object';
+import { Call, Construct, CreateArrayFromList, CreateDataPropertyOrThrow, Get, GetMethod, LengthOfArrayLike, Set } from './abstract_object';
 import { Assert } from './assert';
 import { Abrupt, CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, callOrConstruct, method } from './func';
@@ -9,13 +10,21 @@ import { GetPrototypeFromConstructor, Obj, OrdinaryDefineOwnProperty, OrdinaryGe
 import { HasValueField, IsDataDescriptor, PropertyDescriptor, prop0, propW, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { memoize } from './slots';
-import { PropertyKey } from './val';
+import { PropertyKey, Val } from './val';
 import { DebugString, ECR, Plugin, VM, run } from './vm';
 
 declare const GetIteratorFromMethod: any;
 declare const IteratorStep: any;
 declare const IteratorClose: any;
 declare const IteratorValue: any;
+
+type IteratorRecord = unknown;
+// TODO - move to iterator.ts
+export function CloseIteratorWhenAbrupt(ab: Abrupt, it: IteratorRecord): Abrupt {
+  return ab;
+  // const result = IteratorClose(it);
+  // return IsAbrupt(result) ? result : ab;
+}
 
 /**
  * 10.4.2 Array Exotic Objects
@@ -494,7 +503,7 @@ export const arrayObject: Plugin = {
               const next = IteratorStep(iteratorRecord);
               if (IsAbrupt(next)) return next;
               if (!next) {
-                const result = Set($, A, 'length', k, true);
+                const result = yield* Set($, A, 'length', k, true);
                 if (IsAbrupt(result)) return result;
                 return A;
               }
@@ -529,23 +538,112 @@ export const arrayObject: Plugin = {
             const defineStatus = CreateDataPropertyOrThrow($, A, Pk, mappedValue);
             if (IsAbrupt(defineStatus)) return defineStatus;
           }
-          const result = Set($, A, 'length', len, true);
+          const result = yield* Set($, A, 'length', len, true);
           if (IsAbrupt(result)) return result;
           return A;
         }),
       });
 
+
     },
   },
 };
 
-type IteratorRecord = unknown;
-// TODO - move to iterator.ts
-export function CloseIteratorWhenAbrupt(ab: Abrupt, it: IteratorRecord): Abrupt {
-  return ab;
-  // const result = IteratorClose(it);
-  // return IsAbrupt(result) ? result : ab;
+/**
+ * 13.2.4.1 Runtime Semantics: ArrayAccumulation
+ * 
+ * The syntax-directed operation ArrayAccumulation takes arguments
+ * array (an Array) and nextIndex (an integer) and returns either a
+ * normal completion containing an integer or an abrupt completion. It
+ * is defined piecewise over the following productions:
+ * 
+ * Elision : ,
+ * 1. Let len be nextIndex + 1.
+ * 2. Perform ? Set(array, "length", 𝔽(len), true).
+ * 3. NOTE: The above step throws if len exceeds 232-1.
+ * 4. Return len.
+ * 
+ * Elision : Elision ,
+ * 1. Return ? ArrayAccumulation of Elision with arguments array and (nextIndex + 1).
+ * 
+ * ElementList : Elisionopt AssignmentExpression
+ * 1. If Elision is present, then
+ *     a. Set nextIndex to ? ArrayAccumulation of Elision with arguments array and nextIndex.
+ * 2. Let initResult be ? Evaluation of AssignmentExpression.
+ * 3. Let initValue be ? GetValue(initResult).
+ * 4. Perform ! CreateDataPropertyOrThrow(array, ! ToString(𝔽(nextIndex)), initValue).
+ * 5. Return nextIndex + 1.
+ * 
+ * ElementList : Elisionopt SpreadElement
+ * 1. If Elision is present, then
+ *     a. Set nextIndex to ? ArrayAccumulation of Elision with arguments array and nextIndex.
+ * 2. Return ? ArrayAccumulation of SpreadElement with arguments array and nextIndex.
+ * 
+ * ElementList : ElementList , Elisionopt AssignmentExpression
+ * 1. Set nextIndex to ? ArrayAccumulation of ElementList with arguments array and nextIndex.
+ * 2. If Elision is present, then
+ *     a. Set nextIndex to ? ArrayAccumulation of Elision with arguments array and nextIndex.
+ * 3. Let initResult be ? Evaluation of AssignmentExpression.
+ * 4. Let initValue be ? GetValue(initResult).
+ * 5. Perform ! CreateDataPropertyOrThrow(array, ! ToString(𝔽(nextIndex)), initValue).
+ * 6. Return nextIndex + 1.
+ * 
+ * ElementList : ElementList , Elisionopt SpreadElement
+ * 1. Set nextIndex to ? ArrayAccumulation of ElementList with arguments array and nextIndex.
+ * 2. If Elision is present, then
+ *     a. Set nextIndex to ? ArrayAccumulation of Elision with arguments array and nextIndex.
+ * 3. Return ? ArrayAccumulation of SpreadElement with arguments array and nextIndex.
+ * 
+ * SpreadElement : ... AssignmentExpression
+ * 1. Let spreadRef be ? Evaluation of AssignmentExpression.
+ * 2. Let spreadObj be ? GetValue(spreadRef).
+ * 3. Let iteratorRecord be ? GetIterator(spreadObj, sync).
+ * 4. Repeat,
+ *     a. Let next be ? IteratorStep(iteratorRecord).
+ *     b. If next is false, return nextIndex.
+ *     c. Let nextValue be ? IteratorValue(next).
+ *     d. Perform ! CreateDataPropertyOrThrow(array, ! ToString(𝔽(nextIndex)), nextValue).
+ *     e. Set nextIndex to nextIndex + 1.
+ * 
+ * NOTE: CreateDataPropertyOrThrow is used to ensure that own
+ * properties are defined for the array even if the standard built-in
+ * Array prototype object has been modified in a manner that would
+ * preclude the creation of new own properties using [[Set]].
+ * 
+ * ---
+ *
+ * 13.2.4.2 Runtime Semantics: Evaluation
+ * 
+ * ArrayLiteral : [ Elisionopt ]
+ * 1. Let array be ! ArrayCreate(0).
+ * 2. If Elision is present, then
+ *     a. Perform ? ArrayAccumulation of Elision with arguments array and 0.
+ * 3. Return array.
+ * 
+ * ArrayLiteral : [ ElementList ]
+ * 1. Let array be ! ArrayCreate(0).
+ * 2. Perform ? ArrayAccumulation of ElementList with arguments array and 0.
+ * 3. Return array.
+ * 
+ * ArrayLiteral : [ ElementList , Elisionopt ]
+ * 1. Let array be ! ArrayCreate(0).
+ * 2. Let nextIndex be ? ArrayAccumulation of ElementList with arguments array and 0.
+ * 3. If Elision is present, then
+ *     a. Perform ? ArrayAccumulation of Elision with arguments array and nextIndex.
+ * 4. Return array.
+ */
+export function* Evaluation_ArrayExpression($: VM, node: ArrayExpression): ECR<Obj> {
+  // TODO - support spread
+  const elements: Val[] = [];
+  for (const e of node.elements) {
+    const v = e == null ? undefined : yield* $.evaluateValue(e);
+    if (IsAbrupt(v)) return v;
+    elements.push(v);
+  }
+  return CreateArrayFromList($, elements);
 }
+
+
 
 /**
  * Do a double-binary search to find the range of keys that are array

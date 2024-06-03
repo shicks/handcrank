@@ -30,6 +30,14 @@ if (process.argv.length > 2) {
   let replNum = 0;
   function loop(script: string) {
     if (!script || script === 'exit') return;
+    try {
+      esprima.parseScript(script);
+    } catch (err) {
+      if (err.description === 'Unexpected end of input') {
+        rl.question('... ', (s) => loop(script + '\n' + s));
+        return;
+      }
+    }
     const cr = run(vm.evaluateScript(script, `REPL${++replNum}`));
     if (IsAbrupt(cr)) {
       if (cr.Type === 'throw') {
@@ -38,7 +46,7 @@ if (process.argv.length > 2) {
         console.dir(cr);
       }
     } else {
-      const s = DebugString(cr);
+      const s = DebugString(cr, 2);
       console.log(s);
     }
     rl.question('> ', loop);

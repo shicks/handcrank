@@ -12,6 +12,8 @@ import { EnvironmentRecord } from './environment_record';
 import { HasValueField, propWC } from './property_descriptor';
 import { Assert } from './assert';
 import { Func, IsFunc } from './func';
+import { IsArray } from './abstract_compare';
+import { ArrayExoticObject } from './exotic_array';
 
 export type EvalGen<T> = Generator<undefined, T, undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
@@ -319,7 +321,12 @@ type SyntaxHandlers = {[O in keyof SyntaxOp]: SyntaxHandlerMap<O>};
 //        we can just assume all prereqs exist?
 //export type Plugin = (spi: PluginSPI) => void;
 
-export function DebugString(v: Val|ReferenceRecord): string {
+export function DebugString(
+  v: Val|ReferenceRecord,
+  depth = 0,
+  circular = new Map<Obj, number>(),
+  indent = '',
+): string {
   // TODO - consider adding an optional `color = false` argument
   //  - color null bright white, undefined dark gray, num/bool yellow, strings green, objs cyan
   if (v instanceof ReferenceRecord) {
@@ -340,7 +347,38 @@ export function DebugString(v: Val|ReferenceRecord): string {
       return `[Function: ${name ? String(name) : v.InternalName || '(anonymous)'}]`;
     }
     // TODO - consider printing props? maybe even slots?
-    return '[Object]';
+    if (v instanceof ArrayExoticObject()) {
+      const length = Number(v.OwnProps.get('length')?.Value);
+      if (depth <= 0) return `[... ${length} elements]`;
+      const elems = [];
+      for (let i = 0; i < length; i++) {
+        const desc = v.OwnProps.get(String(i));
+        elems.push(desc && HasValueField(desc) ? DebugString(desc.Value, depth - 1, circular) : '');
+        if (i > 1000) {
+          elems.push(`... ${length - i} more`);
+          break;
+        }
+      }
+      return `[${elems.join(', ')}]`;
+    }
+    if (depth <= 0) return '{...}';
+    if (circular.has(v)) return `%circular%`;
+    circular.set(v, 0); // TODO - keep track and backpopulate.
+    const elems = [];
+    let elided = 0;
+    for (const [k, d] of v.OwnProps) {
+      if (!d.Enumerable) continue;
+      if (elems.length > 100) {
+        elided++;
+        continue;
+      }
+      const key = typeof k === 'symbol' ? `[${String(k)}]` : /^[_$a-z][_$a-z0-9]*$/i.test(k) ? k : JSON.stringify(k);
+      const val = HasValueField(d) ? DebugString(d.Value, depth - 1, circular, `${indent}  `) : '???'
+      elems.push(`${key}: ${val}`);
+    }
+    if (elided) elems.push(`... ${elided} more`);
+    if (elems.length < 10) return `{${elems.join(', ')}}`;
+    return `{\n${indent}  ${elems.join(`,\n${indent}  `)}\n${indent}}`;
   }
   return String(v);
 }
