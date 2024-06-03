@@ -64,7 +64,7 @@ export enum CompletionType {
  * hard to debug.
  */
 export function IsAbrupt<T>(x: CR<T>, ...rest: T extends Generator ? [never] : []): x is Abrupt {
-  if (x && typeof (x as Generator).next === 'function') {
+  if (x && typeof (x as any).next === 'function') {
     throw new Error('IsAbrupt on generator: forgot to yield?');
   }
   return x instanceof Abrupt;
@@ -72,12 +72,12 @@ export function IsAbrupt<T>(x: CR<T>, ...rest: T extends Generator ? [never] : [
 
 export function CastNotAbrupt<T>(x: CR<T>): T {
   try {
-    Assert(!IsAbrupt(x));
+    Assert(!IsAbrupt(x as any));
   } catch (e) {
     console.dir(x); // NOTE: This is a debugging aid.
     throw e;
   }
-  return x;
+  return x as any;
 }
 
 /**

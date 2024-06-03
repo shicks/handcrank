@@ -16,7 +16,7 @@ export const consoleObject: Plugin = {
       stagedGlobals.set('console', propWC(ns));
 
       defineProperties(realm, ns, {
-        'log': method(function*($, _, ...args) {
+        'log': method(function*(_$, _, ...args) {
           const passThroughArgs = args.map((arg) => {
             if (arg instanceof Obj) {
               return DebugString(arg, 1);              

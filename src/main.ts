@@ -26,7 +26,7 @@ if (process.argv.length > 2) {
   console.dir(run(vm.evaluateScript(process.argv[2])));
 } else {
   const rl = readline.createInterface({input: process.stdin, output: process.stdout});
-  rl.on('history', (h) => {
+  rl.on('history', (_h) => {
     // TODO - store to disk
   });
   let replNum = 0;

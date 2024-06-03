@@ -2,12 +2,11 @@
  * @fileoverview Intrinsic and global definitions for the following sections:
  *   - 20 Fundamental Objects
  *   - 21 Numbers and Dates
- *   - 22 Text Processing
  */
 
 import { IsCallable, IsExtensible, RequireObjectCoercible, SameValue } from './abstract_compare';
 import { ToBoolean, ToInt32, ToIntegerOrInfinity, ToNumeric, ToObject, ToPropertyKey, ToString } from './abstract_conversion';
-import { Call, CreateArrayFromList, CreateDataPropertyOrThrow, DefinePropertyOrThrow, EnumerableOwnProperties, Get, HasOwnProperty, Invoke, OrdinaryHasInstance, Set, SetIntegrityLevel, TestIntegrityLevel } from './abstract_object';
+import { Call, CreateArrayFromList, CreateListFromArrayLike, DefinePropertyOrThrow, EnumerableOwnProperties, Get, HasOwnProperty, Invoke, OrdinaryHasInstance, Set, SetIntegrityLevel, TestIntegrityLevel } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { FROZEN, SEALED, STRING, SYMBOL } from './enums';
@@ -267,14 +266,14 @@ export const objectAndFunctionPrototype: Plugin = {
          * the function [[Call]] in step 6.
          */
         'apply': method(function*($, thisValue, thisArg, argArray) {
-          throw new Error('NOT IMPLEMENTED: ARRAY');
-          // const func = thisValue;
-          // if (!IsCallable(func)) throw new TypeError('Function.prototype.apply called on non-callable');
-          // if (argArray == null) {
-          //   return yield* Call($, func, thisArg);
-          // }
-          // const argList = yield* CreateListFromArrayLike($, argArray);
-          // return yield* Call($, func, thisArg, argList);
+          const func = thisValue;
+          if (!IsCallable(func)) return $.throw('TypeError', 'not a function');
+          if (argArray == null) {
+            return yield* Call($, func, thisArg);
+          }
+          const argList = yield* CreateListFromArrayLike($, argArray);
+          if (IsAbrupt(argList)) return argList;
+          return yield* Call($, func, thisArg, argList);
         }),
 
         /**
@@ -807,7 +806,7 @@ export const objectConstructor: Plugin = {
          * 
          * 1. Return SameValue(value1, value2).
          */
-        'is': method(function*($, _thisValue, value1, value2) {
+        'is': method(function*(_$, _thisValue, value1, value2) {
           return SameValue(value1, value2);
         }),
 

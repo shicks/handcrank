@@ -4,7 +4,7 @@ import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, 
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
 import { PropertyDescriptor, PropertyRecord, propC, propWC } from './property_descriptor';
 import { Assert } from './assert';
-import { Call, Construct, DefinePropertyOrThrow, InitializeInstanceElements } from './abstract_object';
+import { Call, Construct, InitializeInstanceElements } from './abstract_object';
 import * as ESTree from 'estree';
 import { RealmRecord } from './realm_record';
 import { ScriptRecord } from './script_record';

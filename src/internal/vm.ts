@@ -12,7 +12,6 @@ import { EnvironmentRecord } from './environment_record';
 import { HasValueField, propWC } from './property_descriptor';
 import { Assert } from './assert';
 import { Func, IsFunc } from './func';
-import { IsArray } from './abstract_compare';
 import { ArrayExoticObject } from './exotic_array';
 
 export type EvalGen<T> = Generator<undefined, T, undefined>;

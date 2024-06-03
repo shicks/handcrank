@@ -392,7 +392,7 @@ export function* Evaluation_ComparisonExpression(
   throw new Error(`Unexpected comparison operator ${opText}`);
 }
 function fmap<T, U>(v: CR<T>, f: (arg: T) => CR<U>): CR<U> {
-  return IsAbrupt(v) ? v : f(v);
+  return (IsAbrupt as any)(v) ? v : f(v as any) as any;
 }
 
 /**
