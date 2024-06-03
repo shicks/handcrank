@@ -1006,7 +1006,7 @@ export function* GetPrototypeFromConstructor(
  * 2. Return unused.
  */
 export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression): ECR<Obj> {
-  const obj = OrdinaryObjectCreate();
+  const obj = OrdinaryObjectCreate({Prototype: $.getIntrinsic('%Object.prototype%')});
   for (const prop of n.properties) {
     if (prop.type === 'Property') {
       // Property includes computed, short-hand, etc

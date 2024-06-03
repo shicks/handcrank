@@ -58,9 +58,12 @@ export enum CompletionType {
 
 /**
  * Abrupt completion refers to any Completion Record with a [[Type]]
- * value other than normal.
+ * value other than normal.  NOTE: we do some type shenanigans to
+ * give a type checking error if an ECR is passed in without yielding,
+ * as well as a runtime check, since this is a common error that is
+ * hard to debug.
  */
-export function IsAbrupt(x: CR<unknown>): x is Abrupt {
+export function IsAbrupt<T>(x: CR<T>, ...rest: T extends Generator ? [never] : []): x is Abrupt {
   if (x && typeof (x as Generator).next === 'function') {
     throw new Error('IsAbrupt on generator: forgot to yield?');
   }

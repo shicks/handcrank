@@ -1819,3 +1819,21 @@ export function getter(
     ...attrs,
   });
 }
+
+/**
+ * Returns a FunctionBehavior for both calling and constructing.
+ * The `this` value is not exposed for calls, and `NewTarget` is
+ * undefined.
+ */
+export function callOrConstruct(
+  fn: ($: VM, argumentList: Val[], NewTarget?: Func) => ECR<Val>,
+): BuiltinFunctionBehavior {
+  return {
+    Call($, _, argumentList) {
+      return fn($, argumentList, undefined);
+    },
+    Construct($, argumentList, NewTarget) {
+      return fn($, argumentList, NewTarget as Func) as ECR<Obj>;
+    },
+  };
+}

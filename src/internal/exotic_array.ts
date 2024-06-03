@@ -1,16 +1,21 @@
-import { IsArray, IsArrayIndex, IsConstructor, IsIntegralNumber, SameValue, SameValueZero } from './abstract_compare';
-import { CanonicalNumericIndexString, ToIntegerOrInfinityInternal, ToNumber, ToUint32 } from './abstract_conversion';
-import { Construct, Get } from './abstract_object';
+import { IsArray, IsArrayIndex, IsCallable, IsConstructor, IsIntegralNumber, SameValue, SameValueZero } from './abstract_compare';
+import { ToNumber, ToObject, ToUint32 } from './abstract_conversion';
+import { Call, Construct, CreateDataPropertyOrThrow, Get, GetMethod, LengthOfArrayLike, Set } from './abstract_object';
 import { Assert } from './assert';
-import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { CreateBuiltinFunction } from './func';
+import { Abrupt, CR, CastNotAbrupt, IsAbrupt } from './completion_record';
+import { CreateBuiltinFunction, callOrConstruct, method } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
-import { IsCompatiblePropertyDescriptor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject, OrdinaryObjectCreate } from './obj';
-import { HasValueField, IsDataDescriptor, PropertyDescriptor, PropertyRecord, prop0, propE, propW } from './property_descriptor';
-import { RealmRecord } from './realm_record';
+import { GetPrototypeFromConstructor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject } from './obj';
+import { HasValueField, IsDataDescriptor, PropertyDescriptor, prop0, propW, propWC, propWEC } from './property_descriptor';
+import { RealmRecord, defineProperties } from './realm_record';
 import { memoize } from './slots';
-import { PropertyKey, Val } from './val';
-import { Plugin, VM, run } from './vm';
+import { PropertyKey } from './val';
+import { DebugString, ECR, Plugin, VM, run } from './vm';
+
+declare const GetIteratorFromMethod: any;
+declare const IteratorStep: any;
+declare const IteratorClose: any;
+declare const IteratorValue: any;
 
 /**
  * 10.4.2 Array Exotic Objects
@@ -170,7 +175,8 @@ export function ArrayCreate($: VM, length: number, proto?: Obj): CR<ArrayExoticO
  * Array.prototype methods that now are defined using
  * ArraySpeciesCreate.
  */
-function* ArraySpeciesCreate($: VM, originalArray: Obj, length: number): CR<Obj> {
+const {} = {ArraySpeciesCreate};
+ function* ArraySpeciesCreate($: VM, originalArray: Obj, length: number): ECR<Obj> {
   const isArray = IsArray($, originalArray);
   if (IsAbrupt(isArray)) return isArray;
   if (!isArray) return ArrayCreate($, length);
@@ -249,6 +255,7 @@ function ArraySetLength($: VM, A: ArrayExoticObject, Desc: PropertyDescriptor): 
   if (!HasValueField(Desc)) return OrdinaryDefineOwnProperty($, A, 'length', Desc);
 
   // TODO - DefinePropertyDescriptor -> generator???
+  debugger;
 
   const newLen = run(ToUint32($, Desc.Value));
   if (IsAbrupt(newLen)) return newLen;
@@ -268,7 +275,7 @@ function ArraySetLength($: VM, A: ArrayExoticObject, Desc: PropertyDescriptor): 
   const toDelete = findKeysAbove(CastNotAbrupt(A.OwnPropertyKeys($)), newLen);
   while (toDelete.length) {
     const P = toDelete.pop()!;
-    const deleteSucceeded = A.Delete($, toDelete.pop()!);
+    const deleteSucceeded = CastNotAbrupt(A.Delete($, P));
     if (!deleteSucceeded) {
       newLenDesc.Value = Number(P) + 1;
       return false;
@@ -301,10 +308,10 @@ function ArraySetLength($: VM, A: ArrayExoticObject, Desc: PropertyDescriptor): 
  *   - has a "length" property whose value is 1𝔽.
  */
 export const arrayObject: Plugin = {
-  iqd: 'arrayObject',
+  id: 'arrayObject',
   deps: [objectAndFunctionPrototype],
   realm: {
-    override CreateIntrinsics(realm: RealmRecord, stagedGlobals: Map<string, Val>) {
+    CreateIntrinsics(realm: RealmRecord, stagedGlobals: Map<string, PropertyDescriptor>) {
       
       /**
        * 23.1.3 Properties of the Array Prototype Object
@@ -362,128 +369,183 @@ export const arrayObject: Plugin = {
        *         ii. Let itemK be values[k].
        *         iii. Perform ! CreateDataPropertyOrThrow(array, Pk, itemK).
        *         iv. Set k to k + 1.
-       *     e. Assert: The mathematical value of array\'s "length"
+       *     e. Assert: The mathematical value of array's "length"
        *        property is numberOfArgs.
        *     f. Return array.
-       *
-       * ---
-       *
-       * 23.1.2 Properties of the Array Constructor
-       * 
-       * The Array constructor:
-       * 
-       * has a [[Prototype]] internal slot whose value is %Function.prototype%.
-       * has the following properties:
-       * 23.1.2.1 Array.from ( items [ , mapfn [ , thisArg ] ] )
-       * 
-       * This method performs the following steps when called:
-       * 
-       * 1. Let C be the this value.
-       * 2. If mapfn is undefined, let mapping be false.
-       * 3. Else,
-       *     a. If IsCallable(mapfn) is false, throw a TypeError exception.
-       *     b. Let mapping be true.
-       * 4. Let usingIterator be ? GetMethod(items, @@iterator).
-       * 5. If usingIterator is not undefined, then
-       *     a. If IsConstructor(C) is true, then
-       *         i. Let A be ? Construct(C).
-       *     b. Else,
-       *         i. Let A be ! ArrayCreate(0).
-       *     c. Let iteratorRecord be ? GetIteratorFromMethod(items, usingIterator).
-       *     d. Let k be 0.
-       *     e. Repeat,
-       *         i. If k ≥ 253 - 1, then
-       * 1. Let error be ThrowCompletion(a newly created TypeError object).
-       * 2. Return ? IteratorClose(iteratorRecord, error).
-       *         ii. Let Pk be ! ToString(𝔽(k)).
-       *         iii. Let next be ? IteratorStep(iteratorRecord).
-       *         iv. If next is false, then
-       * 1. Perform ? Set(A, "length", 𝔽(k), true).
-       * 2. Return A.
-       *         v. Let nextValue be ? IteratorValue(next).
-       *         vi. If mapping is true, then
-       * 1. Let mappedValue be Completion(Call(mapfn, thisArg, « nextValue, 𝔽(k) »)).
-       * 2. IfAbruptCloseIterator(mappedValue, iteratorRecord).
-       *         vii. Else, let mappedValue be nextValue.
-       *         viii. Let defineStatus be
-       *         Completion(CreateDataPropertyOrThrow(A, Pk,
-       *         mappedValue)).
-       * ix. ix. IfAbruptCloseIterator(defineStatus, iteratorRecord).
-       * x. x. Set k to k + 1.
-       * 6. NOTE: items is not an Iterable so assume it is an array-like object.
-       * 7. Let arrayLike be ! ToObject(items).
-       * 8. Let len be ? LengthOfArrayLike(arrayLike).
-       * 9. If IsConstructor(C) is true, then
-       *     a. Let A be ? Construct(C, « 𝔽(len) »).
-       * 10. Else,
-       *     a. Let A be ? ArrayCreate(len).
-       * 11. Let k be 0.
-       * 12. Repeat, while k < len,
-       *     a. Let Pk be ! ToString(𝔽(k)).
-       *     b. Let kValue be ? Get(arrayLike, Pk).
-       *     c. If mapping is true, then
-       *         i. Let mappedValue be ? Call(mapfn, thisArg, « kValue, 𝔽(k) »).
-       *     d. Else, let mappedValue be kValue.
-       *     e. Perform ? CreateDataPropertyOrThrow(A, Pk, mappedValue).
-       *     f. Set k to k + 1.
-       * 13. Perform ? Set(A, "length", 𝔽(len), true).
-       * 14. Return A.
-       * 
-       * NOTE: This method is an intentionally generic factory method;
-       * it does not require that its this value be the Array
-       * constructor. Therefore it can be transferred to or inherited
-       * by any other constructors that may be called with a single numeric argument.
        */
-      const arrayCtor = CreateBuiltinFunction({
-        *Call($, thisArg, ...arguments): CR<Obj> {
+      const arrayCtor = CreateBuiltinFunction(
+        callOrConstruct(function*($, values, NewTarget) {
+          if (NewTarget == null) NewTarget = $.getActiveFunctionObject()!;
+          const proto = yield* GetPrototypeFromConstructor($, NewTarget, '%Array.prototype%');
+          if (IsAbrupt(proto)) return proto;
+          const numberOfArgs = values.length;
+          if (numberOfArgs === 0) return CastNotAbrupt(ArrayCreate($, 0, proto));
 
-
-          // TODO - verify and flesh this out
-          if (IsConstructor(this)) {
-            return yield* Construct($, this, arguments);
-          }
-          const numberOfArgs = arguments.length;
-          if (numberOfArgs === 0) {
-            return yield* ArrayCreate($, 0, this.Prototype);
-          }
           if (numberOfArgs === 1) {
-            const len = arguments[0];
-            let array = yield* ArrayCreate($, 0, this.Prototype);
+            const len = values[0];
+            const array = CastNotAbrupt(ArrayCreate($, 0, proto));
+            let intLen: number;
             if (typeof len !== 'number') {
-              yield* array.CreateDataPropertyOrThrow($, '0', len);
-              const intLen = 1;
+              array.OwnProps.set('0', propWEC(len));
+              intLen = 1;
             } else {
-              const intLen = run(ToUint32($, len));
+              intLen = len >>> 0;
               if (IsAbrupt(intLen)) return intLen;
-              if (!SameValueZero(intLen, len)) return $.throw('RangeError', 'Invalid array length');
+              if (!SameValueZero(intLen, len)) {
+                return $.throw('RangeError', 'Invalid array length');
+              }
             }
-            yield* array.Set($, 'length', intLen, true);
+            array.OwnProps.set('length', propW(intLen));
             return array;
           }
-          Assert(numberOfArgs >= 2);
-          let array = yield* ArrayCreate($, numberOfArgs, this.Prototype);
-          let k = 0;
-          while (k < numberOfArgs) {
-            const Pk = run(ToString($, k));
-            const itemK = arguments[k];
-            yield* array.CreateDataPropertyOrThrow($, Pk, itemK);
-            k++;
+
+          const array = ArrayCreate($, numberOfArgs, proto);
+          if (IsAbrupt(array)) return array;
+          for (let k = 0; k < numberOfArgs; k++) {
+            array.OwnProps.set(String(k), propWEC(values[k]));
           }
-          Assert(array.length === numberOfArgs);
+          array.OwnProps.set('length', propW(numberOfArgs));
           return array;
+        }), 1, 'Array', realm, realm.Intrinsics.get('%Function.prototype%')!);
+      arrayPrototype.OwnProps.set('constructor', propWC(arrayCtor));
+      arrayCtor.OwnProps.set('prototype', prop0(arrayPrototype));
+      realm.Intrinsics.set('%Array%', arrayCtor);
+      stagedGlobals.set('Array', propWC(arrayCtor));
 
-        }
-
-
-realm, function* Array(this: Val, ...values: Val[]): CR<Obj> {
-
-
-
+      defineProperties(realm, arrayCtor, {
+        /**
+         * 23.1.2.1 Array.from ( items [ , mapfn [ , thisArg ] ] )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let C be the this value.
+         * 2. If mapfn is undefined, let mapping be false.
+         * 3. Else,
+         *     a. If IsCallable(mapfn) is false, throw a TypeError exception.
+         *     b. Let mapping be true.
+         * 4. Let usingIterator be ? GetMethod(items, @@iterator).
+         * 5. If usingIterator is not undefined, then
+         *     a. If IsConstructor(C) is true, then
+         *         i. Let A be ? Construct(C).
+         *     b. Else,
+         *         i. Let A be ! ArrayCreate(0).
+         *     c. Let iteratorRecord be ? GetIteratorFromMethod(items, usingIterator).
+         *     d. Let k be 0.
+         *     e. Repeat,
+         *         i. If k ≥ 253 - 1, then
+         *             1. Let error be ThrowCompletion(a newly created TypeError object).
+         *             2. Return ? IteratorClose(iteratorRecord, error).
+         *         ii. Let Pk be ! ToString(𝔽(k)).
+         *         iii. Let next be ? IteratorStep(iteratorRecord).
+         *         iv. If next is false, then
+         *             1. Perform ? Set(A, "length", 𝔽(k), true).
+         *             2. Return A.
+         *         v. Let nextValue be ? IteratorValue(next).
+         *         vi. If mapping is true, then
+         *             1. Let mappedValue be Completion(Call(mapfn,
+         *                thisArg, « nextValue, 𝔽(k) »)).
+         *             2. IfAbruptCloseIterator(mappedValue, iteratorRecord).
+         *         vii. Else, let mappedValue be nextValue.
+         *         viii. Let defineStatus be
+         *               Completion(CreateDataPropertyOrThrow(A, Pk,
+         *               mappedValue)).
+         *         ix. IfAbruptCloseIterator(defineStatus, iteratorRecord).
+         *         x. Set k to k + 1.
+         * 6. NOTE: items is not an Iterable so assume it is an array-like object.
+         * 7. Let arrayLike be ! ToObject(items).
+         * 8. Let len be ? LengthOfArrayLike(arrayLike).
+         * 9. If IsConstructor(C) is true, then
+         *     a. Let A be ? Construct(C, « 𝔽(len) »).
+         * 10. Else,
+         *     a. Let A be ? ArrayCreate(len).
+         * 11. Let k be 0.
+         * 12. Repeat, while k < len,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. Let kValue be ? Get(arrayLike, Pk).
+         *     c. If mapping is true, then
+         *         i. Let mappedValue be ? Call(mapfn, thisArg, « kValue, 𝔽(k) »).
+         *     d. Else, let mappedValue be kValue.
+         *     e. Perform ? CreateDataPropertyOrThrow(A, Pk, mappedValue).
+         *     f. Set k to k + 1.
+         * 13. Perform ? Set(A, "length", 𝔽(len), true).
+         * 14. Return A.
+         * 
+         * NOTE: This method is an intentionally generic factory method;
+         * it does not require that its this value be the Array
+         * constructor. Therefore it can be transferred to or inherited
+         * by any other constructors that may be called with a single numeric argument.
+         */
+        'from': method(function*($, thisValue, items, mapfn = undefined, thisArg = undefined) {
+          const C = thisValue;
+          const mapping = mapfn != null;
+          if (mapping && !IsCallable(mapfn)) {
+            return $.throw('TypeError', `${DebugString(mapfn)} is not a function`);
+          }
+          const usingIterator = yield* GetMethod($, items, Symbol.iterator);
+          if (usingIterator != null) {
+            const A = IsConstructor(C) ? yield* Construct($, C) : ArrayCreate($, 0);
+            if (IsAbrupt(A)) return A;
+            const iteratorRecord = yield* GetIteratorFromMethod($, items, usingIterator);
+            for (let k = 0;; k++) {
+              if (k >= Number.MAX_SAFE_INTEGER) {
+                const error = $.throw('TypeError', 'Too many items');
+                return IteratorClose(iteratorRecord, error);
+              }
+              const next = IteratorStep(iteratorRecord);
+              if (IsAbrupt(next)) return next;
+              if (!next) {
+                const result = Set($, A, 'length', k, true);
+                if (IsAbrupt(result)) return result;
+                return A;
+              }
+              const nextValue = IteratorValue(next);
+              if (IsAbrupt(nextValue)) return nextValue;
+              const mappedValue =
+                mapping ? yield* Call($, mapfn, thisArg, [nextValue, k]) : nextValue;
+              if (IsAbrupt(mappedValue)) {
+                return CloseIteratorWhenAbrupt(mappedValue, iteratorRecord);
+              }
+              const defineStatus = CreateDataPropertyOrThrow($, A, String(k), mappedValue);
+              if (IsAbrupt(defineStatus)) {
+                return CloseIteratorWhenAbrupt(defineStatus, iteratorRecord);
+              }
+            }
+          }
+          // 6. NOTE: `items` is not an iterable, so assume it's array-like.
+          const arrayLike = ToObject($, items);
+          if (IsAbrupt(arrayLike)) return arrayLike;
+          const len = yield* LengthOfArrayLike($, arrayLike);
+          if (IsAbrupt(len)) return len;
+          const A = IsConstructor(C) ?
+            yield* Construct($, C, [len]) :
+            ArrayCreate($, len);
+          if (IsAbrupt(A)) return A;
+          for (let k = 0; k < len; k++) {
+            const Pk = String(k);
+            const kValue = yield* Get($, arrayLike, Pk);
+            if (IsAbrupt(kValue)) return kValue;
+            const mappedValue = mapping ? yield* Call($, mapfn, thisArg, [kValue, k]) : kValue;
+            if (IsAbrupt(mappedValue)) return mappedValue;
+            const defineStatus = CreateDataPropertyOrThrow($, A, Pk, mappedValue);
+            if (IsAbrupt(defineStatus)) return defineStatus;
+          }
+          const result = Set($, A, 'length', len, true);
+          if (IsAbrupt(result)) return result;
+          return A;
+        }),
+      });
 
     },
   },
 };
 
+type IteratorRecord = unknown;
+// TODO - move to iterator.ts
+export function CloseIteratorWhenAbrupt(ab: Abrupt, it: IteratorRecord): Abrupt {
+  return ab;
+  // const result = IteratorClose(it);
+  // return IsAbrupt(result) ? result : ab;
+}
 
 /**
  * Do a double-binary search to find the range of keys that are array

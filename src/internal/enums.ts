@@ -157,6 +157,14 @@ export interface LEXICAL_THIS extends EnumSym<'lexical-this'> {}
 export const NON_LEXICAL_THIS: NON_LEXICAL_THIS = new EnumSym('non-lexical-this');
 export interface NON_LEXICAL_THIS extends EnumSym<'non-lexical-this'> {}
 
+// Integrity level: sealed (7.3.16)
+export const SEALED: SEALED = new EnumSym('sealed');
+export interface SEALED extends EnumSym<'sealed'> {}
+
+// Integrity level: frozen (7.3.16)
+export const FROZEN: FROZEN = new EnumSym('frozen');
+export interface FROZEN extends EnumSym<'frozen'> {}
+
 
 /**
  * ???

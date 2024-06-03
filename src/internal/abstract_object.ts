@@ -3,18 +3,19 @@
  * 7.3 Operations on Objects
  */
 
-import { IsCallable } from './abstract_compare';
-import { ToObject } from './abstract_conversion';
+import { IsCallable, IsConstructor } from './abstract_compare';
+import { ToLength, ToObject } from './abstract_conversion';
 import { Assert } from './assert';
 import { InstanceofOperator } from './arithmetic';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { UNUSED } from './enums';
+import { FROZEN, SEALED, UNUSED } from './enums';
 import { Func } from './func';
 import { Obj } from './obj';
-import { PropertyDescriptor, propWC, propWEC } from './property_descriptor';
+import { IsAccessorDescriptor, IsDataDescriptor, PropertyDescriptor, propW, propWC, propWEC } from './property_descriptor';
 import { RealmRecord } from './realm_record';
-import { PropertyKey, Val } from './val';
+import { PropertyKey, Type, Val } from './val';
 import { DebugString, ECR, VM, just } from './vm';
+import { ArrayCreate } from './exotic_array';
 
 declare const ValidateNonRevokedProxy: any;
 declare global {
@@ -412,11 +413,200 @@ export function Construct(
   return F.Construct!($, argumentsList, newTarget);
 }
 
+/**
+ * 7.3.16 SetIntegrityLevel ( O, level )
+ * 
+ * The abstract operation SetIntegrityLevel takes arguments O (an
+ * Object) and level (sealed or frozen) and returns either a normal
+ * completion containing a Boolean or a throw completion. It is used
+ * to fix the set of own properties of an object. It performs the
+ * following steps when called:
+ * 
+ * 1. Let status be ? O.[[PreventExtensions]]().
+ * 2. If status is false, return false.
+ * 3. Let keys be ? O.[[OwnPropertyKeys]]().
+ * 4. If level is sealed, then
+ *     a. For each element k of keys, do
+ *         i. Perform ? DefinePropertyOrThrow(O, k, PropertyDescriptor
+ *            { [[Configurable]]: false }).
+ * 5. Else,
+ *     a. Assert: level is frozen.
+ *     b. For each element k of keys, do
+ *         i. Let currentDesc be ? O.[[GetOwnProperty]](k).
+ *         ii. If currentDesc is not undefined, then
+ *             1. If IsAccessorDescriptor(currentDesc) is true, then
+ *                 a. Let desc be the PropertyDescriptor {
+ *                    [[Configurable]]: false }.
+ *             2. Else,
+ *                 a. Let desc be the PropertyDescriptor {
+ *                    [[Configurable]]: false, [[Writable]]: false }.
+ *             3. Perform ? DefinePropertyOrThrow(O, k, desc).
+ * 6. Return true.
+ */
+export function SetIntegrityLevel($: VM, O: Obj, level: SEALED|FROZEN): CR<boolean> {
+  const status = O.PreventExtensions($);
+  if (IsAbrupt(status)) return status;
+  if (!status) return false;
+  const keys = O.OwnPropertyKeys($);
+  if (IsAbrupt(keys)) return keys;
+  if (SEALED.is(level)) {
+    for (const k of keys) {
+      const success = DefinePropertyOrThrow($, O, k, {Configurable: false});
+      if (IsAbrupt(success)) return success;
+    }
+  } else {
+    Assert(FROZEN.is(level));
+    for (const k of keys) {
+      const currentDesc = O.GetOwnProperty($, k);
+      if (IsAbrupt(currentDesc)) return currentDesc;
+      if (currentDesc == null) continue;
+      const desc = IsAccessorDescriptor(currentDesc) ?
+        {Configurable: false} :
+        {Configurable: false, Writable: false};
+      const success = DefinePropertyOrThrow($, O, k, desc);
+      if (IsAbrupt(success)) return success;
+    }
+  }
+  return true;
+}
 
+/**
+ * 7.3.17 TestIntegrityLevel ( O, level )
+ * 
+ * The abstract operation TestIntegrityLevel takes arguments O (an
+ * Object) and level (sealed or frozen) and returns either a normal
+ * completion containing a Boolean or a throw completion. It is used
+ * to determine if the set of own properties of an object are
+ * fixed. It performs the following steps when called:
+ * 
+ * 1. Let extensible be ? IsExtensible(O).
+ * 2. If extensible is true, return false.
+ * 3. NOTE: If the object is extensible, none of its properties are examined.
+ * 4. Let keys be ? O.[[OwnPropertyKeys]]().
+ * 5. For each element k of keys, do
+ *     a. Let currentDesc be ? O.[[GetOwnProperty]](k).
+ *     b. If currentDesc is not undefined, then
+ *         i. If currentDesc.[[Configurable]] is true, return false.
+ *         ii. If level is frozen and IsDataDescriptor(currentDesc) is true, then
+ *             1. If currentDesc.[[Writable]] is true, return false.
+ * 6. Return true.
+ */
+export function TestIntegrityLevel($: VM, O: Obj, level: SEALED|FROZEN): CR<boolean> {
+  const extensible = O.IsExtensible($);
+  if (IsAbrupt(extensible)) return extensible;
+  if (extensible) return false;
+  const keys = O.OwnPropertyKeys($);
+  if (IsAbrupt(keys)) return keys;
+  for (const k of keys) {
+    const currentDesc = O.GetOwnProperty($, k);
+    if (IsAbrupt(currentDesc)) return currentDesc;
+    if (currentDesc == null) continue;
+    if (currentDesc.Configurable) return false;
+    if (FROZEN.is(level) && IsDataDescriptor(currentDesc) && currentDesc.Writable) {
+      return false;
+    }
+  }
+  return true;
+}
 
-////////
+/**
+ * 7.3.18 CreateArrayFromList ( elements )
+ * 
+ * The abstract operation CreateArrayFromList takes argument elements
+ * (a List of ECMAScript language values) and returns an Array. It is
+ * used to create an Array whose elements are provided by elements. It
+ * performs the following steps when called:
+ * 
+ * 1. Let array be ! ArrayCreate(0).
+ * 2. Let n be 0.
+ * 3. For each element e of elements, do
+ *     a. Perform ! CreateDataPropertyOrThrow(array, ! ToString(𝔽(n)), e).
+ *     b. Set n to n + 1.
+ * 4. Return array.
+ */
+export function CreateArrayFromList($: VM, elements: Val[]): Obj {
+  const array = CastNotAbrupt(ArrayCreate($, 0));
+  for (let n = 0; n < elements.length; n++) {
+    array.OwnProps.set(String(n), propWEC(elements[n]));
+  }
+  array.OwnProps.set('length', propW(elements.length));
+  return array;
+}
 
+/**
+ * 7.3.19 LengthOfArrayLike ( obj )
+ * 
+ * The abstract operation LengthOfArrayLike takes argument obj (an
+ * Object) and returns either a normal completion containing a
+ * non-negative integer or a throw completion. It returns the value of
+ * the "length" property of an array-like object. It performs the
+ * following steps when called:
+ * 
+ * 1. Return ℝ(? ToLength(? Get(obj, "length"))).
+ * 
+ * An array-like object is any object for which this operation returns
+ * a normal completion.
+ * 
+ * NOTE 1: Typically, an array-like object would also have some
+ * properties with integer index names. However, that is not a
+ * requirement of this definition.
+ *
+ * NOTE 2: Arrays and String objects are examples of array-like objects.
+ */
+export function* LengthOfArrayLike($: VM, obj: Obj): ECR<number> {
+  const length = yield* Get($, obj, 'length');
+  if (IsAbrupt(length)) return length;
+  return yield* ToLength($, length);
+}
 
+/**
+ * 7.3.20 CreateListFromArrayLike ( obj [ , elementTypes ] )
+ * 
+ * The abstract operation CreateListFromArrayLike takes argument obj
+ * (an ECMAScript language value) and optional argument elementTypes
+ * (a List of names of ECMAScript Language Types) and returns either a
+ * normal completion containing a List of ECMAScript language values
+ * or a throw completion. It is used to create a List value whose
+ * elements are provided by the indexed properties of
+ * obj. elementTypes contains the names of ECMAScript Language Types
+ * that are allowed for element values of the List that is created. It
+ * performs the following steps when called:
+ * 
+ * 1. If elementTypes is not present, set elementTypes to « Undefined,
+ *    Null, Boolean, String, Symbol, Number, BigInt, Object ».
+ * 2. If obj is not an Object, throw a TypeError exception.
+ * 3. Let len be ? LengthOfArrayLike(obj).
+ * 4. Let list be a new empty List.
+ * 5. Let index be 0.
+ * 6. Repeat, while index < len,
+ *     a. Let indexName be ! ToString(𝔽(index)).
+ *     b. Let next be ? Get(obj, indexName).
+ *     c. If elementTypes does not contain Type(next), throw a
+ *        TypeError exception.
+ *     d. Append next to list.
+ *     e. Set index to index + 1.
+ * 7. Return list.
+ */
+export function* CreateListFromArrayLike(
+  $: VM,
+  obj: Val,
+  elementTypes?: Set<Type>,
+): ECR<Val[]> {
+  if (!(obj instanceof Obj)) return $.throw('TypeError', 'Not an array-like object');
+  const len = yield* LengthOfArrayLike($, obj);
+  if (IsAbrupt(len)) return len;
+  const list: Val[] = [];
+  for (let index = 0; index < len; index++) {
+    const indexName = String(index);
+    const next = yield* Get($, obj, indexName);
+    if (IsAbrupt(next)) return next;
+    if (elementTypes && !elementTypes.has(Type(next))) {
+      return $.throw('TypeError', `At index ${index}: ${Type(next)} not allowed`);
+    }
+    list.push(next);
+  }
+  return list;
+}
 
 /**
  * 7.3.21 Invoke ( V, P [ , argumentsList ] )
@@ -490,8 +680,96 @@ export function* OrdinaryHasInstance($: VM, C: Val, O: Val): ECR<boolean> {
   }
 }
 
+/**
+ * 7.3.23 SpeciesConstructor ( O, defaultConstructor )
+ * 
+ * The abstract operation SpeciesConstructor takes arguments O (an
+ * Object) and defaultConstructor (a constructor) and returns either a
+ * normal completion containing a constructor or a throw
+ * completion. It is used to retrieve the constructor that should be
+ * used to create new objects that are derived from
+ * O. defaultConstructor is the constructor to use if a constructor
+ * @@species property cannot be found starting from O. It performs the
+ * following steps when called:
+ * 
+ * 1. Let C be ? Get(O, "constructor").
+ * 2. If C is undefined, return defaultConstructor.
+ * 3. If C is not an Object, throw a TypeError exception.
+ * 4. Let S be ? Get(C, @@species).
+ * 5. If S is either undefined or null, return defaultConstructor.
+ * 6. If IsConstructor(S) is true, return S.
+ * 7. Throw a TypeError exception.
+ */
+export function* SpeciesConstructor(
+  $: VM,
+  O: Obj,
+  defaultConstructor: Func,
+): ECR<Func> {
+  const C = yield* Get($, O, 'constructor');
+  if (IsAbrupt(C)) return C;
+  if (C == null) return defaultConstructor;
+  if (!(C instanceof Obj)) return $.throw('TypeError', 'not an object');
+  const S = yield* Get($, C, Symbol.species);
+  if (IsAbrupt(S)) return S;
+  if (S == null) return defaultConstructor;
+  if (!IsConstructor(S)) return $.throw('TypeError', 'not a constructor');
+  return S;
+}
 
-
+/**
+ * 7.3.24 EnumerableOwnProperties ( O, kind )
+ * 
+ * The abstract operation EnumerableOwnProperties takes arguments O
+ * (an Object) and kind (key, value, or key+value) and returns either
+ * a normal completion containing a List of ECMAScript language values
+ * or a throw completion. It performs the following steps when called:
+ * 
+ * 1. Let ownKeys be ? O.[[OwnPropertyKeys]]().
+ * 2. Let results be a new empty List.
+ * 3. For each element key of ownKeys, do
+ *     a. If key is a String, then
+ *         i. Let desc be ? O.[[GetOwnProperty]](key).
+ *         ii. If desc is not undefined and desc.[[Enumerable]] is true, then
+ *             1. If kind is key, append key to results.
+ *             2. Else,
+ *                 a. Let value be ? Get(O, key).
+ *                 b. If kind is value, append value to results.
+ *                 c. Else,
+ *                     i. Assert: kind is key+value.
+ *                     ii. Let entry be CreateArrayFromList(« key, value »).
+ *                     iii. Append entry to results.
+ * 4. Return results.
+ */
+export function EnumerableOwnProperties($: VM, O: Obj, kind: 'key'): ECR<PropertyKey[]>;
+export function EnumerableOwnProperties($: VM, O: Obj, kind: 'value'): ECR<Val[]>;
+export function EnumerableOwnProperties($: VM, O: Obj, kind: 'key+value'): ECR<Val[]>;
+export function* EnumerableOwnProperties(
+  $: VM,
+  O: Obj,
+  kind: 'key'|'value'|'key+value',
+): ECR<unknown[]> {
+  const ownKeys = O.OwnPropertyKeys($);
+  if (IsAbrupt(ownKeys)) return ownKeys;
+  const results: any[] = [];
+  for (const key of ownKeys) {
+    if (typeof key !== 'string') continue;
+    const desc = O.GetOwnProperty($, key);
+    if (IsAbrupt(desc)) return desc;
+    if (desc == null || !desc.Enumerable) continue;
+    if (kind === 'key') {
+      results.push(key);
+    } else {
+      const value = yield* Get($, O, key);
+      if (IsAbrupt(value)) return value;
+      if (kind === 'value') {
+        results.push(value);
+      } else {
+        results.push(CreateArrayFromList($, [key, value]));
+      }
+    }
+  }
+  return results;
+}
 
 /**
  * 7.3.25 GetFunctionRealm ( obj )

@@ -5,26 +5,23 @@
  *   - 22 Text Processing
  */
 
-import { IsCallable, IsIntegralNumber, RequireObjectCoercible, SameValue } from './abstract_compare';
-import { ToBoolean, ToInt32, ToIntegerOrInfinity, ToLength, ToNumber, ToNumeric, ToObject, ToPropertyKey, ToString, ToUint16 } from './abstract_conversion';
-import { Call, Get, GetMethod, HasOwnProperty, HasProperty, Invoke, OrdinaryHasInstance } from './abstract_object';
+import { IsCallable, IsExtensible, RequireObjectCoercible, SameValue } from './abstract_compare';
+import { ToBoolean, ToInt32, ToIntegerOrInfinity, ToNumeric, ToObject, ToPropertyKey, ToString } from './abstract_conversion';
+import { Call, CreateArrayFromList, CreateDataPropertyOrThrow, DefinePropertyOrThrow, EnumerableOwnProperties, Get, HasOwnProperty, Invoke, OrdinaryHasInstance, Set, SetIntegrityLevel, TestIntegrityLevel } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { UNUSED } from './enums';
+import { FROZEN, SEALED, STRING, SYMBOL } from './enums';
 import { BoundFunctionCreate } from './exotic_bind';
-import { StringCreate } from './exotic_string';
-import { BuiltinFunction, BuiltinFunctionBehavior, CreateBuiltinFunction, Func, IsFunc, SetFunctionLength, SetFunctionName, getter, method } from './func';
-import { GetPrototypeFromConstructor, Obj, OrdinaryCreateFromConstructor, OrdinaryObject, OrdinaryObjectCreate } from './obj';
-import { prop0, propC, propWC } from './property_descriptor';
+import { BuiltinFunction, BuiltinFunctionBehavior, CreateBuiltinFunction, SetFunctionLength, SetFunctionName, callOrConstruct, getter, method } from './func';
+import { Obj, OrdinaryCreateFromConstructor, OrdinaryObject, OrdinaryObjectCreate } from './obj';
+import { FromPropertyDescriptor, PropertyDescriptor, ToPropertyDescriptor, prop0, propC, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
-import { Val } from './val';
+import { PropertyKey, Val } from './val';
 import { DebugString, ECR, Plugin, VM } from './vm';
 
 
 // TODO:
 function IsArray(..._args: unknown[]) { return false; }
-function IsRegExp(..._args: unknown[]) { return false; }
-declare const RegExpCreate: any;
 function PrepareForTailCall(...args: unknown[]) {}
 
 
@@ -491,8 +488,8 @@ export const objectConstructor: Plugin = {
       const objectPrototype = realm.Intrinsics.get('%Object.prototype%')!;
       const functionPrototype = realm.Intrinsics.get('%Function.prototype%')!;
       const objectCtor = CreateBuiltinFunction(
-        wrapperBehavior(function*($, [value], NewTarget) {
-          if (NewTarget !== undefined && NewTarget !== $.getRunningContext().Function) {
+        callOrConstruct(function*($, [value], NewTarget) {
+          if (NewTarget !== undefined && NewTarget !== $.getActiveFunctionObject()) {
             return yield* OrdinaryCreateFromConstructor($, NewTarget, '%Object.prototype%');
           }
           if (value == null) return OrdinaryObjectCreate(objectPrototype);
@@ -504,6 +501,536 @@ export const objectConstructor: Plugin = {
 
       realm.Intrinsics.set('%Object%', objectCtor);
       stagedGlobals.set('Object', propWC(objectCtor));
+
+      defineProperties(realm, objectCtor, {
+        /**
+         * 20.1.2.1 Object.assign ( target, ...sources )
+         * 
+         * This function copies the values of all of the enumerable
+         * own properties from one or more source objects to a target
+         * object.
+         * 
+         * It performs the following steps when called:
+         * 
+         * 1. Let to be ? ToObject(target).
+         * 2. If only one argument was passed, return to.
+         * 3. For each element nextSource of sources, do
+         *     a. If nextSource is neither undefined nor null, then
+         *         i. Let from be ! ToObject(nextSource).
+         *         ii. Let keys be ? from.[[OwnPropertyKeys]]().
+         *         iii. For each element nextKey of keys, do
+         *             1. Let desc be ? from.[[GetOwnProperty]](nextKey).
+         *             2. If desc is not undefined and desc.[[Enumerable]] is true, then
+         *                 a. Let propValue be ? Get(from, nextKey).
+         *                 b. Perform ? Set(to, nextKey, propValue, true).
+         * 4. Return to.
+         * 
+         * The "length" property of this function is 2𝔽.
+         */
+        'assign': method(function*($, _thisValue, target, ...sources) {
+          const to = ToObject($, target);
+          if (IsAbrupt(to)) return to;
+          for (const nextSource of sources) {
+            if (nextSource == null) continue;
+            const from = CastNotAbrupt(ToObject($, nextSource));
+            const keys = from.OwnPropertyKeys($);
+            if (IsAbrupt(keys)) return keys;
+            for (const nextKey of keys) {
+              const desc = from.GetOwnProperty($, nextKey);
+              if (IsAbrupt(desc)) return desc;
+              if (desc == null || !desc.Enumerable) continue;
+              const propValue = yield* Get($, from, nextKey);
+              if (IsAbrupt(propValue)) return propValue;
+              const setStatus = yield* Set($, to, nextKey, propValue, true);
+              if (IsAbrupt(setStatus)) return setStatus;
+            }
+          }
+          return to;
+        }, 2),
+
+        /**
+         * 20.1.2.2 Object.create ( O, Properties )
+         * 
+         * This function creates a new object with a specified prototype.
+         * 
+         * It performs the following steps when called:
+         * 
+         * 1. If O is not an Object and O is not null, throw a
+         *    TypeError exception.
+         * 2. Let obj be OrdinaryObjectCreate(O).
+         * 3. If Properties is not undefined, then
+         *     a. Return ? ObjectDefineProperties(obj, Properties).
+         * 4. Return obj.
+         */
+        'create': method(function*($, _thisValue, O, Properties) {
+          if (O !== null && !(O instanceof Obj)) {
+            return $.throw(
+              'TypeError',
+              `Object prototype may only be an object or null: ${DebugString(O)}`);
+          }
+          const obj = OrdinaryObjectCreate({Prototype: O});
+          if (Properties != null) {
+            return yield* ObjectDefineProperties($, obj, Properties);
+          }
+          return obj;
+        }),
+
+        /**
+         * 20.1.2.3 Object.defineProperties ( O, Properties )
+         * 
+         * This function adds own properties and/or updates the
+         * attributes of existing own properties of an object.
+         * 
+         * It performs the following steps when called:
+         * 
+         * 1. If O is not an Object, throw a TypeError exception.
+         * 2. Return ? ObjectDefineProperties(O, Properties).
+         */
+        'defineProperties': method(function*($, _thisValue, O, Properties) {
+          if (!(O instanceof Obj)) {
+            return $.throw('TypeError', 'Object.defineProperties called on non-object');
+          }
+          return yield* ObjectDefineProperties($, O, Properties);
+        }),
+
+        /**
+         * 20.1.2.4 Object.defineProperty ( O, P, Attributes )
+         * 
+         * This function adds an own property and/or updates the
+         * attributes of an existing own property of an object.
+         * 
+         * It performs the following steps when called:
+         * 
+         * 1. If O is not an Object, throw a TypeError exception.
+         * 2. Let key be ? ToPropertyKey(P).
+         * 3. Let desc be ? ToPropertyDescriptor(Attributes).
+         * 4. Perform ? DefinePropertyOrThrow(O, key, desc).
+         * 5. Return O.
+         */
+        'defineProperty': method(function*($, _thisValue, O, P, Attributes) {
+          if (!(O instanceof Obj)) {
+            return $.throw('TypeError', 'Object.defineProperty called on non-object');
+          }
+          const key = yield* ToPropertyKey($, P);
+          if (IsAbrupt(key)) return key;
+          const desc = yield* ToPropertyDescriptor($, Attributes);
+          if (IsAbrupt(desc)) return desc;
+          const defineStatus = DefinePropertyOrThrow($, O, key, desc);
+          if (IsAbrupt(defineStatus)) return defineStatus;
+          return O;
+        }),
+
+        /**
+         * 20.1.2.5 Object.entries ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Let obj be ? ToObject(O).
+         * 2. Let entryList be ? EnumerableOwnProperties(obj, key+value).
+         * 3. Return CreateArrayFromList(entryList).
+         */
+        'entries': method(function*($, _thisValue, O) {
+          const obj = ToObject($, O);
+          if (IsAbrupt(obj)) return obj;
+          const entryList = yield* EnumerableOwnProperties($, obj, 'key+value');
+          if (IsAbrupt(entryList)) return entryList;
+          return CreateArrayFromList($, entryList);
+        }),
+
+        /**
+         * 20.1.2.6 Object.freeze ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. If O is not an Object, return O.
+         * 2. Let status be ? SetIntegrityLevel(O, frozen).
+         * 3. If status is false, throw a TypeError exception.
+         * 4. Return O.
+         */
+        'freeze': method(function*($, _thisValue, O) {
+          if (!(O instanceof Obj)) return O;
+          const status = SetIntegrityLevel($, O, FROZEN);
+          if (IsAbrupt(status)) return status;
+          if (status === false) return $.throw('TypeError', 'Object.freeze failed');
+          return O;
+        }),
+
+        /**
+         * 20.1.2.7 Object.fromEntries ( iterable )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Perform ? RequireObjectCoercible(iterable).
+         * 2. Let obj be OrdinaryObjectCreate(%Object.prototype%).
+         * 3. Assert: obj is an extensible ordinary object with no own properties.
+         * 4. Let closure be a new Abstract Closure with parameters
+         *    (key, value) that captures obj and performs the following
+         *    steps when called:
+         *     a. Let propertyKey be ? ToPropertyKey(key).
+         *     b. Perform ! CreateDataPropertyOrThrow(obj, propertyKey, value).
+         *     c. Return undefined.
+         * 5. Let adder be CreateBuiltinFunction(closure, 2, "", « »).
+         * 6. Return ? AddEntriesFromIterable(obj, iterable, adder).
+         * 
+         * NOTE: The function created for adder is never directly
+         * accessible to ECMAScript code.
+         */
+        'fromEntries': method(function*($, _thisValue, iterable) {
+
+          throw new Error('NOT IMPLEMENTED - need iterators');
+
+          // const coercibleStatus = RequireObjectCoercible($, iterable);
+          // if (IsAbrupt(coercibleStatus)) return coercibleStatus;
+          // const obj = OrdinaryObjectCreate({Prototype: objectPrototype});
+          // const closure = new AbstractClosure((key, value) => {
+          //   const propertyKey = ToPropertyKey($, key);
+          //   CreateDataPropertyOrThrow($, obj, propertyKey, value);
+          // });
+          // const adder = CreateBuiltinFunction(closure, 2, '', realm);
+          // return yield* AddEntriesFromIterable($, obj, iterable, adder);
+        }),
+
+        /**
+         * 20.1.2.8 Object.getOwnPropertyDescriptor ( O, P )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Let obj be ? ToObject(O).
+         * 2. Let key be ? ToPropertyKey(P).
+         * 3. Let desc be ? obj.[[GetOwnProperty]](key).
+         * 4. Return FromPropertyDescriptor(desc).
+         */
+        'getOwnPropertyDescriptor': method(function*($, _thisValue, O, P) {
+          const obj = ToObject($, O);
+          if (IsAbrupt(obj)) return obj;
+          const key = yield* ToPropertyKey($, P);
+          if (IsAbrupt(key)) return key;
+          const desc = obj.GetOwnProperty($, key);
+          if (IsAbrupt(desc)) return desc;
+          return FromPropertyDescriptor($, desc);
+        }),
+
+        /**
+         * 20.1.2.9 Object.getOwnPropertyDescriptors ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Let obj be ? ToObject(O).
+         * 2. Let ownKeys be ? obj.[[OwnPropertyKeys]]().
+         * 3. Let descriptors be OrdinaryObjectCreate(%Object.prototype%).
+         * 4. For each element key of ownKeys, do
+         *     a. Let desc be ? obj.[[GetOwnProperty]](key).
+         *     b. Let descriptor be FromPropertyDescriptor(desc).
+         *     c. If descriptor is not undefined, perform
+         *        ! CreateDataPropertyOrThrow(descriptors, key,
+         *        descriptor).
+         * 5. Return descriptors.
+         */
+        'getOwnPropertyDescriptors': method(function*($, _thisValue, O) {
+          const obj = ToObject($, O);
+          if (IsAbrupt(obj)) return obj;
+          const ownKeys = obj.OwnPropertyKeys($);
+          if (IsAbrupt(ownKeys)) return ownKeys;
+          const descriptors = OrdinaryObjectCreate({Prototype: objectPrototype});
+          for (const key of ownKeys) {
+            const desc = obj.GetOwnProperty($, key);
+            if (IsAbrupt(desc)) return desc;
+            const descriptor = FromPropertyDescriptor($, desc);
+            if (descriptor != null) {
+              descriptors.OwnProps.set(key, propWEC(descriptor));
+            }
+          }
+          return descriptors;
+        }),
+
+        /**
+         * 20.1.2.10 Object.getOwnPropertyNames ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Return CreateArrayFromList(? GetOwnPropertyKeys(O, string)).
+         */
+        'getOwnPropertyNames': method(function*($, _thisValue, O) {
+          const keys = GetOwnPropertyKeys($, O, STRING);
+          if (IsAbrupt(keys)) return keys;
+          return CreateArrayFromList($, keys);
+        }),
+
+        /**
+         * 20.1.2.11 Object.getOwnPropertySymbols ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Return CreateArrayFromList(? GetOwnPropertyKeys(O, symbol)).
+         */
+        'getOwnPropertySymbols': method(function*($, _thisValue, O) {
+          const keys = GetOwnPropertyKeys($, O, SYMBOL);
+          if (IsAbrupt(keys)) return keys;
+          return CreateArrayFromList($, keys);
+        }),
+
+        /**
+         * 20.1.2.12 Object.getPrototypeOf ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Let obj be ? ToObject(O).
+         * 2. Return ? obj.[[GetPrototypeOf]]().
+         */
+        'getPrototypeOf': method(function*($, _thisValue, O) {
+          const obj = ToObject($, O);
+          if (IsAbrupt(obj)) return obj;
+          return obj.GetPrototypeOf($);
+        }),
+
+        /**
+         * 20.1.2.13 Object.hasOwn ( O, P )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Let obj be ? ToObject(O).
+         * 2. Let key be ? ToPropertyKey(P).
+         * 3. Return ? HasOwnProperty(obj, key).
+         */
+        'hasOwn': method(function*($, _thisValue, O, P) {
+          const obj = ToObject($, O);
+          if (IsAbrupt(obj)) return obj;
+          const key = yield* ToPropertyKey($, P);
+          if (IsAbrupt(key)) return key;
+          return HasOwnProperty($, obj, key);
+        }),
+
+        /**
+         * 20.1.2.14 Object.is ( value1, value2 )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Return SameValue(value1, value2).
+         */
+        'is': method(function*($, _thisValue, value1, value2) {
+          return SameValue(value1, value2);
+        }),
+
+        /**
+         * 20.1.2.15 Object.isExtensible ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. If O is not an Object, return false.
+         * 2. Return ? IsExtensible(O).
+         */
+        'isExtensible': method(function*($, _thisValue, O) {
+          if (!(O instanceof Obj)) return false;
+          return IsExtensible($, O);
+        }),
+
+        /**
+         * 20.1.2.16 Object.isFrozen ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. If O is not an Object, return true.
+         * 2. Return ? TestIntegrityLevel(O, frozen).
+         */
+        'isFrozen': method(function*($, _thisValue, O) {
+          if (!(O instanceof Obj)) return true;
+          return TestIntegrityLevel($, O, FROZEN);
+        }),
+
+        /**
+         * 20.1.2.17 Object.isSealed ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. If O is not an Object, return true.
+         * 2. Return ? TestIntegrityLevel(O, sealed).
+         */
+        'isSealed': method(function*($, _thisValue, O) {
+          if (!(O instanceof Obj)) return true;
+          return TestIntegrityLevel($, O, SEALED);
+        }),
+
+        /**
+         * 20.1.2.18 Object.keys ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Let obj be ? ToObject(O).
+         * 2. Let keyList be ? EnumerableOwnProperties(obj, key).
+         * 3. Return CreateArrayFromList(keyList).
+         */
+        'keys': method(function*($, _thisValue, O) {
+          const obj = ToObject($, O);
+          if (IsAbrupt(obj)) return obj;
+          const keyList = yield* EnumerableOwnProperties($, obj, 'key');
+          if (IsAbrupt(keyList)) return keyList;
+          return CreateArrayFromList($, keyList);
+        }),
+
+        /**
+         * 20.1.2.19 Object.preventExtensions ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. If O is not an Object, return O.
+         * 2. Let status be ? O.[[PreventExtensions]]().
+         * 3. If status is false, throw a TypeError exception.
+         * 4. Return O.
+         */
+        'preventExtensions': method(function*($, _thisValue, O) {
+          if (!(O instanceof Obj)) return O;
+          const status = O.PreventExtensions($);
+          if (status === false) return $.throw('TypeError', 'Object.preventExtensions failed');
+          return O;
+        }),
+
+        // 20.1.2.20 Object.prototype
+
+        /**
+         * 20.1.2.21 Object.seal ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. If O is not an Object, return O.
+         * 2. Let status be ? SetIntegrityLevel(O, sealed).
+         * 3. If status is false, throw a TypeError exception.
+         * 4. Return O.
+         */
+        'seal': method(function*($, _thisValue, O) {
+          if (!(O instanceof Obj)) return O;
+          const status = SetIntegrityLevel($, O, SEALED);
+          if (IsAbrupt(status)) return status;
+          if (status === false) return $.throw('TypeError', 'Object.seal failed');
+          return O;
+        }),
+
+        /**
+         * 20.1.2.22 Object.setPrototypeOf ( O, proto )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Set O to ? RequireObjectCoercible(O).
+         * 2. If proto is not an Object and proto is not null, throw a
+         *    TypeError exception.
+         * 3. If O is not an Object, return O.
+         * 4. Let status be ? O.[[SetPrototypeOf]](proto).
+         * 5. If status is false, throw a TypeError exception.
+         * 6. Return O.
+         */
+        'setPrototypeOf': method(function*($, _thisValue, O, proto) {
+          const coercibleStatus = RequireObjectCoercible($, O);
+          if (IsAbrupt(coercibleStatus)) return coercibleStatus;
+          if (proto !== null && !(proto instanceof Obj)) {
+            return $.throw(
+              'TypeError',
+              `Object prototype may only be an object or null: ${DebugString(proto)}`);
+          }
+          if (!(O instanceof Obj)) return O;
+          const status = O.SetPrototypeOf($, proto);
+          if (IsAbrupt(status)) return status;
+          if (status === false) return $.throw('TypeError', 'Object.setPrototypeOf failed');
+          return O;
+        }),
+
+        /**
+         * 20.1.2.23 Object.values ( O )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Let obj be ? ToObject(O).
+         * 2. Let valueList be ? EnumerableOwnProperties(obj, value).
+         * 3. Return CreateArrayFromList(valueList).
+         */
+        'values': method(function*($, _thisValue, O) {
+          const obj = ToObject($, O);
+          if (IsAbrupt(obj)) return obj;
+          const valueList = yield* EnumerableOwnProperties($, obj, 'value');
+          if (IsAbrupt(valueList)) return valueList;
+          return CreateArrayFromList($, valueList);
+        }),
+      });
+
+      /**
+       * 20.1.2.3.1 ObjectDefineProperties ( O, Properties )
+       * 
+       * The abstract operation ObjectDefineProperties takes
+       * arguments O (an Object) and Properties (an ECMAScript
+       * language value) and returns either a normal completion
+       * containing an Object or a throw completion. It performs the
+       * following steps when called:
+       * 
+       * 1. Let props be ? ToObject(Properties).
+       * 2. Let keys be ? props.[[OwnPropertyKeys]]().
+       * 3. Let descriptors be a new empty List.
+       * 4. For each element nextKey of keys, do
+       *     a. Let propDesc be ? props.[[GetOwnProperty]](nextKey).
+       *     b. If propDesc is not undefined and
+       *        propDesc.[[Enumerable]] is true, then
+       *         i. Let descObj be ? Get(props, nextKey).
+       *         ii. Let desc be ? ToPropertyDescriptor(descObj).
+       *         iii. Append the pair (a two element List)
+       *              consisting of nextKey and desc to the end of
+       *              descriptors.
+       * 5. For each element pair of descriptors, do
+       *     a. Let P be the first element of pair.
+       *     b. Let desc be the second element of pair.
+       *     c. Perform ? DefinePropertyOrThrow(O, P, desc).
+       * 6. Return O.
+       */
+      function* ObjectDefineProperties($: VM, O: Obj, Properties: Val): ECR<Obj> {
+        const props = ToObject($, Properties);
+        if (IsAbrupt(props)) return props;
+        const keys = props.OwnPropertyKeys($);
+        if (IsAbrupt(keys)) return keys;
+        const descriptors: [PropertyKey, PropertyDescriptor][] = [];
+        for (const nextKey of keys) {
+          const propDesc = props.GetOwnProperty($, nextKey);
+          if (IsAbrupt(propDesc)) return propDesc;
+          if (propDesc == null || !propDesc.Enumerable) continue;
+          const descObj = yield* Get($, props, nextKey);
+          if (IsAbrupt(descObj)) return descObj;
+          const desc = yield* ToPropertyDescriptor($, descObj);
+          if (IsAbrupt(desc)) return desc;
+          descriptors.push([nextKey, desc]);
+        }
+        for (const [P, desc] of descriptors) {
+          const defineStatus = DefinePropertyOrThrow($, O, P, desc);
+          if (IsAbrupt(defineStatus)) return defineStatus;
+        }
+        return O;
+      }
+
+      /**
+       * 20.1.2.11.1 GetOwnPropertyKeys ( O, type )
+       * 
+       * The abstract operation GetOwnPropertyKeys takes arguments O
+       * (an ECMAScript language value) and type (string or symbol)
+       * and returns either a normal completion containing a List of
+       * property keys or a throw completion. It performs the
+       * following steps when called:
+       * 
+       * 1. Let obj be ? ToObject(O).
+       * 2. Let keys be ? obj.[[OwnPropertyKeys]]().
+       * 3. Let nameList be a new empty List.
+       * 4. For each element nextKey of keys, do
+       *     a. If nextKey is a Symbol and type is symbol, or if
+       *        nextKey is a String and type is string, then
+       *         i. Append nextKey to nameList.
+       * 5. Return nameList.
+       */
+      function GetOwnPropertyKeys($: VM, O: Val, type: STRING|SYMBOL): CR<PropertyKey[]> {
+        const obj = ToObject($, O);
+        if (IsAbrupt(obj)) return obj;
+        const keys = obj.OwnPropertyKeys($);
+        if (IsAbrupt(keys)) return keys;
+        const nameList: PropertyKey[] = [];
+        for (const nextKey of keys) {
+          if (typeof nextKey === (STRING.is(type) ? 'string' : 'symbol')) {
+            nameList.push(nextKey);
+          }
+        }
+        return nameList;
+      }
     },
   },
 };
@@ -548,18 +1075,6 @@ export const functionConstructor: Plugin = {
     },
   },
 };
-
-// TODO - inline this if all wrappers are spec'd this way?
-function wrapperBehavior(fn: ($: VM, argumentList: Val[], NewTarget?: Func) => ECR<Val>): BuiltinFunctionBehavior {
-  return {
-    Call($, _, argumentList) {
-      return fn($, argumentList, undefined);
-    },
-    Construct($, argumentList, NewTarget) {
-      return fn($, argumentList, NewTarget as Func) as ECR<Obj>;
-    },
-  };
-}
 
 function makeWrapper(
   realm: RealmRecord,
@@ -616,7 +1131,7 @@ export const booleanObject: Plugin = {
       const [booleanCtor, booleanPrototype] =
         makeWrapper(
           realm, 'Boolean', '%Object.prototype',
-          wrapperBehavior(function*($, [value], NewTarget) {
+          callOrConstruct(function*($, [value], NewTarget) {
             const b = ToBoolean(value);
             if (NewTarget == null) return b;
             return yield* OrdinaryCreateFromConstructor(
@@ -739,7 +1254,7 @@ export const symbolObject: Plugin = {
       const [symbolCtor, symbolPrototype] =
         makeWrapper(
           realm, 'Symbol', '%Object.prototype',
-          wrapperBehavior(function*($, [description], NewTarget) {
+          callOrConstruct(function*($, [description], NewTarget) {
             if (NewTarget != null) {
               return $.throw('TypeError', 'Symbol is not a constructor');
             }
@@ -957,322 +1472,11 @@ export const symbolObject: Plugin = {
  * 3. Assert: desc is a String.
  * 4. Return the string-concatenation of "Symbol(", desc, and ")".
  */
-function SymbolDescriptiveString(sym: symbol): string {
+export function SymbolDescriptiveString(sym: symbol): string {
   const desc = sym.description;
   if (desc == null) return 'Symbol()';
   Assert(typeof desc === 'string');
   return `Symbol(${desc})`;
-}
-
-/**
- * 20.5 Error Objects
- *
- * Instances of Error objects are thrown as exceptions when runtime
- * errors occur. The Error objects may also serve as base objects for
- * user-defined exception classes.
- *
- * When an ECMAScript implementation detects a runtime error, it
- * throws a new instance of one of the NativeError objects defined in
- * 20.5.5 or a new instance of AggregateError object defined in
- * 20.5.7. Each of these objects has the structure described below,
- * differing only in the name used as the constructor name instead of
- * NativeError, in the "name" property of the prototype object, in the
- * implementation-defined "message" property of the prototype object,
- * and in the presence of the %AggregateError%-specific "errors"
- * property.
- */
-export const errorObject: Plugin = {
-  id: 'errorObject',
-  deps: [objectAndFunctionPrototype],
-  realm: {
-    CreateIntrinsics(realm, stagedGlobals) {
-      /**
-       * 20.5.1 The Error Constructor
-       *
-       * The Error constructor:
-       *   - is %Error%.
-       *   - is the initial value of the "Error" property of the global object.
-       *   - creates and initializes a new Error object when called as a
-       *     function rather than as a constructor. Thus the function
-       *     call Error(…) is equivalent to the object creation
-       *     expression new Error(…) with the same arguments.
-       *   - may be used as the value of an extends clause of a class
-       *     definition. Subclass constructors that intend to inherit
-       *     the specified Error behaviour must include a super call
-       *     to the Error constructor to create and initialize
-       *     subclass instances with an [[ErrorData]] internal slot.
-       *
-       * ---
-       *
-       * 20.5.3 Properties of the Error Prototype Object
-       *
-       * The Error prototype object:
-       *   - is %Error.prototype%.
-       *   - is an ordinary object.
-       *   - is not an Error instance and does not have an [[ErrorData]]
-       *     internal slot.
-       *   - has a [[Prototype]] internal slot whose value is %Object.prototype%.
-       */
-      const [errorCtor, errorPrototype] =
-        makeWrapper(
-          realm, 'Error', '%Object.prototype',
-          wrapperBehavior(errorBehavior));
-      stagedGlobals.set('Error', propWC(errorCtor));
-
-      /**
-       * 20.5.1.1 Error ( message [ , options ] )
-       *
-       * This function performs the following steps when called:
-       * 
-       * 1. If NewTarget is undefined, let newTarget be the active
-       *    function object; else let newTarget be NewTarget.
-       * 2. Let O be ? OrdinaryCreateFromConstructor(newTarget,
-       *    "%Error.prototype%", « [[ErrorData]] »).
-       * 3. If message is not undefined, then
-       *     a. Let msg be ? ToString(message).
-       *     b. Perform CreateNonEnumerableDataPropertyOrThrow(O, "message", msg).
-       * 4. Perform ? InstallErrorCause(O, options).
-       * 5. Return O.
-       */
-      function* errorBehavior($: VM, [message, options]: Val[], NewTarget: Val) {
-        const newTarget = NewTarget ?? $.getRunningContext().Function!;
-        Assert(IsFunc(newTarget));
-        const O = yield* OrdinaryCreateFromConstructor($, newTarget, '%Error.prototype', {
-          // NOTE: spec requires [[ErrorData]] = undefined, but that's
-          // harder to identify robustly.  It's never used aside from
-          // detecting presence, so we just set it to a string instead.
-          ErrorData: '',
-        });
-        if (IsAbrupt(O)) return O;
-        if (message != null) {
-          const msg = yield* ToString($, message);
-          if (IsAbrupt(msg)) return msg;
-          O.OwnProps.set('message', propWC(msg));
-        }
-        const result = yield* InstallErrorCause($, O, options);
-        if (IsAbrupt(result)) return result;
-        // Non-standard: fill in the stack trace
-        $.captureStackTrace(O);
-        // End non-standard portion
-        return O;
-      }
-
-      defineProperties(realm, errorPrototype, {
-        /**
-         * 20.5.3.2 Error.prototype.message
-         *
-         * The initial value of Error.prototype.message is the empty String.
-         */
-        'message': propWC(''),
-        /**
-         * 20.5.3.3 Error.prototype.name
-         *
-         * The initial value of Error.prototype.name is "Error".
-         */
-        'name': propWC('Error'),
-        /**
-         * 20.5.3.4 Error.prototype.toString ( )
-         *
-         * This method performs the following steps when called:
-         * 
-         * 1. Let O be the this value.
-         * 2. If O is not an Object, throw a TypeError exception.
-         * 3. Let name be ? Get(O, "name").
-         * 4. If name is undefined, set name to "Error"; otherwise set
-         *    name to ? ToString(name).
-         * 5. Let msg be ? Get(O, "message").
-         * 6. If msg is undefined, set msg to the empty String;
-         *    otherwise set msg to ? ToString(msg).
-         * 7. If name is the empty String, return msg.
-         * 8. If msg is the empty String, return name.
-         * 9. Return the string-concatenation of name, the code unit
-         *    0x003A (COLON), the code unit 0x0020 (SPACE), and msg.
-         */
-        'toString': method(function*($, O) {
-          if (!(O instanceof Obj)) {
-            return $.throw('TypeError',
-                           `Method Error.prototype.toString called on incompatible receiver ${
-                            DebugString(O)}`);
-          }
-          let name = yield* Get($, O, 'name');
-          if (IsAbrupt(name)) return name;
-          name = (name == null) ? 'Error' : yield* ToString($, name);
-          if (IsAbrupt(name)) return name;
-          let msg = yield* Get($, O, 'message');
-          if (IsAbrupt(msg)) return msg;
-          msg = (msg == null) ? '' : yield* ToString($, msg);
-          if (IsAbrupt(msg)) return msg;
-          if (!name) return msg;
-          if (!msg) return name;
-          return `${name}: ${msg}`;
-        }),
-      });
-
-      /**
-       * 20.5.5 NativeError Objects
-       *
-       * The following NativeError objects are provided by the ECMAScript
-       * specification:
-       *   - EvalError
-       *   - RangeError
-       *   - ReferenceError
-       *   - SyntaxError
-       *   - TypeError
-       *   - URIError
-       */
-      [
-        'EvalError',
-        'RangeError',
-        'ReferenceError',
-        'SyntaxError',
-        'TypeError',
-        'URIError',
-      ].forEach(makeNativeError);
-
-      /**
-       * 20.5.6 NativeError Object Structure
-       *
-       * When an ECMAScript implementation detects a runtime error, it
-       * throws a new instance of one of the NativeError objects
-       * defined in 20.5.5. Each of these objects has the structure
-       * described below, differing only in the name used as the
-       * constructor name instead of NativeError, in the "name"
-       * property of the prototype object, and in the
-       * implementation-defined "message" property of the prototype
-       * object.
-       *
-       * For each error object, references to NativeError in the
-       * definition should be replaced with the appropriate error
-       * object name from 20.5.5.
-       */
-      function makeNativeError(name: string) {
-        /**
-         * 20.5.6.1 The NativeError Constructors
-         *
-         * Each NativeError constructor:
-         *   - creates and initializes a new NativeError object when
-         *     called as a function rather than as a constructor. A call
-         *     of the object as a function is equivalent to calling it
-         *     as a constructor with the same arguments. Thus the
-         *     function call NativeError(…) is equivalent to the object
-         *     creation expression new NativeError(…) with the same
-         *     arguments.
-         *   - may be used as the value of an extends clause of a class
-         *     definition. Subclass constructors that intend to inherit
-         *     the specified NativeError behaviour must include a super
-         *     call to the NativeError constructor to create and
-         *     initialize subclass instances with an [[ErrorData]]
-         *     internal slot.
-         *
-         * ---
-         *
-         * 20.5.6.1.1 NativeError ( message [ , options ] )
-         *
-         * Each NativeError function performs the following steps when
-         * called:
-         * 
-         * 1. If NewTarget is undefined, let newTarget be the active
-         *    function object; else let newTarget be NewTarget.
-         * 2. Let O be ? OrdinaryCreateFromConstructor(newTarget,
-         *    "%NativeError.prototype%", « [[ErrorData]] »).
-         * 3. If message is not undefined, then
-         *     a. Let msg be ? ToString(message).
-         *     b. Perform CreateNonEnumerableDataPropertyOrThrow(O, "message", msg).
-         * 4. Perform ? InstallErrorCause(O, options).
-         * 5. Return O.
-         *
-         * The actual value of the string passed in step 2 is either
-         * "%EvalError.prototype%", "%RangeError.prototype%",
-         * "%ReferenceError.prototype%", "%SyntaxError.prototype%",
-         * "%TypeError.prototype%", or "%URIError.prototype%"
-         * corresponding to which NativeError constructor is being
-         * defined.
-         */
-        const [ctor, prototype] = makeWrapper(realm, name, '%Error.prototype',
-          wrapperBehavior(errorBehavior));
-        stagedGlobals.set(name, propWC(ctor));
-
-        /**
-         * 20.5.6.3 Properties of the NativeError Prototype Objects
-         *
-         * Each NativeError prototype object:
-         *   - is an ordinary object.
-         *   - is not an Error instance and does not have an
-         *     [[ErrorData]] internal slot.
-         *   - has a [[Prototype]] internal slot whose value is %Error.prototype%.
-         */
-        defineProperties(realm, prototype, {
-          /** 20.5.6.3.2 NativeError.prototype.message */
-          'message': propWC(''),
-          /** 20.5.6.3.3 NativeError.prototype.name */
-          'name': propWC(name),
-        });
-      }
-
-      /**
-       * 10.2.4.1 %ThrowTypeError% ( )
-       *
-       * This function is the %ThrowTypeError% intrinsic object.
-       *
-       * It is an anonymous built-in function object that is defined
-       * once for each realm.
-       *
-       * It performs the following steps when called:
-       *
-       * 1. Throw a TypeError exception.
-       *
-       * The value of the [[Extensible]] internal slot of this
-       * function is false.
-       *
-       * The "length" property of this function has the attributes {
-       * [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]:
-       * false }.
-       *
-       * The "name" property of this function has the attributes {
-       * [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]:
-       * false }.
-       */
-      realm.Intrinsics.set('%ThrowTypeError%', (() => {
-        const throwTypeError = CreateBuiltinFunction({
-          *Call($) { return $.throw('TypeError', '%ThrowTypeError%'); },
-        }, 0, '', realm, realm.Intrinsics.get('%Function.prototype%')!);
-        throwTypeError.OwnProps.set('length', prop0(0));
-        throwTypeError.OwnProps.set('name', prop0(''));
-        return throwTypeError;
-      })())
-
-      // TODO - 20.5.7 AggregateError Objects
-    },
-  },
-};
-
-/**
- * 20.5.8 Abstract Operations for Error Objects
- *
- * 20.5.8.1 InstallErrorCause ( O, options )
- *
- * The abstract operation InstallErrorCause takes arguments O (an
- * Object) and options (an ECMAScript language value) and returns
- * either a normal completion containing unused or a throw
- * completion. It is used to create a "cause" property on O when a
- * "cause" property is present on options. It performs the following
- * steps when called:
- *
- * 1. If options is an Object and ? HasProperty(options, "cause") is true, then
- *     a. Let cause be ? Get(options, "cause").
- *     b. Perform CreateNonEnumerableDataPropertyOrThrow(O, "cause", cause).
- * 2. Return unused.
- */
-export function* InstallErrorCause($: VM, O: Obj, options: Val): ECR<UNUSED> {
-  if (!(options instanceof Obj)) return UNUSED;
-  const hasProp = HasProperty($, options, 'cause');
-  if (IsAbrupt(hasProp)) return hasProp;
-  if (hasProp) {
-    const cause = yield* Get($, options, 'cause');
-    if (IsAbrupt(cause)) return cause;
-    O.OwnProps.set('cause', propWC(cause));
-  }
-  return UNUSED;
 }
 
 /**
@@ -1431,7 +1635,7 @@ export const numberObject: Plugin = {
       const [numberCtor, numberPrototype] =
         makeWrapper(
           realm, 'Number', '%Object.prototype',
-          wrapperBehavior(function*($, [value], NewTarget) {
+          callOrConstruct(function*($, [value], NewTarget) {
             let n = 0;
             if (value != null) {
               const prim = yield* ToNumeric($, value);
@@ -1725,930 +1929,6 @@ export const numberObject: Plugin = {
 // TODO - Math object 21.3
 // TODO - Date object 21.4
 
-/**
- * 22.1 String Objects
- *
- * 22.1.1 The String Constructor
- *
- * The String constructor:
- *   - is %String%.
- *   - is the initial value of the "String" property of the global object.
- *   - creates and initializes a new String object when called as a constructor.
- *   - performs a type conversion when called as a function rather than as a constructor.
- *   - may be used as the value of an extends clause of a class
- *     definition. Subclass constructors that intend to inherit the
- *     specified String behaviour must include a super call to the
- *     String constructor to create and initialize the subclass
- *     instance with a [[StringData]] internal slot.
- *
- * ---
- *
- * 22.1.3 Properties of the String Prototype Object
- * 
- * The String prototype object:
- *   - is %String.prototype%.
- *   - is a String exotic object and has the internal methods specified
- *     for such objects.
- *   - has a [[StringData]] internal slot whose value is the empty String.
- *   - has a "length" property whose initial value is +0𝔽 and whose
- *     attributes are { [[Writable]]: false, [[Enumerable]]: false,
- *     [[Configurable]]: false }.
- *   - has a [[Prototype]] internal slot whose value is %Object.prototype%.
- * 
- * Unless explicitly stated otherwise, the methods of the String
- * prototype object defined below are not generic and the this value
- * passed to them must be either a String value or an object that has
- * a [[StringData]] internal slot that has been initialized to a
- * String value.
- */
-export const stringObject: Plugin = {
-  id: 'stringObject',
-  deps: [objectAndFunctionPrototype],
-  realm: {
-    CreateIntrinsics(realm, stagedGlobals) {
-      /**
-       * 22.1.1.1 String ( value )
-       *
-       * This function performs the following steps when called:
-       * 
-       * 1. If value is not present, let s be the empty String.
-       * 2. Else,
-       *     a. If NewTarget is undefined and value is a Symbol,
-       *        return SymbolDescriptiveString(value).
-       *     b. Let s be ? ToString(value).
-       * 3. If NewTarget is undefined, return s.
-       * 4. Return StringCreate(s,
-       *    ? GetPrototypeFromConstructor(NewTarget, "%String.prototype%")).
-       */
-      const stringCtor = CreateBuiltinFunction(
-        wrapperBehavior(function*($, [value], NewTarget) {
-          let s = '';
-          if (value != null) {
-            if (NewTarget == null && typeof value === 'symbol') {
-              return SymbolDescriptiveString(value);
-            }
-            const crs = yield* ToString($, value);
-            if (IsAbrupt(crs)) return crs;
-            s = crs;
-          }
-          if (NewTarget == null) return s;
-          const prototype =
-            yield* GetPrototypeFromConstructor($, NewTarget, '%String.prototype%');
-          if (IsAbrupt(prototype)) return prototype;
-          return StringCreate(s, prototype);
-        }), 1, 'String', realm, realm.Intrinsics.get('%Function.prototype%')!);
-
-      const stringPrototype =
-        StringCreate('', realm.Intrinsics.get('%Object.prototype%')!);
-
-      stringCtor.OwnProps.set('prototype', prop0(stringPrototype));
-      realm.Intrinsics.set('%String%', stringCtor);
-      realm.Intrinsics.set('%String.prototype%', stringPrototype);
-      stagedGlobals.set('String', propWC(stringCtor));
-
-      /** 22.1.2 Properties of the String Constructor */
-      defineProperties(realm, stringCtor, {
-        /**
-         * 22.1.2.1 String.fromCharCode ( ...codeUnits )
-         *
-         * This function may be called with any number of arguments
-         * which form the rest parameter codeUnits.
-         *
-         * It performs the following steps when called:
-         *
-         * 1. Let result be the empty String.
-         * 2. For each element next of codeUnits, do
-         *     a. Let nextCU be the code unit whose numeric value is ℝ(? ToUint16(next)).
-         *     b. Set result to the string-concatenation of result and nextCU.
-         * 3. Return result.
-         * 
-         * The "length" property of this function is 1𝔽.
-         */
-        'fromCharCode': method(function*($, _, ...codeUnits) {
-          const numbers: number[] = [];
-          for (const element of codeUnits) {
-            const numeric = yield* ToUint16($, element);
-            if (IsAbrupt(numeric)) return numeric;
-            numbers.push(numeric);
-          }
-          return String.fromCharCode(...numbers);
-        }, 1),
-
-        /**
-         * 22.1.2.2 String.fromCodePoint ( ...codePoints )
-         * 
-         * This function may be called with any number of arguments
-         * which form the rest parameter codePoints.
-         * 
-         * It performs the following steps when called:
-         * 
-         * 1. Let result be the empty String.
-         * 2. For each element next of codePoints, do
-         *     a. Let nextCP be ? ToNumber(next).
-         *     b. If IsIntegralNumber(nextCP) is false, throw a
-         *        RangeError exception.
-         *     c. If ℝ(nextCP) < 0 or ℝ(nextCP) > 0x10FFFF, throw a
-         *        RangeError exception.
-         *     d. Set result to the string-concatenation of result and
-         *        UTF16EncodeCodePoint(ℝ(nextCP)).
-         * 3. Assert: If codePoints is empty, then result is the empty String.
-         * 4. Return result.
-         * 
-         * The "length" property of this function is 1𝔽.
-         */
-        'fromCodePoint': method(function*($, _, ...codePoints) {
-          const numbers: number[] = [];
-          for (const element of codePoints) {
-            const nextCP = yield* ToNumber($, element);
-            if (IsAbrupt(nextCP)) return nextCP;
-            if (!IsIntegralNumber(nextCP) || nextCP < 0 || nextCP > 0x10FFFF) {
-              return $.throw('RangeError', `Invalid code point ${nextCP}`);
-            }
-            numbers.push(nextCP);
-          }
-          return String.fromCodePoint(...numbers);
-        }, 1),
-
-        /**
-         * 22.1.2.4 String.raw ( template, ...substitutions )
-         *
-         * This function may be called with a variable number of
-         * arguments. The first argument is template and the remainder
-         * of the arguments form the List substitutions.
-         * 
-         * It performs the following steps when called:
-         * 
-         * 1. Let substitutionCount be the number of elements in
-         *    substitutions.
-         * 2. Let cooked be ? ToObject(template).
-         * 3. Let literals be ? ToObject(? Get(cooked, "raw")).
-         * 4. Let literalCount be ? LengthOfArrayLike(literals).
-         * 5. If literalCount ≤ 0, return the empty String.
-         * 6. Let R be the empty String.
-         * 7. Let nextIndex be 0.
-         * 8. Repeat,
-         *     a. Let nextLiteralVal be ? Get(literals, ! ToString(𝔽(nextIndex))).
-         *     b. Let nextLiteral be ? ToString(nextLiteralVal).
-         *     c. Set R to the string-concatenation of R and nextLiteral.
-         *     d. If nextIndex + 1 = literalCount, return R.
-         *     e. If nextIndex < substitutionCount, then
-         *         i. Let nextSubVal be substitutions[nextIndex].
-         *         ii. Let nextSub be ? ToString(nextSubVal).
-         *         iii. Set R to the string-concatenation of R and nextSub.
-         *     f. Set nextIndex to nextIndex + 1.
-         * 
-         * NOTE: This function is intended for use as a tag function
-         * of a Tagged Template (13.3.11). When called as such, the
-         * first argument will be a well formed template object and
-         * the rest parameter will contain the substitution values.
-         */
-        'raw': method(function*(_$, _, _template, ..._substitutions) {
-          throw new Error('NOT IMPLEMENTED');
-        }),
-      });
-
-      /**
-       * (22.1.3) The abstract operation thisStringValue takes
-       * argument value. It performs the following steps when called:
-       * 
-       * 1. If value is a String, return value.
-       * 2. If value is an Object and value has a [[StringData]] internal slot, then
-       *     a. Let s be value.[[StringData]].
-       *     b. Assert: s is a String.
-       *     c. Return s.
-       * 3. Throw a TypeError exception.
-       */
-      function thisStringValue($: VM, value: Val, method: string): CR<string> {
-        if (typeof value === 'string') return value;
-        if (value instanceof Obj && value.StringData != null) {
-          Assert(typeof value.StringData === 'string');
-          return value.StringData;
-        }
-        return $.throw('TypeError', `String.prototype${method} requires that 'this' be a String`);
-      }
-
-      function* coercibleToString($: VM, value: Val): ECR<string> {
-        const O = RequireObjectCoercible($, value);
-        if (IsAbrupt(O)) return O;
-        return yield* ToString($, O);
-      }
-      type Factory<T> = ((...args: any[]) => CR<T>|ECR<T>);//|((...args: any[]) => ECR<T>);
-
-      function isIter(arg: unknown): arg is Iterable<any> {
-        return Boolean(arg && typeof arg === 'object' && Symbol.iterator in arg);
-      }
-
-      function* wrapMethod<R, A extends unknown[]>(
-        $: VM,
-        fn: (this: string, ...args: A) => R,
-        str: Factory<string>,
-        ...args: {[K in keyof A]: K extends 'length' ? A[K] : Factory<A[K]>}
-      ): ECR<R> {
-        const thisArg$ = str();
-        const thisArg = isIter(thisArg$) ? yield* (thisArg$ as any) : thisArg$;
-        if (IsAbrupt(thisArg)) return thisArg;
-        const argArray: Val[] = [];
-        for (const factory of args) {
-          const arg = factory(thisArg, ...argArray);
-          const yielded = isIter(arg) ? yield* arg : arg;
-          if (IsAbrupt(yielded)) return yielded;
-          argArray.push(yielded);
-        }
-        return callMethod($, fn, thisArg as string, ...argArray as any);
-        // try {
-        //   return fn.apply(thisArg, argArray);
-        // } catch (err) {
-        //   return $.throw(err.name, err.message);
-        // }
-      }
-
-      function* noRegExpToString($: VM, value: Val): ECR<string> {
-        if (IsRegExp(value)) {
-          return $.throw('TypeError', 'argument must not be a regular expression');
-        }
-        return yield* ToString($, value);
-      }
-
-      // function* wrapPad(
-      //   $: VM,
-      //   method: (this: string, maxLength: number, fillString?: string) => string,
-      //   thisArg: Factory<string>,
-      //   maxLength: Factory<number>,
-      //   fillString: Factory<string>,
-      // ): ECR<string> {
-      //   const S$ = thisArg();
-      //   const S = isIter(S$) ? yield* S$ as any : S$;
-      //   if (IsAbrupt(S)) return S;
-      //   const intMaxLength$ = maxLength();
-      //   const intMaxLength = isIter(intMaxLength$) ? yield* intMaxLength$ : intMaxLength$;
-      //   if (IsAbrupt(intMaxLength)) return intMaxLength;
-      //   const stringLength = S.length;
-      //   if (intMaxLength <= stringLength) return S;
-      //   const filler$ = fillString();
-      //   const filler = isIter(filler$) ? yield* filler$ : filler$;
-      //   if (IsAbrupt(filler)) return filler;
-      //   return callMethod($, method, S, intMaxLength, filler);
-      // }
-
-      function callMethod<A extends unknown[], R>($: VM, method: (this: string, ...args: A) => R, thisArg: string, ...args: A): CR<R> {
-        try {
-          return method.apply(thisArg, args);
-        } catch (err) {
-          return $.throw(err.name, err.message);
-        }
-      }
-
-      /** 22.1.3 Properties of the String Prototype Object */
-      defineProperties(realm, stringPrototype, {
-        /**
-         * 22.1.3.1 String.prototype.at ( index )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 4. Let relativeIndex be ? ToIntegerOrInfinity(index).
-         * ...
-         */
-        'at': method(($, thisValue, index) =>
-          wrapMethod($, String.prototype.at,
-                     () => coercibleToString($, thisValue),
-                     () => ToIntegerOrInfinity($, index))),
-
-        /**
-         * 22.1.3.2 String.prototype.charAt ( pos )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let position be ? ToIntegerOrInfinity(pos).
-         * ...
-         */
-        'charAt': method(($, thisValue, pos) =>
-          wrapMethod($, String.prototype.charAt,
-                     () => coercibleToString($, thisValue),
-                     () => ToIntegerOrInfinity($, pos))),
-
-        /**
-         * 22.1.3.3 String.prototype.charCodeAt ( pos )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let position be ? ToIntegerOrInfinity(pos).
-         * ...
-         */
-        'charCodeAt': method(($, thisValue, pos) =>
-          wrapMethod($, String.prototype.charCodeAt,
-                     () => coercibleToString($, thisValue),
-                     () => ToIntegerOrInfinity($, pos))),
-
-        /**
-         * 22.1.3.4 String.prototype.codePointAt ( pos )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let position be ? ToIntegerOrInfinity(pos).
-         * ...
-         */
-        'codePointAt': method(($, thisValue, pos) =>
-          wrapMethod($, String.prototype.codePointAt,
-                     () => coercibleToString($, thisValue),
-                     () => ToIntegerOrInfinity($, pos))),
-
-        /**
-         * 22.1.3.5 String.prototype.concat ( ...args )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let R be S.
-         * 4. For each element next of args, do
-         *     a. Let nextString be ? ToString(next).
-         * ...
-         * The "length" property of this method is 1𝔽.
-         */
-        'concat': method(($, thisValue, ...args) =>
-          wrapMethod($, String.prototype.concat,
-                     () => coercibleToString($, thisValue),
-                     ...args.map((arg) => () => ToString($, arg))), 1),
-
-        /** 22.1.3.6 String.prototype.constructor */
-        'constructor': propWC(stringCtor),
-
-        /**
-         * 22.1.3.7 String.prototype.endsWith ( searchString [ , endPosition ] )
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let isRegExp be ? IsRegExp(searchString).
-         * 4. If isRegExp is true, throw a TypeError exception.
-         * 5. Let searchStr be ? ToString(searchString).
-         * 6. Let len be the length of S.
-         * 7. If endPosition is undefined, let pos be len; else let
-         *    pos be ? ToIntegerOrInfinity(endPosition).
-         * ...
-         */
-        'endsWith': method(($, thisValue, searchString, endPosition = undefined) =>
-          wrapMethod($, String.prototype.endsWith,
-                     () => coercibleToString($, thisValue),
-                     () => noRegExpToString($, searchString),
-                     function*() {
-                       if (endPosition == null) return undefined;
-                       return yield* ToIntegerOrInfinity($, endPosition);
-                     })),
-
-        /**
-         * 22.1.3.8 String.prototype.includes ( searchString [ , position ] )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let isRegExp be ? IsRegExp(searchString).
-         * 4. If isRegExp is true, throw a TypeError exception.
-         * 5. Let searchStr be ? ToString(searchString).
-         * 6. Let pos be ? ToIntegerOrInfinity(position).
-         */
-        'includes': method(($, thisValue, searchString, position = undefined) =>
-          wrapMethod($, String.prototype.includes,
-                     () => coercibleToString($, thisValue),
-                     () => noRegExpToString($, searchString),
-                     () => ToIntegerOrInfinity($, position))),
-
-        /**
-         * 22.1.3.9 String.prototype.indexOf ( searchString [ , position ] )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let searchStr be ? ToString(searchString).
-         * 4. Let pos be ? ToIntegerOrInfinity(position).
-         */
-        'indexOf': method(($, thisValue, searchString, position = undefined) =>
-          wrapMethod($, String.prototype.indexOf,
-                     () => coercibleToString($, thisValue),
-                     () => ToString($, searchString),
-                     () => ToIntegerOrInfinity($, position))),
-
-        /**
-         * 22.1.3.10 String.prototype.lastIndexOf ( searchString [ , position ] )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let searchStr be ? ToString(searchString).
-         * 4. Let numPos be ? ToNumber(position).
-         */
-        'lastIndexOf': method(($, thisValue, searchString, position = undefined) =>
-          wrapMethod($, String.prototype.lastIndexOf,
-                     () => coercibleToString($, thisValue),
-                     () => ToString($, searchString),
-                     () => ToNumber($, position))),
-
-        /**
-         * 22.1.3.11 String.prototype.localeCompare ( that [ , reserved1 [ , reserved2 ] ] )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let thatValue be ? ToString(that).
-         *
-         * NOTE: We don't attempt to do anything with locale (even delegating to the host)
-         * to avoid getting different results on different hosts.  Instead, we do a trivial
-         * non-locale compare.
-         */
-        'localeCompare': method(function*($, thisValue, that) {
-          const left = yield* coercibleToString($, thisValue);
-          if (IsAbrupt(left)) return left;
-          const right = yield* ToString($, that);
-          if (IsAbrupt(right)) return right;
-          return left < right ? -1 : left > right ? 1 : 0;
-        }),
-
-        /**
-         * 22.1.3.12 String.prototype.match ( regexp )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. If regexp is neither undefined nor null, then
-         *     a. Let matcher be ? GetMethod(regexp, @@match).
-         *     b. If matcher is not undefined, then
-         *         i. Return ? Call(matcher, regexp, « O »).
-         * 3. Let S be ? ToString(O).
-         * 4. Let rx be ? RegExpCreate(regexp, undefined).
-         * 5. Return ? Invoke(rx, @@match, « S »).
-         */
-        'match': method(function*($, thisValue, regexp) {
-          // TODO - validate this!!!
-          const O = RequireObjectCoercible($, thisValue);
-          if (IsAbrupt(O)) return O;
-          if (regexp != null) {
-            const matcher = yield* GetMethod($, regexp, Symbol.match);
-            if (IsAbrupt(matcher)) return matcher;
-            if (matcher !== undefined) {
-              return yield* Call($, matcher, regexp, [O]);
-            }
-          }
-          const S = yield* ToString($, O);
-          if (IsAbrupt(S)) return S;
-          const rx = RegExpCreate($, regexp, undefined);
-          return yield* Invoke($, rx, Symbol.match, [S]);
-        }),
-
-        /**
-         * 22.1.3.13 String.prototype.matchAll ( regexp )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. If regexp is neither undefined nor null, then
-         *     a. Let isRegExp be ? IsRegExp(regexp).
-         *     b. If isRegExp is true, then
-         *         i. Let flags be ? Get(regexp, "flags").
-         *         ii. Perform ? RequireObjectCoercible(flags).
-         *         iii. If ? ToString(flags) does not contain "g", throw a TypeError exception.
-         *     c. Let matcher be ? GetMethod(regexp, @@matchAll).
-         *     d. If matcher is not undefined, then
-         *         i. Return ? Call(matcher, regexp, « O »).
-         * 3. Let S be ? ToString(O).
-         * 4. Let rx be ? RegExpCreate(regexp, "g").
-         * 5. Return ? Invoke(rx, @@matchAll, « S »).
-         */
-        'matchAll': method(function*($, thisValue, regexp) {
-          // TODO - validate this!!!
-          const O = RequireObjectCoercible($, thisValue);
-          if (IsAbrupt(O)) return O;
-          if (regexp != null) {
-            const isRegExp = IsRegExp(regexp);
-            if (IsAbrupt(isRegExp)) return isRegExp;
-            if (isRegExp) {
-              const flags = yield* Get($, regexp as Obj, 'flags');
-              if (IsAbrupt(flags)) return flags;
-              if (!String(flags).includes('g')) {
-                return $.throw('TypeError', 'RegExp must have "g" flag for matchAll');
-              }
-            }
-            const matcher = yield* GetMethod($, regexp, Symbol.matchAll);
-            if (IsAbrupt(matcher)) return matcher;
-            if (matcher !== undefined) {
-              return yield* Call($, matcher, regexp, [O]);
-            }
-          }
-          const S = yield* ToString($, O);
-          if (IsAbrupt(S)) return S;
-          const rx = RegExpCreate($, regexp, 'g');
-          return yield* Invoke($, rx, Symbol.matchAll, [S]);
-        }),
-
-        /**
-         * 22.1.3.14 String.prototype.normalize ( [ form ] )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. If form is undefined, let f be "NFC".
-         * 4. Else, let f be ? ToString(form).
-         * 5. If f is not one of "NFC", "NFD", "NFKC", or "NFKD", throw a RangeError exception.
-         */
-        'normalize': method(($, thisValue, form = 'NFC') =>
-          wrapMethod($, String.prototype.normalize,
-                     () => coercibleToString($, thisValue),
-                     () => ToString($, form))),
-
-        /**
-         * 22.1.3.15 String.prototype.padEnd ( maxLength [ , fillString ] )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Return ? StringPad(O, maxLength, fillString, end).
-         */
-        'padEnd': method(($, thisValue, maxLength, fillString = ' ') =>
-          wrapMethod($, String.prototype.padEnd,
-                     () => coercibleToString($, thisValue),
-                     () => ToIntegerOrInfinity($, maxLength),
-                     () => ToString($, fillString))),
-
-        /**
-         * 22.1.3.16 String.prototype.padStart ( maxLength [ , fillString ] )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Return ? StringPad(O, maxLength, fillString, start).
-         * ---
-         * 22.1.3.16.1 StringPad ( O, maxLength, fillString, placement )
-         *
-         * 1. Let S be ? ToString(O).
-         * 2. Let intMaxLength be ℝ(? ToLength(maxLength)).
-         * 3. Let stringLength be the length of S.
-         * 4. If intMaxLength ≤ stringLength, return S.
-         * 5. If fillString is undefined, let filler be the String
-         *    value consisting solely of the code unit 0x0020 (SPACE).
-         * 6. Else, let filler be ? ToString(fillString).
-         * ...
-         */
-        'padStart': method(($, thisValue, maxLength, fillString = ' ') =>
-          wrapMethod($, String.prototype.padStart,
-                  () => coercibleToString($, thisValue),
-                  () => ToLength($, maxLength),
-                  (str: string, len: number) =>
-                    ToString($, len > str.length ? fillString : ' '))),
-
-        /**
-         * 22.1.3.17 String.prototype.repeat ( count )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let n be ? ToIntegerOrInfinity(count).
-         * 4. If n < 0 or n = +∞, throw a RangeError exception.
-         */
-        'repeat': method(($, thisValue, count) =>
-          wrapMethod($, String.prototype.repeat,
-                     () => coercibleToString($, thisValue),
-                     () => ToIntegerOrInfinity($, count))),
-
-        /**
-         * 22.1.3.18 String.prototype.replace ( searchValue, replaceValue )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. If searchValue is neither undefined nor null, then
-         *     a. Let replacer be ? GetMethod(searchValue, @@replace).
-         *     b. If replacer is not undefined, then
-         *         i. Return ? Call(replacer, searchValue, « O, replaceValue »).
-         * 3. Let string be ? ToString(O).
-         * 4. Let searchString be ? ToString(searchValue).
-         * 5. Let functionalReplace be IsCallable(replaceValue).
-         * 6. If functionalReplace is false, then
-         *     a. Set replaceValue to ? ToString(replaceValue).
-         * 7. Let searchLength be the length of searchString.
-         * 8. Let position be StringIndexOf(string, searchString, 0).
-         * 9. If position = -1, return string.
-         * 10. Let preceding be the substring of string from 0 to position.
-         * 11. Let following be the substring of string from position + searchLength.
-         * 12. If functionalReplace is true, then
-         *     a. Let replacement be ? ToString(? Call(replaceValue,
-         *        undefined, « searchString, 𝔽(position), string »)).
-         * 13. Else,
-         *     a. Assert: replaceValue is a String.
-         *     b. Let captures be a new empty List.
-         *     c. Let replacement be ! GetSubstitution(searchString,
-         *        string, position, captures, undefined, replaceValue).
-         * 14. Return the string-concatenation of preceding, replacement, and following.
-         */
-        'replace': method(function*($, thisValue, searchValue, replaceValue) {
-          const O = RequireObjectCoercible($, thisValue);
-          if (IsAbrupt(O)) return O;
-          if (searchValue != null) {
-            const replacer = yield* GetMethod($, searchValue, Symbol.replace);
-            if (IsAbrupt(replacer)) return replacer;
-            if (replacer !== undefined) {
-              return yield* Call($, replacer, searchValue, [O, replaceValue]);
-            }
-          }
-          const string = yield* ToString($, O);
-          if (IsAbrupt(string)) return string;
-          const searchString = yield* ToString($, searchValue);
-          if (IsAbrupt(searchString)) return searchString;
-          const functionalReplace = IsCallable(replaceValue);
-          //let replaceValue: string|undefined;
-          if (!functionalReplace) {
-            const replaceValue$ = yield* ToString($, replaceValue);
-            if (IsAbrupt(replaceValue$)) return replaceValue$;
-            //replaceValue = replaceValue$;
-          }
-          // TODO - figure out how regex objects work
-          throw new Error('NOT IMPLEMENTED');
-        }),
-          
-        /**
-         * 22.1.3.19 String.prototype.replaceAll ( searchValue, replaceValue )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. If searchValue is neither undefined nor null, then
-         *     a. Let isRegExp be ? IsRegExp(searchValue).
-         *     b. If isRegExp is true, then
-         *         i. Let flags be ? Get(searchValue, "flags").
-         *         ii. Perform ? RequireObjectCoercible(flags).
-         *         iii. If ? ToString(flags) does not contain "g",
-         *              throw a TypeError exception.
-         *     c. Let replacer be ? GetMethod(searchValue, @@replace).
-         *     d. If replacer is not undefined, then
-         *         i. Return ? Call(replacer, searchValue, « O, replaceValue »).
-         * 3. Let string be ? ToString(O).
-         * 4. Let searchString be ? ToString(searchValue).
-         * 5. Let functionalReplace be IsCallable(replaceValue).
-         * 6. If functionalReplace is false, then
-         *     a. Set replaceValue to ? ToString(replaceValue).
-         * 7. Let searchLength be the length of searchString.
-         * 8. Let advanceBy be max(1, searchLength).
-         * 9. Let matchPositions be a new empty List.
-         * 10. Let position be StringIndexOf(string, searchString, 0).
-         * 11. Repeat, while position ≠ -1,
-         *     a. Append position to matchPositions.
-         *     b. Set position to StringIndexOf(string, searchString, position + advanceBy).
-         * 12. Let endOfLastMatch be 0.
-         * 13. Let result be the empty String.
-         * 14. For each element p of matchPositions, do
-         *     a. Let preserved be the substring of string from endOfLastMatch to p.
-         *     b. If functionalReplace is true, then
-         *         i. Let replacement be ? ToString(?
-         *            Call(replaceValue, undefined, « searchString, 𝔽(p),
-         *            string »)).
-         *     c. Else,
-         *         i. Assert: replaceValue is a String.
-         *         ii. Let captures be a new empty List.
-         *         iii. Let replacement be
-         *              ! GetSubstitution(searchString, string, p,
-         *              captures, undefined, replaceValue).
-         *     d. Set result to the string-concatenation of result, preserved, and replacement.
-         *     e. Set endOfLastMatch to p + searchLength.
-         * 15. If endOfLastMatch < the length of string, then
-         *     a. Set result to the string-concatenation of result and the substring of
-         *        string from endOfLastMatch.
-         * 16. Return result.
-         */
-        'replaceAll': method(function*(_$, _thisValue, _searchValue, _replaceValue) {
-          throw new Error('NOT IMPLEMENTED');
-        }),
-
-        /**
-         * 22.1.3.20 String.prototype.search ( regexp )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. If regexp is neither undefined nor null, then
-         *     a. Let searcher be ? GetMethod(regexp, @@search).
-         *     b. If searcher is not undefined, then
-         *         i. Return ? Call(searcher, regexp, « O »).
-         * 3. Let string be ? ToString(O).
-         * 4. Let rx be ? RegExpCreate(regexp, undefined).
-         * 5. Return ? Invoke(rx, @@search, « string »).
-         */
-        'search': method(function*($, thisValue, regexp) {
-          // TODO - validate!!!
-          const O = RequireObjectCoercible($, thisValue);
-          if (IsAbrupt(O)) return O;
-          if (regexp != null) {
-            const searcher = yield* GetMethod($, regexp, Symbol.search);
-            if (IsAbrupt(searcher)) return searcher;
-            if (searcher !== undefined) {
-              return yield* Call($, searcher, regexp, [O]);
-            }
-          }
-          const string = yield* ToString($, O);
-          if (IsAbrupt(string)) return string;
-          const rx = RegExpCreate($, regexp, undefined);
-          return yield* Invoke($, rx, Symbol.search, [string]);
-        }),
-
-        /**
-         * 22.1.3.21 String.prototype.slice ( start, end )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let len be the length of S.
-         * 4. Let intStart be ? ToIntegerOrInfinity(start).
-         * 5. If intStart = -∞, let from be 0.
-         * 6. Else if intStart < 0, let from be max(len + intStart, 0).
-         * 7. Else, let from be min(intStart, len).
-         * 8. If end is undefined, let intEnd be len; else let intEnd be ? ToIntegerOrInfinity(end).
-         */
-        'slice': method(($, thisValue, start, end = undefined) =>
-          wrapMethod($, String.prototype.slice,
-                     () => coercibleToString($, thisValue),
-                     () => ToIntegerOrInfinity($, start),
-                     () => end !== undefined ? ToIntegerOrInfinity($, end) : end)),
-
-        /**
-         * 22.1.3.22 String.prototype.split ( separator, limit )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. If separator is neither undefined nor null, then
-         *     a. Let splitter be ? GetMethod(separator, @@split).
-         *     b. If splitter is not undefined, then
-         *         i. Return ? Call(splitter, separator, « O, limit »).
-         * 3. Let S be ? ToString(O).
-         * 4. If limit is undefined, let lim be 232 - 1; else let lim be ℝ(? ToUint32(limit)).
-         * 5. Let R be ? ToString(separator).
-         * ...
-         */
-        'split': method(function*($, thisValue, separator, limit = undefined) {
-          // TODO - regex/symbol, returns array, ...
-          throw new Error('NOT IMPLEMENTED');
-        }),
-
-        /**
-         * 22.1.3.23 String.prototype.startsWith ( searchString [ , position ] )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let isRegExp be ? IsRegExp(searchString).
-         * 4. If isRegExp is true, throw a TypeError exception.
-         * 5. Let searchStr be ? ToString(searchString).
-         * 6. Let len be the length of S.
-         * 7. If position is undefined, let pos be 0; else let pos be
-         *    ? ToIntegerOrInfinity(position).
-         */
-        'startsWith': method(($, thisValue, searchString, position = undefined) =>
-          wrapMethod($, String.prototype.startsWith,
-                     () => coercibleToString($, thisValue),
-                     () => noRegExpToString($, searchString),
-                     () => ToIntegerOrInfinity($, position))),
-
-        /**
-         * 22.1.3.24 String.prototype.substring ( start, end )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         * 3. Let len be the length of S.
-         * 4. Let intStart be ? ToIntegerOrInfinity(start).
-         * 5. If end is undefined, let intEnd be len; else let intEnd be ? ToIntegerOrInfinity(end).
-         */
-        'substring': method(($, thisValue, start, end) =>
-          wrapMethod($, String.prototype.substring,
-                     () => coercibleToString($, thisValue),
-                     () => ToIntegerOrInfinity($, start),
-                     () => end !== undefined ? ToIntegerOrInfinity($, end) : end)),
-
-        /**
-         * 22.1.3.25 String.prototype.toLocaleLowerCase ( [ reserved1 [ , reserved2 ] ] )
-         */
-        'toLocaleLowerCase': method(($, thisValue) =>
-          wrapMethod($, String.prototype.toLowerCase,
-                     () => coercibleToString($, thisValue))),
-
-        /**
-         * 22.1.3.26 String.prototype.toLocaleUpperCase ( [ reserved1 [ , reserved2 ] ] )
-         */
-        'toLocaleUpperCase': method(($, thisValue) =>
-          wrapMethod($, String.prototype.toUpperCase,
-                     () => coercibleToString($, thisValue))),
-
-        /**
-         * 22.1.3.27 String.prototype.toLowerCase ( )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let S be ? ToString(O).
-         */
-        'toLowerCase': method(($, thisValue) =>
-          wrapMethod($, String.prototype.toLowerCase,
-                     () => coercibleToString($, thisValue))),
-
-        /**
-         * 22.1.3.28 String.prototype.toString ( )
-         * 
-         * 1. Return ? thisStringValue(this value).
-         */
-        'toString': method(function*($, thisValue) {
-          return thisStringValue($, thisValue, '.toString');
-        }),
-
-        /**
-         * 22.1.3.29 String.prototype.toUpperCase ( )
-         * 
-         * It behaves in exactly the same way as
-         * String.prototype.toLowerCase, except that the String is
-         * mapped using the toUppercase algorithm of the Unicode
-         * Default Case Conversion.
-         */
-        'toUpperCase': method(($, thisValue) =>
-          wrapMethod($, String.prototype.toUpperCase,
-                     () => coercibleToString($, thisValue))),
-
-        /**
-         * 22.1.3.30 String.prototype.trim ( )
-         * 
-         * 1. Let S be the this value.
-         * 2. Return ? TrimString(S, start+end).
-         * ---
-         * 1. Let str be ? RequireObjectCoercible(string).
-         * 2. Let S be ? ToString(str).
-         * ...
-         */
-        'trim': method(($, thisValue) =>
-          wrapMethod($, String.prototype.trim,
-                     () => coercibleToString($, thisValue))),
-
-        /**
-         * 22.1.3.31 String.prototype.trimEnd ( )
-         * 
-         * 1. Let S be the this value.
-         * 2. Return ? TrimString(S, end).
-         * ---
-         * 1. Let str be ? RequireObjectCoercible(string).
-         * 2. Let S be ? ToString(str).
-         * ...
-         */
-        'trimEnd': method(($, thisValue) =>
-          wrapMethod($, String.prototype.trimEnd,
-                     () => coercibleToString($, thisValue))),
-
-        /**
-         * 22.1.3.32 String.prototype.trimStart ( )
-         * 
-         * 1. Let S be the this value.
-         * 2. Return ? TrimString(S, start).
-         * ---
-         * 1. Let str be ? RequireObjectCoercible(string).
-         * 2. Let S be ? ToString(str).
-         * ...
-         */
-        'trimStart': method(($, thisValue) =>
-          wrapMethod($, String.prototype.trimStart,
-                     () => coercibleToString($, thisValue))),
-
-        /**
-         * 22.1.3.33 String.prototype.valueOf ( )
-         * 
-         * 1. Return ? thisStringValue(this value).
-         */
-        'valueOf': method(function*($, thisValue) {
-          return thisStringValue($, thisValue, '.valueOf');
-        }),
-
-          // TODO - iterators!!!
-
-        /**
-         * 22.1.3.34 String.prototype [ @@iterator ] ( )
-         * 
-         * 1. Let O be ? RequireObjectCoercible(this value).
-         * 2. Let s be ? ToString(O).
-         * 3. Let closure be a new Abstract Closure with no parameters that captures s and performs the following steps when called:
-         *     a. Let len be the length of s.
-         *     b. Let position be 0.
-         *     c. Repeat, while position < len,
-         *         i. Let cp be CodePointAt(s, position).
-         *         ii. Let nextIndex be position + cp.[[CodeUnitCount]].
-         *         iii. Let resultString be the substring of s from position to nextIndex.
-         *         iv. Set position to nextIndex.
-         *         v. Perform ? GeneratorYield(CreateIterResultObject(resultString, false)).
-         *     d. Return undefined.
-         * 4. Return CreateIteratorFromClosure(closure, "%StringIteratorPrototype%", %StringIteratorPrototype%).
-         */
-
-        /**
-         * 22.1.5 String Iterator Objects
-         * 
-         * A String Iterator is an object, that represents a specific iteration over some specific String instance object. There is not a named constructor for String Iterator objects. Instead, String iterator objects are created by calling certain methods of String instance objects.
-         */
-
-        /**
-         * 22.1.5.1 The %StringIteratorPrototype% Object
-         * 
-         * The %StringIteratorPrototype% object:
-         * 
-         * has properties that are inherited by all String Iterator Objects.
-         * is an ordinary object.
-         * has a [[Prototype]] internal slot whose value is %IteratorPrototype%.
-         * has the following properties:
-         */
-
-        /**
-         * 22.1.5.1.1 %StringIteratorPrototype%.next ( )
-         * 
-         * 1. Return ? GeneratorResume(this value, empty, "%StringIteratorPrototype%").
-         */
-
-        /**
-         * 22.1.5.1.2 %StringIteratorPrototype% [ @@toStringTag ]
-         * 
-         * The initial value of the @@toStringTag property is the String value "String Iterator".
-         * 
-         * This property has the attributes { [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: true }.
-         */
-
-      });
-    },
-  },
-};
-
-// TODO - figure out how to make these things more plug-and-play/optional?
-//      - maybe they get separated into separate files?
-
-/**/
-
 export const fundamental: Plugin = {
   deps: [
     objectAndFunctionPrototype,
@@ -2656,101 +1936,6 @@ export const fundamental: Plugin = {
     functionConstructor,
     booleanObject,
     symbolObject,
-    errorObject,
     numberObject,
-    stringObject,
   ],
 }
-
-
-/*
-22.1.3.16.1 StringPad ( O, maxLength, fillString, placement )
-1. 1. Let S be ? ToString(O).
-2. 2. Let intMaxLength be ℝ(? ToLength(maxLength)).
-3. 3. Let stringLength be the length of S.
-4. 4. If intMaxLength ≤ stringLength, return S.
-5. 5. If fillString is undefined, let filler be the String value consisting solely of the code unit 0x0020 (SPACE).
-6. 6. Else, let filler be ? ToString(fillString).
-
-22.1.3.16.2 ToZeroPaddedDecimalString ( n, minLength )
-1. 1. Let S be the String representation of n, formatted as a decimal number.
-2. 2. Return ! StringPad(S, 𝔽(minLength), "0", start).
-
-22.1.3.18.1 GetSubstitution ( matched, str, position, captures, namedCaptures, replacementTemplate )
-
-The abstract operation GetSubstitution takes arguments matched (a String), str (a String), position (a non-negative integer), captures (a possibly empty List, each of whose elements is a String or undefined), namedCaptures (an Object or undefined), and replacementTemplate (a String) and returns either a normal completion containing a String or a throw completion. For the purposes of this abstract operation, a decimal digit is a code unit in the inclusive interval from 0x0030 (DIGIT ZERO) to 0x0039 (DIGIT NINE). It performs the following steps when called:
-
-1. 1. Let stringLength be the length of str.
-2. 2. Assert: position ≤ stringLength.
-3. 3. Let result be the empty String.
-4. 4. Let templateRemainder be replacementTemplate.
-5. 5. Repeat, while templateRemainder is not the empty String,
-a. a. NOTE: The following steps isolate ref (a prefix of templateRemainder), determine refReplacement (its replacement), and then append that replacement to result.
-b. b. If templateRemainder starts with "$$", then
-i. i. Let ref be "$$".
-ii. ii. Let refReplacement be "$".
-c. c. Else if templateRemainder starts with "$`", then
-i. i. Let ref be "$`".
-ii. ii. Let refReplacement be the substring of str from 0 to position.
-d. d. Else if templateRemainder starts with "$&", then
-i. i. Let ref be "$&".
-ii. ii. Let refReplacement be matched.
-e. e. Else if templateRemainder starts with "$\'" (0x0024 (DOLLAR SIGN) followed by 0x0027 (APOSTROPHE)), then
-i. i. Let ref be "$\'".
-ii. ii. Let matchLength be the length of matched.
-iii. iii. Let tailPos be position + matchLength.
-iv. iv. Let refReplacement be the substring of str from min(tailPos, stringLength).
-v. v. NOTE: tailPos can exceed stringLength only if this abstract operation was invoked by a call to the intrinsic @@replace method of %RegExp.prototype% on an object whose "exec" property is not the intrinsic %RegExp.prototype.exec%.
-f. f. Else if templateRemainder starts with "$" followed by 1 or more decimal digits, then
-i. i. If templateRemainder starts with "$" followed by 2 or more decimal digits, let digitCount be 2. Otherwise, let digitCount be 1.
-ii. ii. Let ref be the substring of templateRemainder from 0 to 1 + digitCount.
-iii. iii. Let digits be the substring of templateRemainder from 1 to 1 + digitCount.
-iv. iv. Let index be ℝ(StringToNumber(digits)).
-v. v. Assert: 0 ≤ index ≤ 99.
-vi. vi. Let captureLen be the number of elements in captures.
-vii. vii. If 1 ≤ index ≤ captureLen, then
-1. 1. Let capture be captures[index - 1].
-2. 2. If capture is undefined, then
-a. a. Let refReplacement be the empty String.
-3. 3. Else,
-a. a. Let refReplacement be capture.
-viii. viii. Else,
-1. 1. Let refReplacement be ref.
-g. g. Else if templateRemainder starts with "$<", then
-i. i. Let gtPos be StringIndexOf(templateRemainder, ">", 0).
-ii. ii. If gtPos = -1 or namedCaptures is undefined, then
-1. 1. Let ref be "$<".
-2. 2. Let refReplacement be ref.
-iii. iii. Else,
-1. 1. Let ref be the substring of templateRemainder from 0 to gtPos + 1.
-2. 2. Let groupName be the substring of templateRemainder from 2 to gtPos.
-3. 3. Assert: namedCaptures is an Object.
-4. 4. Let capture be ? Get(namedCaptures, groupName).
-5. 5. If capture is undefined, then
-a. a. Let refReplacement be the empty String.
-6. 6. Else,
-a. a. Let refReplacement be ? ToString(capture).
-h. h. Else,
-i. i. Let ref be the substring of templateRemainder from 0 to 1.
-ii. ii. Let refReplacement be ref.
-i. i. Let refLength be the length of ref.
-j. j. Set templateRemainder to the substring of templateRemainder from refLength.
-k. k. Set result to the string-concatenation of result and refReplacement.
-6. 6. Return result.
-
-22.1.3.30.1 TrimString ( string, where )
-
-The abstract operation TrimString takes arguments string (an ECMAScript language value) and where (start, end, or start+end) and returns either a normal completion containing a String or a throw completion. It interprets string as a sequence of UTF-16 encoded code points, as described in 6.1.4. It performs the following steps when called:
-
-1. 1. Let str be ? RequireObjectCoercible(string).
-2. 2. Let S be ? ToString(str).
-3. 3. If where is start, let T be the String value that is a copy of S with leading white space removed.
-4. 4. Else if where is end, let T be the String value that is a copy of S with trailing white space removed.
-5. 5. Else,
-a. a. Assert: where is start+end.
-b. b. Let T be the String value that is a copy of S with both leading and trailing white space removed.
-6. 6. Return T.
-
-The definition of white space is the union of WhiteSpace and LineTerminator. When determining whether a Unicode code point is in Unicode general category “Space_Separator” (“Zs”), code unit sequences are interpreted as UTF-16 encoded code point sequences as specified in 6.1.4.
-
-*/

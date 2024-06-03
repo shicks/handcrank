@@ -11,7 +11,7 @@ import { Obj, OrdinaryObjectCreate } from './obj';
 import { EnvironmentRecord } from './environment_record';
 import { HasValueField, propWC } from './property_descriptor';
 import { Assert } from './assert';
-import { IsFunc } from './func';
+import { Func, IsFunc } from './func';
 
 export type EvalGen<T> = Generator<undefined, T, undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
@@ -65,6 +65,10 @@ export class VM {
   getRunningContext(): ExecutionContext {
     // TODO - what if stack empty?!?
     return this.executionStack.at(-1)!;
+  }
+
+  getActiveFunctionObject(): Func|undefined {
+    return this.getRunningContext().Function ?? undefined;
   }
 
   getRealm(): RealmRecord|undefined {
