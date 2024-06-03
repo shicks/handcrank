@@ -22,13 +22,15 @@ browser or on the server.
 - [x] Standard globals
 - [x] Basic primitive types and wrappers
     - [x] Number
+        - [ ] Math
     - [x] String
     - [x] Symbol
     - [x] Boolean
     - [ ] BigInt
 - [ ] Well-known Object types
     - [x] Object
-        - [ ] static methods
+        - [x] static methods
+            - [ ] Object.fromEntries
         - [x] instance methods
     - [x] Function
         - [ ] instance methods
@@ -36,7 +38,8 @@ browser or on the server.
         - [x] all subtypes
         - [x] throwable
         - [x] stack traces
-    - [ ] Array
+    - [x] Array
+    - [ ] Iterators
     - [ ] RegExp
     - [ ] Arguments
     - [ ] Map
@@ -45,7 +48,7 @@ browser or on the server.
 - [x] Define functions
     - [x] vanilla declarations
     - [x] vanilla expressions
-    - [ ] arrow functions
+    - [x] arrow functions
     - [ ] generators
     - [ ] async
     - [ ] async arrows
@@ -53,7 +56,7 @@ browser or on the server.
 - [ ] Template string literals
 - [ ] Syntax
     - [x] Object literals
-    - [ ] Array literals
+    - [x] Array literals
     - [ ] Destructuring
     - [x] binary operators
     - [x] unary operators
