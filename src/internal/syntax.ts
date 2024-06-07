@@ -100,6 +100,13 @@ export const syntax: Plugin = {
         //if (GetGeneratorKind() === 'async') {
         return new Abrupt(CompletionType.Return, exprValue, EMPTY);
       });
+      on('YieldExpression', function*(n) {
+        if (n.delegate) {
+          return yield* Evaluation_YieldDelegateExpression($, n);
+        } else {
+          return yield* Evaluation_YieldExpression($, n);
+        }
+      });
       on('ThrowStatement', function*(n) {
         // 14.14.1 Runtime Semantics: Evaluation
         //

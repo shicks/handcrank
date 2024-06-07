@@ -61,3 +61,11 @@ browser or on the server.
     - [x] binary operators
     - [x] unary operators
     - [x] ++ and -- operators
+    - [ ] Control structures
+        - [ ] for
+        - [ ] if
+        - [ ] while
+        - [ ] try
+    - [ ] Classes
+        - [ ] class fields
+        - [ ] private fields

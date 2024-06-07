@@ -166,11 +166,17 @@ export const FROZEN: FROZEN = new EnumSym('frozen');
 export interface FROZEN extends EnumSym<'frozen'> {}
 
 
-/**
- * ???
- */
+// For constructor type
 export const BASE: BASE = new EnumSym('base');
 export interface BASE extends EnumSym<'base'> {}
 
 export const DERIVED: DERIVED = new EnumSym('derived');
 export interface DERIVED extends EnumSym<'derived'> {}
+
+
+// For 7.4.3 GetIterator
+export const SYNC: SYNC = new EnumSym('sync');
+export interface SYNC extends EnumSym<'sync'> {}
+
+export const ASYNC: ASYNC = new EnumSym('async');
+export interface ASYNC extends EnumSym<'async'> {}

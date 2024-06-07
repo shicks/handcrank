@@ -1,6 +1,6 @@
 import { Abrupt, CR, CastNotAbrupt, CompletionType, IsAbrupt, ThrowCompletion } from './completion_record';
-import { DebugString, ECR, EvalGen, VM } from './vm';
-import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, STRICT, UNINITIALIZED, UNUSED } from './enums';
+import { DebugString, ECR, EvalGen, VM, just } from './vm';
+import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, STRICT, SYNC, UNINITIALIZED, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
 import { PropertyDescriptor, PropertyRecord, propC, propWC } from './property_descriptor';
 import { Assert } from './assert';
@@ -20,6 +20,8 @@ import { ToObject } from './abstract_conversion';
 import { GetThisValue, GetValue, InitializeReferencedBinding, IsPropertyReference, PutValue, ReferenceRecord } from './reference_record';
 import { IsCallable, IsConstructor } from './abstract_compare';
 import { memoize } from './slots';
+import { GetIterator, IteratorStep, IteratorValue } from './abstract_iterator';
+import { InstantiateGeneratorFunctionObject } from './generator';
 
 type Node = ESTree.Node;
 
@@ -27,9 +29,6 @@ type PrivateElement = never;
 type ClassFieldDefinitionRecord = never;
 
 function PrepareForTailCall(...args: any): void {}
-declare const GetIterator: any;
-declare const IteratorStep: any;
-declare const IteratorValue: any;
 
 declare global {
   interface ObjectSlots {
@@ -383,6 +382,7 @@ export function InstantiateFunctionObject($: VM, env: EnvironmentRecord, private
     || node.type === 'FunctionExpression'
     || node.type === 'ArrowFunctionExpression');
   if (node.generator) {
+    Assert(node.type !== 'ArrowFunctionExpression');
     if (node.async) return InstantiateAsyncGeneratorFunctionObject($, node, env, privateEnv);
     return InstantiateGeneratorFunctionObject($, node, env, privateEnv);
   }
@@ -390,7 +390,6 @@ export function InstantiateFunctionObject($: VM, env: EnvironmentRecord, private
   return InstantiateOrdinaryFunctionObject($, node, env, privateEnv);
 }
 declare const InstantiateAsyncGeneratorFunctionObject: any;
-declare const InstantiateGeneratorFunctionObject: any;
 declare const InstantiateAsyncFunctionObject: any;
 
 /**
@@ -1880,13 +1879,13 @@ function* ArgumentListEvaluation(
       // TODO - we haven't implemented iterators yet
       const spreadObj = yield* $.evaluateValue(arg.argument);
       if (IsAbrupt(spreadObj)) return spreadObj;
-      const iteratorRecord = GetIterator($, spreadObj, false);
+      const iteratorRecord = yield* GetIterator($, spreadObj, SYNC);
       if (IsAbrupt(iteratorRecord)) return iteratorRecord;
       while (true) {
-        const next = IteratorStep($, iteratorRecord);
+        const next = yield* IteratorStep($, iteratorRecord);
         if (IsAbrupt(next)) return next;
         if (!next) break;
-        const nextArg = IteratorValue($, next);
+        const nextArg = yield* IteratorValue($, next);
         if (IsAbrupt(nextArg)) return nextArg;
         list.push(nextArg);
       }
@@ -1913,6 +1912,22 @@ export function method(
   return (realm, name) => propWC(CreateBuiltinFunction({
     Call($, thisObj, argumentsList) { return fn($, thisObj, ...argumentsList); },
   }, length, specifiedName ?? name, realm, realm.Intrinsics.get('%Function.prototype%')!));
+}
+
+/**
+ * Same as `method` but guards that `thisValue` is an Object.
+ */
+export function methodO(
+  fn: ($: VM, thisValue: Obj, ...params: Val[]) => ECR<Val>,
+  length = fn.length - 2,
+  specifiedName?: string,
+): (realm: RealmRecord, name: string) => PropertyDescriptor {
+  return method(
+    ($, thisObj, argumentsList) =>
+      thisObj instanceof Obj ?
+      fn($, thisObj, argumentsList) :
+      just($.throw('TypeError', 'invalid receiver')),
+    length, specifiedName);
 }
 
 /**

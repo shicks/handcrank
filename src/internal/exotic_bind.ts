@@ -14,24 +14,24 @@ declare global {
 }
 
 interface BoundFunctionExoticSlots {
-    /**
-     * [[BoundTargetFunction]], a callable Object - The wrapped
-     * function object.
-     */
-    BoundTargetFunction?: Func;
+  /**
+   * [[BoundTargetFunction]], a callable Object - The wrapped
+   * function object.
+   */
+  BoundTargetFunction?: Func;
 
-    /**
-     * [[BoundThis]], an ECMAScript language value - The value that is
-     * always passed as the this value when calling the wrapped function.
-     */
-    BoundThis?: Val;
+  /**
+   * [[BoundThis]], an ECMAScript language value - The value that is
+   * always passed as the this value when calling the wrapped function.
+   */
+  BoundThis?: Val;
 
-    /**
-     * [[BoundArguments]], a List of ECMAScript language values - A list
-     * of values whose elements are used as the first arguments to any
-     * call to the wrapped function.
-     */
-    BoundArguments?: Val[];
+  /**
+   * [[BoundArguments]], a List of ECMAScript language values - A list
+   * of values whose elements are used as the first arguments to any
+   * call to the wrapped function.
+   */
+  BoundArguments?: Val[];
 }
 
 type BoundFunctionRequiredSlots = RequiredSlots<keyof BoundFunctionExoticSlots|'Prototype'>;

@@ -10,7 +10,7 @@ import { RealmRecord } from './realm_record';
 import { ReferenceRecord } from './reference_record';
 import { ScriptRecord } from './script_record';
 import { Val } from './val';
-import { VM } from './vm';
+import { ECR, VM } from './vm';
 
 /**
  * 9.4 Execution Contexts
@@ -82,6 +82,12 @@ export abstract class ExecutionContext {
   isStrict: boolean = false;
   isRunning: boolean = false;
 
+  CodeEvaluationState: ECR<Val>|undefined = undefined;
+  Generator: Obj|undefined = undefined;
+  // TODO - CodeEvaluationState is a generator object {next, throw, return}
+  //      - if we're suspended, resumption is calling next.
+  //      - NOTE: we need to yield until we get a SUSPEND value?
+
   LexicalEnvironment: EnvironmentRecord|undefined;
   VariableEnvironment: EnvironmentRecord|undefined;
 
@@ -90,7 +96,6 @@ export abstract class ExecutionContext {
     readonly Function: Func|null,
     readonly Realm: RealmRecord,
     readonly PrivateEnvironment: PrivateEnvironmentRecord|null,
-    //Generator?: Gen;
   ) { }
 
   suspend(): void {

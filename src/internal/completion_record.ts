@@ -56,6 +56,8 @@ export enum CompletionType {
   Break = 'break',
 }
 
+type NotGen<T> = T extends Generator ? [never] : [];
+
 /**
  * Abrupt completion refers to any Completion Record with a [[Type]]
  * value other than normal.  NOTE: we do some type shenanigans to
@@ -63,7 +65,7 @@ export enum CompletionType {
  * as well as a runtime check, since this is a common error that is
  * hard to debug.
  */
-export function IsAbrupt<T>(x: CR<T>, ...rest: T extends Generator ? [never] : []): x is Abrupt {
+export function IsAbrupt<T>(x: CR<T>, ...rest: NotGen<T>): x is Abrupt {
   if (x && typeof (x as any).next === 'function') {
     throw new Error('IsAbrupt on generator: forgot to yield?');
   }
@@ -100,6 +102,26 @@ export function NormalCompletion<T>(value: T): CR<T> {
  */
 export function ThrowCompletion(value: Val): CR<never> {
   return new Abrupt(CompletionType.Throw, value, EMPTY);
+}
+
+type ThrowCompletion = Abrupt & {type: CompletionType.Throw};
+export function IsThrowCompletion<T>(
+  completion: CR<T>,
+  ...rest: NotGen<T>
+): completion is ThrowCompletion {
+  return IsAbrupt(completion, ...rest) && completion.Type === CompletionType.Throw;
+}
+
+export function ReturnCompletion(value: Val): CR<never> {
+  return new Abrupt(CompletionType.Return, value, EMPTY);
+}
+
+type ReturnCompletion = Abrupt & {type: CompletionType.Return};
+export function IsReturnCompletion<T>(
+  completion: CR<T>,
+  ...rest: NotGen<T>
+): completion is ReturnCompletion {
+  return IsAbrupt(completion, ...rest) && completion.Type === CompletionType.Return;
 }
 
 /**

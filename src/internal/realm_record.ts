@@ -199,6 +199,12 @@ export function InitializeHostDefinedRealm($: VM): CR<UNUSED> {
   //    is now the running execution context.
   $.executionStack.push(newContext);
   CreateIntrinsics($, realm);
+
+  for (const [k, v] of realm.Intrinsics) {
+    intrinsicName.set(v, k);
+    v[INTRINSIC_NAME] = k;
+  }
+
   // 7. If the host requires use of an exotic object to serve as
   //    realm's global object, let global be such an object created in a
   //    host-defined manner. Otherwise, let global be undefined,
@@ -222,6 +228,12 @@ export function InitializeHostDefinedRealm($: VM): CR<UNUSED> {
   if (IsAbrupt(globalObj)) return globalObj;
   // 12. Return unused.
   return UNUSED;
+}
+
+const INTRINSIC_NAME = Symbol();
+const intrinsicName = new WeakMap<Obj, string>();
+export function getIntrinsicName(o: Obj): string|undefined {
+  return intrinsicName.get(o);
 }
 
 /**

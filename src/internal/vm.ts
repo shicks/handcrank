@@ -4,7 +4,7 @@ import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext, Resolv
 import { EMPTY, NOT_APPLICABLE, UNRESOLVABLE } from './enums';
 import { NodeType, NodeMap, Node, Esprima, preprocess, Source } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
-import { InitializeHostDefinedRealm, RealmAdvice, RealmRecord } from './realm_record';
+import { InitializeHostDefinedRealm, RealmAdvice, RealmRecord, getIntrinsicName } from './realm_record';
 import { ParseScript, ScriptEvaluation } from './script_record';
 import * as ESTree from 'estree';
 import { Obj, OrdinaryObjectCreate } from './obj';
@@ -14,7 +14,8 @@ import { Assert } from './assert';
 import { Func, IsFunc } from './func';
 import { ArrayExoticObject } from './exotic_array';
 
-export type EvalGen<T> = Generator<undefined, T, undefined>;
+export type Yield = {yield: Val};
+export type EvalGen<T> = Generator<Yield|undefined, T, CR<Val>|undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
 
 export function run<T>(gen: EvalGen<T>) {
@@ -22,6 +23,13 @@ export function run<T>(gen: EvalGen<T>) {
   do {
     result = gen.next();
   } while (!result.done);
+  return result.value;
+}
+
+/** Similar to run(), but fails if there are any yields. */
+export function runImmediate<T>(gen: EvalGen<T>) {
+  const result = gen.next();
+  Assert(result.done);
   return result.value;
 }
 
@@ -57,8 +65,8 @@ export class VM {
   }
 
   popContext(context?: ExecutionContext) {
-    Assert(this.executionStack.length > 1);
-    if (context) Assert(this.executionStack.at(-1) === context);
+    Assert(this.executionStack.length > 1, 'Cannot pop last context');
+    //if (context) Assert(this.executionStack.at(-1) === context, `Wrong context to pop`);
     this.executionStack.pop()!.suspend();
     this.getRunningContext().resume();
   }
@@ -77,7 +85,9 @@ export class VM {
   }
 
   getIntrinsic(name: string): Obj {
-    return this.getRealm()!.Intrinsics.get(name)!;
+    const intrinsic = this.getRealm()!.Intrinsics.get(name);
+    Assert(intrinsic, `No intrinsic: ${name}`);
+    return intrinsic;
   }
 
   throw(name: string, message?: string): CR<never> {
@@ -340,6 +350,9 @@ export function DebugString(
   if (typeof v === 'string') return JSON.stringify(v);
   if (typeof v === 'bigint') return `${String(v)}n`;
   if (v instanceof Obj) {
+    const intrinsicName = getIntrinsicName(v);
+    if (intrinsicName != null) return intrinsicName;
+
     if (v.ErrorData != null) return v.ErrorData || 'Error';
     if (IsFunc(v)) {
       const name = v.OwnProps.get('name')?.Value;

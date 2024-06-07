@@ -10,7 +10,7 @@ import { PropertyDescriptor, PropertyRecord, prop0, propE, propWC } from './prop
 import { defineProperties } from './realm_record';
 import { memoize } from './slots';
 import { PropertyKey, Val } from './val';
-import { ECR, Plugin, VM } from './vm';
+import { ECR, EvalGen, Plugin, VM } from './vm';
 
 function IsRegExp(..._args: unknown[]) { return false; }
 declare const RegExpCreate: any;
@@ -427,7 +427,7 @@ export const stringObject: Plugin = {
       }
       type Factory<T> = ((...args: any[]) => CR<T>|ECR<T>);//|((...args: any[]) => ECR<T>);
 
-      function isIter(arg: unknown): arg is Iterable<any> {
+      function isIter(arg: unknown): arg is EvalGen<any> {
         return Boolean(arg && typeof arg === 'object' && Symbol.iterator in arg);
       }
 
