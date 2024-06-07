@@ -1,8 +1,8 @@
 import * as ESTree from 'estree';
 import { GetSourceText } from './static/functions';
-import { CreateBuiltinFunction, Func, FunctionDeclarationInstantiation, OrdinaryFunction, OrdinaryFunctionCreate, SetFunctionName, callOrConstruct, methodO } from './func';
+import { CreateBuiltinFunction, Func, FunctionDeclarationInstantiation, OrdinaryFunction, OrdinaryFunctionCreate, SetFunctionName, callOrConstruct, functions, methodO } from './func';
 import { prop0, propC, propW } from './property_descriptor';
-import { ECR, Plugin, VM, runImmediate } from './vm';
+import { ECR, Plugin, VM, mapJust, runImmediate, when } from './vm';
 import { functionConstructor } from './fundamental';
 import { ASYNC, EMPTY, NON_LEXICAL_THIS, SYNC, UNUSED } from './enums';
 import { Abrupt, CR, CastNotAbrupt, IsAbrupt, IsReturnCompletion, IsThrowCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';
@@ -12,7 +12,7 @@ import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj'
 import { Assert } from './assert';
 import { PropertyKey, Val } from './val';
 import { iterators } from './iterators';
-import { defineProperties } from './realm_record';
+import { RealmRecord, defineProperties } from './realm_record';
 import { AsyncIteratorClose, CreateIterResultObject, GetIterator, IteratorClose, IteratorComplete, IteratorValue } from './abstract_iterator';
 import { CodeExecutionContext, ExecutionContext } from './execution_context';
 import { Call, GetMethod } from './abstract_object';
@@ -20,6 +20,39 @@ import { Call, GetMethod } from './abstract_object';
 declare const CreateDynamicFunction: any;
 declare const Await: any;
 declare const AsyncGeneratorYield: any;
+
+export const generators: Plugin = {
+  id: 'generators',
+  deps: () => [functionConstructor, iterators, functions],
+
+  syntax: {
+    NamedEvaluation(on) {
+      on('FunctionExpression',
+         when(n => !n.async && n.generator,
+              mapJust(InstantiateGeneratorFunctionExpression)));
+    },
+    InstantiateFunctionObject(on) {
+      on('FunctionDeclaration',
+         when(n => !n.async && n.generator, InstantiateGeneratorFunctionObject));
+    },
+    Evaluation(on) {
+      on('FunctionExpression',
+         when(n => !n.async && n.generator,
+              mapJust(InstantiateGeneratorFunctionExpression)));
+      on('YieldExpression', function*($, n) {
+        if (n.delegate) {
+          return yield* Evaluation_YieldDelegateExpression($, n);
+        } else {
+          return yield* Evaluation_YieldExpression($, n);
+        }
+      });
+    },
+  },
+
+  realm: {
+    CreateIntrinsics,
+  },
+};
 
 enum GeneratorState {
   suspendedStart = 1,
@@ -256,210 +289,203 @@ export function InstantiateGeneratorFunctionExpression(
   return closure;
 }
 
-export const generators: Plugin = {
-  id: 'generators',
-  deps: [functionConstructor, iterators],
-  realm: {
-    CreateIntrinsics(realm) {
-      /**
-       * 27.3.1 The GeneratorFunction Constructor
-       * 
-       * The GeneratorFunction constructor:
-       * 
-       *   - is %GeneratorFunction%.
-       *   - is a subclass of Function.
-       *   - creates and initializes a new GeneratorFunction when called as a
-       *     function rather than as a constructor. Thus the function call
-       *     GeneratorFunction (…) is equivalent to the object creation
-       *     expression new GeneratorFunction (…) with the same arguments.
-       *   - may be used as the value of an extends clause of a class
-       *     definition. Subclass constructors that intend to inherit the
-       *     specified GeneratorFunction behaviour must include a super call
-       *     to the GeneratorFunction constructor to create and initialize
-       *     subclass instances with the internal slots necessary for
-       *     built-in GeneratorFunction behaviour. All ECMAScript syntactic
-       *     forms for defining generator function objects create direct
-       *     instances of GeneratorFunction. There is no syntactic means to
-       *     create instances of GeneratorFunction subclasses.
-       * 
-       * ---
-       * 
-       * 27.3.1.1 GeneratorFunction ( ...parameterArgs, bodyArg )
-       * 
-       * The last argument (if any) specifies the body (executable code) of
-       * a generator function; any preceding arguments specify formal
-       * parameters.
-       * 
-       * This function performs the following steps when called:
-       * 
-       * 1. Let C be the active function object.
-       * 2. If bodyArg is not present, set bodyArg to the empty String.
-       * 3. Return ? CreateDynamicFunction(C, NewTarget, generator, parameterArgs, bodyArg).
-       * 
-       * NOTE: See NOTE for 20.2.1.1.
-       * 
-       * ---
-       * 
-       * 27.3.2 Properties of the GeneratorFunction Constructor
-       * 
-       * The GeneratorFunction constructor:
-       * 
-       *   - is a standard built-in function object that inherits from
-       *     the Function constructor.
-       *   - has a [[Prototype]] internal slot whose value is %Function%.
-       *   - has a "name" property whose value is "GeneratorFunction".
-       *   - has the following properties:
-       */
-      const generatorFunction = CreateBuiltinFunction(
-        callOrConstruct(($, args, NewTarget) => {
-          const bodyArg = args.pop() || '';
-          const parameterArgs = args;
-          const C = $.getActiveFunctionObject();
-          return CreateDynamicFunction($, C, NewTarget, 'generator', parameterArgs, bodyArg);
-        }), 1, 'GeneratorFunction', realm, realm.Intrinsics.get('%Function%')!);
-      realm.Intrinsics.set('%GeneratorFunction%', generatorFunction);
+function CreateIntrinsics(realm: RealmRecord) {
+  /**
+   * 27.3.1 The GeneratorFunction Constructor
+   * 
+   * The GeneratorFunction constructor:
+   * 
+   *   - is %GeneratorFunction%.
+   *   - is a subclass of Function.
+   *   - creates and initializes a new GeneratorFunction when called as a
+   *     function rather than as a constructor. Thus the function call
+   *     GeneratorFunction (…) is equivalent to the object creation
+   *     expression new GeneratorFunction (…) with the same arguments.
+   *   - may be used as the value of an extends clause of a class
+   *     definition. Subclass constructors that intend to inherit the
+   *     specified GeneratorFunction behaviour must include a super call
+   *     to the GeneratorFunction constructor to create and initialize
+   *     subclass instances with the internal slots necessary for
+   *     built-in GeneratorFunction behaviour. All ECMAScript syntactic
+   *     forms for defining generator function objects create direct
+   *     instances of GeneratorFunction. There is no syntactic means to
+   *     create instances of GeneratorFunction subclasses.
+   * 
+   * ---
+   * 
+   * 27.3.1.1 GeneratorFunction ( ...parameterArgs, bodyArg )
+   * 
+   * The last argument (if any) specifies the body (executable code) of
+   * a generator function; any preceding arguments specify formal
+   * parameters.
+   * 
+   * This function performs the following steps when called:
+   * 
+   * 1. Let C be the active function object.
+   * 2. If bodyArg is not present, set bodyArg to the empty String.
+   * 3. Return ? CreateDynamicFunction(C, NewTarget, generator, parameterArgs, bodyArg).
+   * 
+   * NOTE: See NOTE for 20.2.1.1.
+   * 
+   * ---
+   * 
+   * 27.3.2 Properties of the GeneratorFunction Constructor
+   * 
+   * The GeneratorFunction constructor:
+   * 
+   *   - is a standard built-in function object that inherits from
+   *     the Function constructor.
+   *   - has a [[Prototype]] internal slot whose value is %Function%.
+   *   - has a "name" property whose value is "GeneratorFunction".
+   *   - has the following properties:
+   */
+  const generatorFunction = CreateBuiltinFunction(
+    callOrConstruct(($, args, NewTarget) => {
+      const bodyArg = args.pop() || '';
+      const parameterArgs = args;
+      const C = $.getActiveFunctionObject();
+      return CreateDynamicFunction($, C, NewTarget, 'generator', parameterArgs, bodyArg);
+    }), 1, 'GeneratorFunction', realm, realm.Intrinsics.get('%Function%')!);
+  realm.Intrinsics.set('%GeneratorFunction%', generatorFunction);
 
-      /**
-       * 27.3.3 Properties of the GeneratorFunction Prototype Object
-       * 
-       * The GeneratorFunction prototype object:
-       *   - is %GeneratorFunction.prototype% (see Figure 6).
-       *   - is an ordinary object.
-       *   - is not a function object and does not have an [[ECMAScriptCode]]
-       *     internal slot or any other of the internal slots listed in
-       *     Table 30 or Table 82.
-       *   - has a [[Prototype]] internal slot whose value is %Function.prototype%.
-       */
-      const generatorFunctionPrototype = OrdinaryObjectCreate({
-        Prototype: realm.Intrinsics.get('%Function.prototype%')!,
-      }, {
-        /**
-         * 27.3.3.1 GeneratorFunction.prototype.constructor
-         * 
-         * The initial value of GeneratorFunction.prototype.constructor is
-         * %GeneratorFunction%.
-         * 
-         * This property has the attributes { [[Writable]]: false,
-         * [[Enumerable]]: false, [[Configurable]]: true }.
-         */
-        'constructor': propC(generatorFunction),
+  /**
+   * 27.3.3 Properties of the GeneratorFunction Prototype Object
+   * 
+   * The GeneratorFunction prototype object:
+   *   - is %GeneratorFunction.prototype% (see Figure 6).
+   *   - is an ordinary object.
+   *   - is not a function object and does not have an [[ECMAScriptCode]]
+   *     internal slot or any other of the internal slots listed in
+   *     Table 30 or Table 82.
+   *   - has a [[Prototype]] internal slot whose value is %Function.prototype%.
+   */
+  const generatorFunctionPrototype = OrdinaryObjectCreate({
+    Prototype: realm.Intrinsics.get('%Function.prototype%')!,
+  }, {
+    /**
+     * 27.3.3.1 GeneratorFunction.prototype.constructor
+     * 
+     * The initial value of GeneratorFunction.prototype.constructor is
+     * %GeneratorFunction%.
+     * 
+     * This property has the attributes { [[Writable]]: false,
+     * [[Enumerable]]: false, [[Configurable]]: true }.
+     */
+    'constructor': propC(generatorFunction),
 
-        /**
-         * 27.3.3.3 GeneratorFunction.prototype [ @@toStringTag ]
-         * 
-         * The initial value of the @@toStringTag property is the String value
-         * "GeneratorFunction".
-         * 
-         * This property has the attributes { [[Writable]]: false,
-         * [[Enumerable]]: false, [[Configurable]]: true }.
-         */
-        [Symbol.toStringTag]: propC('GeneratorFunction'),
-      });
-      realm.Intrinsics.set('%GeneratorFunction.prototype%', generatorFunctionPrototype);
+    /**
+     * 27.3.3.3 GeneratorFunction.prototype [ @@toStringTag ]
+     * 
+     * The initial value of the @@toStringTag property is the String value
+     * "GeneratorFunction".
+     * 
+     * This property has the attributes { [[Writable]]: false,
+     * [[Enumerable]]: false, [[Configurable]]: true }.
+     */
+    [Symbol.toStringTag]: propC('GeneratorFunction'),
+  });
+  realm.Intrinsics.set('%GeneratorFunction.prototype%', generatorFunctionPrototype);
 
-      /**
-       * 27.5.1 Properties of the Generator Prototype Object
-       * 
-       * The Generator prototype object:
-       * 
-       *   - is %GeneratorFunction.prototype.prototype%.
-       *   - is an ordinary object.
-       *   - is not a Generator instance and does not have a
-       *     [[GeneratorState]] internal slot.
-       *   - has a [[Prototype]] internal slot whose value is %IteratorPrototype%.
-       *   - has properties that are indirectly inherited by all Generator instances.
-       */
-      const generatorFunctionPrototypePrototype = OrdinaryObjectCreate({
-        Prototype: realm.Intrinsics.get('%IteratorPrototype%')!,
-      }, {
-        /**
-         * 27.5.1.1 Generator.prototype.constructor
-         * 
-         * The initial value of Generator.prototype.constructor is
-         * %GeneratorFunction.prototype%.
-         * 
-         * This property has the attributes { [[Writable]]: false,
-         * [[Enumerable]]: false, [[Configurable]]: true }.
-         */
-        'constructor': propC(generatorFunctionPrototype),
-      });
-      realm.Intrinsics.set('%GeneratorFunction.prototype.prototype%',
-                           generatorFunctionPrototypePrototype);
+  /**
+   * 27.5.1 Properties of the Generator Prototype Object
+   * 
+   * The Generator prototype object:
+   * 
+   *   - is %GeneratorFunction.prototype.prototype%.
+   *   - is an ordinary object.
+   *   - is not a Generator instance and does not have a
+   *     [[GeneratorState]] internal slot.
+   *   - has a [[Prototype]] internal slot whose value is %IteratorPrototype%.
+   *   - has properties that are indirectly inherited by all Generator instances.
+   */
+  const generatorFunctionPrototypePrototype = OrdinaryObjectCreate({
+    Prototype: realm.Intrinsics.get('%IteratorPrototype%')!,
+  }, {
+    /**
+     * 27.5.1.1 Generator.prototype.constructor
+     * 
+     * The initial value of Generator.prototype.constructor is
+     * %GeneratorFunction.prototype%.
+     * 
+     * This property has the attributes { [[Writable]]: false,
+     * [[Enumerable]]: false, [[Configurable]]: true }.
+     */
+    'constructor': propC(generatorFunctionPrototype),
+  });
+  realm.Intrinsics.set('%GeneratorFunction.prototype.prototype%',
+                       generatorFunctionPrototypePrototype);
 
-      defineProperties(realm, generatorFunctionPrototypePrototype, {
-        /**
-         * 27.5.1.2 Generator.prototype.next ( value )
-         * 
-         * 1. Return ? GeneratorResume(this value, value, empty).
-         */
-        'next': methodO(($, thisValue, value) =>
-          GeneratorResume($, thisValue, value, EMPTY)),
+  defineProperties(realm, generatorFunctionPrototypePrototype, {
+    /**
+     * 27.5.1.2 Generator.prototype.next ( value )
+     * 
+     * 1. Return ? GeneratorResume(this value, value, empty).
+     */
+    'next': methodO(($, thisValue, value) =>
+      GeneratorResume($, thisValue, value, EMPTY)),
 
-        /**
-         * 27.5.1.3 Generator.prototype.return ( value )
-         * 
-         * This method performs the following steps when called:
-         * 
-         * 1. Let g be the this value.
-         * 2. Let C be Completion Record { [[Type]]: return, [[Value]]: value,
-         *    [[Target]]: empty }.
-         * 3. Return ? GeneratorResumeAbrupt(g, C, empty).
-         */
-        'return': methodO(($, thisValue, value) =>
-          GeneratorResumeAbrupt($, thisValue, ReturnCompletion(value), EMPTY)),
-        
-        /**
-         * 27.5.1.4 Generator.prototype.throw ( exception )
-         * 
-         * This method performs the following steps when called:
-         * 
-         * 1. Let g be the this value.
-         * 2. Let C be ThrowCompletion(exception).
-         * 3. Return ? GeneratorResumeAbrupt(g, C, empty).
-         */
-        'throw': methodO(($, thisValue, exception) =>
-          GeneratorResumeAbrupt($, thisValue, ThrowCompletion(exception), EMPTY)),
+    /**
+     * 27.5.1.3 Generator.prototype.return ( value )
+     * 
+     * This method performs the following steps when called:
+     * 
+     * 1. Let g be the this value.
+     * 2. Let C be Completion Record { [[Type]]: return, [[Value]]: value,
+     *    [[Target]]: empty }.
+     * 3. Return ? GeneratorResumeAbrupt(g, C, empty).
+     */
+    'return': methodO(($, thisValue, value) =>
+      GeneratorResumeAbrupt($, thisValue, ReturnCompletion(value), EMPTY)),
 
-        /**
-         * 27.5.1.5 Generator.prototype [ @@toStringTag ]
-         * 
-         * The initial value of the @@toStringTag property is the String value "Generator".
-         * 
-         * This property has the attributes { [[Writable]]: false,
-         * [[Enumerable]]: false, [[Configurable]]: true }.
-         */
-        [Symbol.toStringTag]: propC('Generator'),
-      });
+    /**
+     * 27.5.1.4 Generator.prototype.throw ( exception )
+     * 
+     * This method performs the following steps when called:
+     * 
+     * 1. Let g be the this value.
+     * 2. Let C be ThrowCompletion(exception).
+     * 3. Return ? GeneratorResumeAbrupt(g, C, empty).
+     */
+    'throw': methodO(($, thisValue, exception) =>
+      GeneratorResumeAbrupt($, thisValue, ThrowCompletion(exception), EMPTY)),
 
-      /**
-       * 27.3.2.2 GeneratorFunction.prototype
-       * 
-       * The initial value of GeneratorFunction.prototype is the
-       * GeneratorFunction prototype object.
-       * 
-       * This property has the attributes { [[Writable]]: false,
-       * [[Enumerable]]: false, [[Configurable]]: false }.
-       */
-      defineProperties(realm, generatorFunction, {
-        'prototype': prop0(generatorFunctionPrototype),
-      });
+    /**
+     * 27.5.1.5 Generator.prototype [ @@toStringTag ]
+     * 
+     * The initial value of the @@toStringTag property is the String value "Generator".
+     * 
+     * This property has the attributes { [[Writable]]: false,
+     * [[Enumerable]]: false, [[Configurable]]: true }.
+     */
+    [Symbol.toStringTag]: propC('Generator'),
+  });
 
-      /**
-       * 27.3.3.2 GeneratorFunction.prototype.prototype
-       * 
-       * The initial value of GeneratorFunction.prototype.prototype is the
-       * Generator prototype object.
-       * 
-       * This property has the attributes { [[Writable]]: false,
-       * [[Enumerable]]: false, [[Configurable]]: true }.
-       */
-      defineProperties(realm, generatorFunctionPrototype, {
-        'prototype': propC(generatorFunctionPrototypePrototype),
-      });
-    },
-  },
-};
+  /**
+   * 27.3.2.2 GeneratorFunction.prototype
+   * 
+   * The initial value of GeneratorFunction.prototype is the
+   * GeneratorFunction prototype object.
+   * 
+   * This property has the attributes { [[Writable]]: false,
+   * [[Enumerable]]: false, [[Configurable]]: false }.
+   */
+  defineProperties(realm, generatorFunction, {
+    'prototype': prop0(generatorFunctionPrototype),
+  });
 
+  /**
+   * 27.3.3.2 GeneratorFunction.prototype.prototype
+   * 
+   * The initial value of GeneratorFunction.prototype.prototype is the
+   * Generator prototype object.
+   * 
+   * This property has the attributes { [[Writable]]: false,
+   * [[Enumerable]]: false, [[Configurable]]: true }.
+   */
+  defineProperties(realm, generatorFunctionPrototype, {
+    'prototype': propC(generatorFunctionPrototypePrototype),
+  });
+}
 
 /**
  * 27.3.4 GeneratorFunction Instances

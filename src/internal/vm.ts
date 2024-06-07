@@ -13,10 +13,27 @@ import { HasValueField, propWC } from './property_descriptor';
 import { Assert } from './assert';
 import { Func, IsFunc } from './func';
 import { ArrayExoticObject } from './exotic_array';
+import { PrivateEnvironmentRecord } from './private_environment_record';
 
 export type Yield = {yield: Val};
 export type EvalGen<T> = Generator<Yield|undefined, T, CR<Val>|undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
+
+interface SyntaxOp {
+  Evaluation(): ECR<Val|ReferenceRecord|EMPTY>;
+  NamedEvaluation(name: string): ECR<Val>;
+  InstantiateFunctionObject(
+    env: EnvironmentRecord,
+    privateEnv: PrivateEnvironmentRecord|null,
+  ): Func;
+}
+
+export interface Plugin {
+  id?: string|symbol;
+  deps?: () => Plugin[];
+  syntax?: SyntaxOpMap;
+  realm?: RealmAdvice;
+}
 
 export function run<T>(gen: EvalGen<T>) {
   let result;
@@ -41,6 +58,8 @@ export class VM {
   plugins = new Map<string|symbol|Plugin, Plugin>();
   syntaxOperations: SyntaxHandlers = {
     Evaluation: {},
+    NamedEvaluation: {},
+    InstantiateFunctionObject: {},
   };
 
   constructor(private readonly esprima?: Esprima) {}
@@ -66,7 +85,7 @@ export class VM {
 
   popContext(context?: ExecutionContext) {
     Assert(this.executionStack.length > 1, 'Cannot pop last context');
-    //if (context) Assert(this.executionStack.at(-1) === context, `Wrong context to pop`);
+    if (context) Assert(this.executionStack.at(-1) === context, `Wrong context to pop`);
     this.executionStack.pop()!.suspend();
     this.getRunningContext().resume();
   }
@@ -148,11 +167,11 @@ export class VM {
     O.ErrorData = stack;
   }
 
-  // NOTE: this helper method is typically more useful than the "recurse"
-  // function passed to the syntax operator because it additionally unwraps
-  // ReferenceRecords.  The spec does this in a production that's basically
-  // transparent to ESTree, so we don't have a good opportunity, but we do
-  // know when an rvalue is required from a child.
+  // NOTE: this helper method is typically more useful than direct
+  // Evaluation because it additionally unwraps ReferenceRecords.  The
+  // spec does this in a production that's basically transparent to
+  // ESTree, so we don't have a good opportunity, but we do know when
+  // an rvalue is required from a child.
   * evaluateValue(node: Node): ECR<Val> {
     this.initialize()
     const result: CR<EMPTY|Val|ReferenceRecord> = yield* this.operate('Evaluation', node);
@@ -217,11 +236,21 @@ export class VM {
       yield* GetValue(this, result);
   }
 
-  Evaluation(n: Node): SyntaxOp['Evaluation'] {
+  Evaluation(n: Node): ECR<Val|ReferenceRecord|EMPTY> {
     return this.operate('Evaluation', n);
   }
+  NamedEvaluation(n: Node, name: string): ECR<Val> {
+    return this.operate('NamedEvaluation', n, name);
+  }
+  InstantiateFunctionObject(
+    n: Node,
+    env: EnvironmentRecord,
+    privateEnv: PrivateEnvironmentRecord|null,
+  ): Func {
+    return this.operate('InstantiateFunctionObject', n, env, privateEnv);
+  }
 
-  operate<O extends keyof SyntaxOp>(op: O, n: Node): SyntaxOp[O] {
+  private operate<O extends keyof SyntaxOp>(op: O, n: Node, ...rest: SyntaxArgs<O>): SyntaxResult<O> {
     if (op === 'Evaluation') {
       const ctx = this.getRunningContext();
       if (ctx instanceof CodeExecutionContext) {
@@ -229,7 +258,7 @@ export class VM {
       }
     }
     for (const impl of this.syntaxOperations[op][n.type] || []) {
-      const result = impl(n as any, (child) => this.operate(op, child));
+      const result = impl(this, n as any, ...rest);
       if (!NOT_APPLICABLE.is(result)) return result;
     }
     // TODO - might be nice to print to depth 2?
@@ -238,7 +267,7 @@ export class VM {
   }
 
   install(plugin: Plugin): void {
-    for (const dep of plugin.deps ?? []) {
+    for (const dep of plugin.deps?.() ?? []) {
       const id = dep.id ?? dep;
       if (!this.plugins.has(id)) this.install(dep);
     }
@@ -251,14 +280,15 @@ export class VM {
       if (!Object.hasOwn(this.syntaxOperations, key) ||
         !Object.hasOwn(plugin.syntax, key) ||
         typeof register != 'function') continue;
-      const op = this.syntaxOperations[key as keyof SyntaxOp];
-      const on = (types: NodeType|NodeType[], handler: SyntaxHandler<any, any>) => {
-        if (!Array.isArray(types)) types = [types];
-        for (const type of types) {
-          (op[type] || (op[type] = [])).push(handler);
-        }
-      };
-      register(this, on);
+      const op: any = this.syntaxOperations[key as keyof SyntaxOp];
+      const on: SyntaxRegistration<any> =
+        (types: NodeType|NodeType[], handler: SyntaxHandler<any, any>) => {
+          if (!Array.isArray(types)) types = [types];
+          for (const type of types) {
+            (op[type] || (op[type] = [])).push(handler);
+          }
+        };
+      register(on);
     }
   }
 
@@ -271,34 +301,18 @@ export class VM {
 export function* just<T>(value: T): Generator<any, T, any> {
   return value;
 }
-
-export function when<N, T>(
-  condition: (n: N) => boolean,
-  action: (n: N, recurse: (n: Node) => T) => T,
-): (n: N, recurse: (n: Node) => T) => T|NOT_APPLICABLE {
-  return (n, recurse) => condition(n) ? action(n, recurse) : NOT_APPLICABLE;
+export function mapJust<A extends unknown[], R>(
+  fn: (...args: A) => R,
+): (...args: A) => Generator<any, R, any> {
+  return (...args: A) => just(fn(...args));
 }
 
-interface SyntaxOp {
-  Evaluation: ECR<Val|ReferenceRecord|EMPTY>;
+export function when<N, A extends unknown[], T>(
+  condition: (n: N) => boolean|undefined,
+  action: ($: VM, n: N, ...rest: A) => T,
+): ($: VM, n: N, ...rest: A) => T|NOT_APPLICABLE {
+  return ($, n, ...rest) => condition(n) ? action($, n, ...rest) : NOT_APPLICABLE;
 }
-type SyntaxOpMap = {[K in keyof SyntaxOp]?: ($: VM, on: SyntaxRegistration<K>) => void};
-
-export interface Plugin {
-  id?: string|symbol;
-  deps?: Plugin[];
-  syntax?: SyntaxOpMap;
-  realm?: RealmAdvice;
-}
-
-type SyntaxRegistration<O extends keyof SyntaxOp> =
-  <N extends NodeType>(types: N|N[], handler: SyntaxHandler<N, O>) => void;
-type SyntaxHandler<N extends NodeType, O extends keyof SyntaxOp> =
-  (n: NodeMap[N], recurse: (n: Node) => SyntaxOp[O]) => SyntaxOp[O]|NOT_APPLICABLE;
-
-type SyntaxHandlerMap<O extends keyof SyntaxOp> =
-  {[N in NodeType]?: Array<SyntaxHandler<N, O>>};
-type SyntaxHandlers = {[O in keyof SyntaxOp]: SyntaxHandlerMap<O>};
 
 // type SyntaxOpFn<O extends keyof SyntaxOp, N extends keyof NodeMap> =
 //     ($: VM, node: NodeMap[N],
@@ -405,3 +419,17 @@ function findValueProp(o: Obj|null|undefined, p: string): Val {
   }
   return findValueProp(o.Prototype, p);
 }
+
+type SyntaxOpMap = {[K in keyof SyntaxOp]?: (on: SyntaxRegistration<K>) => void};
+type SyntaxRegistration<O extends keyof SyntaxOp> =
+  <N extends NodeType>(types: N|N[], handler: SyntaxHandler<N, O>) => void;
+type SyntaxHandler<N extends NodeType, O extends keyof SyntaxOp> =
+  ($: VM, n: NodeMap[N], ...rest: SyntaxArgs<O>) => SyntaxResult<O>|NOT_APPLICABLE;
+type SyntaxArgs<O extends keyof SyntaxOp> =
+  SyntaxOp[O] extends (...args: infer A) => any ? A : never[];
+type SyntaxResult<O extends keyof SyntaxOp> =
+  SyntaxOp[O] extends (...args: any[]) => infer R ? R : never;
+
+type SyntaxHandlerMap<O extends keyof SyntaxOp> =
+  {[N in NodeType]?: Array<SyntaxHandler<N, O>>};
+type SyntaxHandlers = {[O in keyof SyntaxOp]: SyntaxHandlerMap<O>};

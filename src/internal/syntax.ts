@@ -8,7 +8,7 @@ import { StrictNode } from './tree';
 import { ToPropertyKey } from './abstract_conversion';
 import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from './statements';
 import { Evaluation_AssignmentExpression } from './assignment';
-import { Evaluation_CallExpression, Evaluation_NewExpression, InstantiateArrowFunctionExpression, InstantiateOrdinaryFunctionExpression } from './func';
+import { Evaluation_CallExpression, Evaluation_NewExpression } from './func';
 import { Evaluation_ObjectExpression } from './obj';
 import { Evaluation_ArrayExpression } from './exotic_array';
 
@@ -18,29 +18,29 @@ export const syntax: Plugin = {
   id: 'syntax',
 
   syntax: {
-    Evaluation($, on) {
-      on('Program', function*(n, evaluate) {
+    Evaluation(on) {
+      on('Program', function*($, n) {
         let result: CR<Val|ReferenceRecord|EMPTY> = EMPTY;
         for (const child of n.body) {
-          result = yield* evaluate(child);
+          result = yield* $.Evaluation(child);
           if (IsAbrupt(result)) return result;
         }
         return result;
       });
-      on('ExpressionStatement', (n, evaluate) => evaluate(n.expression));
+      on('ExpressionStatement', ($, n) => $.Evaluation(n.expression));
       // Primary elements
-      on('Literal', (n) => {
+      on('Literal', (_$, n) => {
         if (n.value instanceof RegExp) return NOT_APPLICABLE;
         return just(n.value);
       });
-      on('ThisExpression', () => just(ResolveThisBinding($)));
-      on('Identifier', (n) => just(ResolveBinding($, n.name)));
-      on('ObjectExpression', (n) => Evaluation_ObjectExpression($, n));
-      on('ArrayExpression', (n) => Evaluation_ArrayExpression($, n));
+      on('ThisExpression', ($) => just(ResolveThisBinding($)));
+      on('Identifier', ($, n) => just(ResolveBinding($, n.name)));
+      on('ObjectExpression', Evaluation_ObjectExpression);
+      on('ArrayExpression', Evaluation_ArrayExpression);
       //on('Literal', when(n.value instanceof RegExp) (n) => {throw'13.2.7.3'});
-      on('TemplateLiteral', (n) => {throw'13.2.8.6'});
+      on('TemplateLiteral', () => {throw 'Not Implemented: 13.2.8.6'});
       /** 13.3.2.1 MemberExpression */
-      on('MemberExpression', function*(n) {
+      on('MemberExpression', function*($, n) {
         const baseValue = yield* $.evaluateValue(n.object);
         if (IsAbrupt(baseValue)) return baseValue;
         const strict = (n as StrictNode).strict || false;
@@ -64,50 +64,15 @@ export const syntax: Plugin = {
         }
         return new ReferenceRecord(baseValue, propertyKey, strict, EMPTY);
       });
-      on('BlockStatement', (n) => Evaluation_BlockStatement($, n));
-      on('VariableDeclaration', (n) => {
+      on('BlockStatement', Evaluation_BlockStatement);
+      on('VariableDeclaration', ($, n) => {
         if (n.kind !== 'var') {
           return Evaluation_LexicalDeclaration($, n);
         }
         return Evaluation_VariableStatement($, n);
       });
-      on('AssignmentExpression', (n) => Evaluation_AssignmentExpression($, n));
-      on('FunctionDeclaration', (n) => just(EMPTY));
-      on('FunctionExpression', (n) => {
-        if (n.async || n.generator) return NOT_APPLICABLE;
-        return InstantiateOrdinaryFunctionExpression($, n);
-      });
-      on('ArrowFunctionExpression', (n) => {
-        if (n.async) return NOT_APPLICABLE;
-        return just(InstantiateArrowFunctionExpression($, n));
-      });
-      on('ReturnStatement', function*(n) {
-        // 14.10.1 Runtime Semantics: Evaluation
-        //
-        // ReturnStatement : return ;
-        // 1. Return Completion Record { [[Type]]: return, [[Value]]:
-        //    undefined, [[Target]]: empty }.
-        if (!n.argument) return new Abrupt(CompletionType.Return, undefined, EMPTY);
-
-        // ReturnStatement : return Expression ;
-        // 1. Let exprRef be ? Evaluation of Expression.
-        // 2. Let exprValue be ? GetValue(exprRef).
-        // 3. If GetGeneratorKind() is async, set exprValue to ? Await(exprValue).
-        // 4. Return Completion Record { [[Type]]: return, [[Value]]:
-        //    exprValue, [[Target]]: empty }.
-        const exprValue = yield* $.evaluateValue(n.argument);
-        if (IsAbrupt(exprValue)) return exprValue;
-        //if (GetGeneratorKind() === 'async') {
-        return new Abrupt(CompletionType.Return, exprValue, EMPTY);
-      });
-      on('YieldExpression', function*(n) {
-        if (n.delegate) {
-          return yield* Evaluation_YieldDelegateExpression($, n);
-        } else {
-          return yield* Evaluation_YieldExpression($, n);
-        }
-      });
-      on('ThrowStatement', function*(n) {
+      on('AssignmentExpression', Evaluation_AssignmentExpression);
+      on('ThrowStatement', function*($, n) {
         // 14.14.1 Runtime Semantics: Evaluation
         //
         // ThrowStatement : throw Expression ;
@@ -118,8 +83,8 @@ export const syntax: Plugin = {
         if (IsAbrupt(exprValue)) return exprValue;
         return new Abrupt(CompletionType.Throw, exprValue, EMPTY);
       });
-      on('CallExpression', (n) => Evaluation_CallExpression($, n));
-      on('NewExpression', (n) => Evaluation_NewExpression($, n));
+      on('CallExpression', Evaluation_CallExpression);
+      on('NewExpression', Evaluation_NewExpression);
     },
   },
 };

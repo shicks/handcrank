@@ -318,7 +318,7 @@ function ArraySetLength($: VM, A: ArrayExoticObject, Desc: PropertyDescriptor): 
  */
 export const arrayObject: Plugin = {
   id: 'arrayObject',
-  deps: [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype],
   realm: {
     CreateIntrinsics(realm: RealmRecord, stagedGlobals: Map<string, PropertyDescriptor>) {
       

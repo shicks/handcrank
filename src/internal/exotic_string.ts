@@ -256,7 +256,7 @@ function StringGetOwnProperty(S: Obj, P: PropertyKey): PropertyDescriptor | unde
  */
 export const stringObject: Plugin = {
   id: 'stringObject',
-  deps: [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       /**

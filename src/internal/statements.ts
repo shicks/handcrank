@@ -5,13 +5,12 @@ import { Assert } from "./assert";
 import { CR, CastNotAbrupt, IsAbrupt, UpdateEmpty } from "./completion_record";
 import { EMPTY, UNUSED } from "./enums";
 import { DeclarativeEnvironmentRecord, EnvironmentRecord } from "./environment_record";
-import { InstantiateFunctionObject } from "./func";
 import { BoundNames, IsConstantDeclaration, LexicallyScopedDeclarations } from "./static/scope";
 import { EvalGen, VM } from "./vm";
 import { Val } from "./val";
 import { ResolveBinding } from "./execution_context";
 import { InitializeReferencedBinding, PutValue } from "./reference_record";
-import { IsAnonymousFunctionDefinition, NamedEvaluation } from "./static/functions";
+import { IsAnonymousFunctionDefinition } from "./static/functions";
 
 /**
  * 14.2.2 Runtime Semantics: Evaluation
@@ -110,7 +109,7 @@ export function* BlockDeclarationInstantiation(
     //       iii. Perform ! env.InitializeBinding(fn, fo). NOTE: This step is replaced in section B.3.2.6.
       const [fn, ...rest] = BoundNames(d);
       Assert(fn != null && !rest.length);
-      const fo = InstantiateFunctionObject($, env, privateEnv, d);
+      const fo = $.InstantiateFunctionObject(d, env, privateEnv);
       CastNotAbrupt(yield* env.InitializeBinding($, fn, fo));
     }
   }
@@ -168,7 +167,7 @@ export function* Evaluation_LexicalDeclaration($: VM, n: VariableDeclaration): E
           // LexicalBinding : BindingIdentifier Initializer
           let value;
           if (IsAnonymousFunctionDefinition(binding.init)) {
-            value = yield* NamedEvaluation($, binding.init as FunctionExpression, binding.id.name)
+            value = yield* $.NamedEvaluation(binding.init, binding.id.name)
           } else {
             value = yield* $.evaluateValue(binding.init);
           }
@@ -248,7 +247,7 @@ export function* Evaluation_VariableStatement($: VM, n: VariableDeclaration): Ev
           // VariableDeclaration : BindingIdentifier Initializer
           let value;
           if (IsAnonymousFunctionDefinition(binding.init)) {
-            value = yield* NamedEvaluation($, binding.init as FunctionExpression, binding.id.name)
+            value = yield* $.NamedEvaluation(binding.init, binding.id.name)
           } else {
             value = yield* $.evaluateValue(binding.init);
           }

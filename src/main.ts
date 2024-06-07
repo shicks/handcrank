@@ -14,6 +14,7 @@ import { consoleObject } from './internal/console';
 import { iterators } from './internal/iterators';
 import { generators } from './internal/generator';
 import * as fs from 'node:fs';
+import { functions } from './internal/func';
 
 export const vm = new VM({
   parseScript(source) { return esprima.parseScript(source, {loc: true, range: true}); },
@@ -27,7 +28,8 @@ vm.install(arrayObject);
 vm.install(errorObject);
 vm.install(consoleObject);
 vm.install(iterators);
-vm.install(generators); // TODO - move function* syntax here???
+vm.install(functions);
+vm.install(generators);
 
 function runScript(script: string, filename: string, printResult = false) {
   const cr = run(vm.evaluateScript(script, filename));

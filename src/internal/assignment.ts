@@ -28,7 +28,7 @@ import { Assert } from './assert';
 import { CR, IsAbrupt } from './completion_record';
 import { EMPTY } from './enums';
 import { GetValue, PutValue } from './reference_record';
-import { IsAnonymousFunctionDefinition, NamedEvaluation } from './static/functions';
+import { IsAnonymousFunctionDefinition } from './static/functions';
 import { Val } from './val';
 import { EvalGen, VM } from './vm';
 import { AssignmentExpression, MemberExpression, Pattern } from 'estree';
@@ -129,7 +129,7 @@ export function* Evaluation_AssignmentExpression($: VM, n: AssignmentExpression)
   if (n.left.type === 'ObjectPattern' || n.left.type === 'ArrayPattern') {
     return yield* Evaluation_AssignmentExpression_pattern($, n);
   }
-  const lref = yield* $.operate('Evaluation', n.left);
+  const lref = yield* $.Evaluation(n.left);
   if (IsAbrupt(lref)) return lref;
   Assert(!EMPTY.is(lref));
   let lval;
@@ -145,7 +145,7 @@ export function* Evaluation_AssignmentExpression($: VM, n: AssignmentExpression)
   const namedEval = !compoundOp || SHORT_CIRCUIT_OPS.has(compoundOp);
   let rval: CR<Val>;
   if (namedEval && IsAnonymousFunctionDefinition(n.right) && n.left.type === 'Identifier') {
-    rval = yield* NamedEvaluation($, n.right as any, n.left.name);
+    rval = yield* $.NamedEvaluation(n.right, n.left.name);
   } else {
     rval = yield* $.evaluateValue(n.right);
   }

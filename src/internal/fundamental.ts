@@ -480,7 +480,7 @@ export const objectAndFunctionPrototype: Plugin = {
  */
 export const objectConstructor: Plugin = {
   id: 'objectConstructor',
-  deps: [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       const objectPrototype = realm.Intrinsics.get('%Object.prototype%')!;
@@ -1056,7 +1056,7 @@ export const objectConstructor: Plugin = {
  */
 export const functionConstructor: Plugin = {
   id: 'functionConstructor',
-  deps: [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       const functionPrototype = realm.Intrinsics.get('%Function.prototype%')!;
@@ -1111,7 +1111,7 @@ function makeWrapper(
  */
 export const booleanObject: Plugin = {
   id: 'booleanObject',
-  deps: [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       /**
@@ -1216,7 +1216,7 @@ export const booleanObject: Plugin = {
  */
 export const symbolObject: Plugin = {
   id: 'symbolObject',
-  deps: [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       /**
@@ -1495,7 +1495,7 @@ export function SymbolDescriptiveString(sym: symbol): string {
  */
 export const numberObject: Plugin = {
   id: 'numberObject',
-  deps: [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
 
@@ -1928,7 +1928,7 @@ export const numberObject: Plugin = {
 // TODO - Date object 21.4
 
 export const fundamental: Plugin = {
-  deps: [
+  deps: () => [
     objectAndFunctionPrototype,
     objectConstructor,
     functionConstructor,

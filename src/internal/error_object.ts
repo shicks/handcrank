@@ -30,7 +30,7 @@ import { UNUSED } from './enums';
  */
 export const errorObject: Plugin = {
   id: 'errorObject',
-  deps: [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       /**

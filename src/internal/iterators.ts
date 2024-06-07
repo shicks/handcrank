@@ -6,7 +6,7 @@ import { OrdinaryObjectCreate } from './obj';
 
 export const iterators: Plugin = {
   id: 'iterators',
-  deps: [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       /**

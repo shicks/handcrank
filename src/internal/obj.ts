@@ -6,7 +6,7 @@ import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { IsFunc, SetFunctionName, type Func } from './func';
 import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor, methodName, propWEC } from './property_descriptor';
 import { Slots, hasAnyFields, memoize } from './slots';
-import { GetSourceText, IsAnonymousFunctionDefinition, NamedEvaluation } from './static/functions';
+import { GetSourceText, IsAnonymousFunctionDefinition } from './static/functions';
 import { PropertyKey, Val } from './val';
 import { ECR, VM } from './vm';
 import * as ESTree from 'estree';
@@ -1032,7 +1032,7 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
           isProtoSetter = true;
         }
         if (IsAnonymousFunctionDefinition(prop.value) && !isProtoSetter) {
-          propValue = yield* NamedEvaluation($, prop.value as any, key);
+          propValue = yield* $.NamedEvaluation(prop.value, key);
         } else {
           propValue = yield* $.evaluateValue(prop.value);
         }

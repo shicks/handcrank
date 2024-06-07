@@ -1,5 +1,5 @@
 import { Abrupt, CR, CastNotAbrupt, CompletionType, IsAbrupt, ThrowCompletion } from './completion_record';
-import { DebugString, ECR, EvalGen, VM, just } from './vm';
+import { DebugString, ECR, EvalGen, Plugin, VM, just, mapJust, when } from './vm';
 import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, STRICT, SYNC, UNINITIALIZED, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
 import { PropertyDescriptor, PropertyRecord, propC, propWC } from './property_descriptor';
@@ -21,7 +21,7 @@ import { GetThisValue, GetValue, InitializeReferencedBinding, IsPropertyReferenc
 import { IsCallable, IsConstructor } from './abstract_compare';
 import { memoize } from './slots';
 import { GetIterator, IteratorStep, IteratorValue } from './abstract_iterator';
-import { InstantiateGeneratorFunctionObject } from './generator';
+import { functionConstructor } from './fundamental';
 
 type Node = ESTree.Node;
 
@@ -29,6 +29,53 @@ type PrivateElement = never;
 type ClassFieldDefinitionRecord = never;
 
 function PrepareForTailCall(...args: any): void {}
+
+export const functions: Plugin = {
+  id: 'functions',
+  deps: () => [functionConstructor],
+
+  syntax: {
+    NamedEvaluation(on) {
+      on('ArrowFunctionExpression',
+         when(n => !n.async, mapJust(InstantiateArrowFunctionExpression)));
+      on('FunctionExpression',
+         when(n => !n.async && !n.generator, InstantiateOrdinaryFunctionExpression));
+    },
+    InstantiateFunctionObject(on) {
+      on('FunctionDeclaration',
+         when(n => !n.async && !n.generator,
+              InstantiateOrdinaryFunctionObject));
+    },
+    Evaluation(on) {
+      on('FunctionDeclaration', () => just(EMPTY));
+      on('FunctionExpression',
+         when(n => !n.async && !n.generator,
+              InstantiateOrdinaryFunctionExpression));
+      on('ArrowFunctionExpression',
+         when(n => !n.async,
+              mapJust(InstantiateArrowFunctionExpression)));
+      on('ReturnStatement', function*($, n) {
+        // 14.10.1 Runtime Semantics: Evaluation
+        //
+        // ReturnStatement : return ;
+        // 1. Return Completion Record { [[Type]]: return, [[Value]]:
+        //    undefined, [[Target]]: empty }.
+        if (!n.argument) return new Abrupt(CompletionType.Return, undefined, EMPTY);
+
+        // ReturnStatement : return Expression ;
+        // 1. Let exprRef be ? Evaluation of Expression.
+        // 2. Let exprValue be ? GetValue(exprRef).
+        // 3. If GetGeneratorKind() is async, set exprValue to ? Await(exprValue).
+        // 4. Return Completion Record { [[Type]]: return, [[Value]]:
+        //    exprValue, [[Target]]: empty }.
+        const exprValue = yield* $.evaluateValue(n.argument);
+        if (IsAbrupt(exprValue)) return exprValue;
+        //if (GetGeneratorKind() === 'async') {
+        return new Abrupt(CompletionType.Return, exprValue, EMPTY);
+      });
+    },
+  },
+};
 
 declare global {
   interface ObjectSlots {
@@ -343,54 +390,6 @@ export const OrdinaryFunction = memoize(() => class OrdinaryFunction extends Ord
     return undefined;
   }
 });
-
-
-/**
- * 8.6.1 Runtime Semantics: InstantiateFunctionObject
- *
- * The syntax-directed operation InstantiateFunctionObject takes
- * arguments env (an Environment Record) and privateEnv (a
- * PrivateEnvironment Record or null) and returns a function
- * object. It is defined piecewise over the following productions:
- *
- * FunctionDeclaration :
- *         function BindingIdentifier ( FormalParameters ) { FunctionBody }
- *         function ( FormalParameters ) { FunctionBody }
- * 1. Return InstantiateOrdinaryFunctionObject of
- *    FunctionDeclaration with arguments env and privateEnv.
- *
- * GeneratorDeclaration :
- *         function * BindingIdentifier ( FormalParameters ) { GeneratorBody }
- *         function * ( FormalParameters ) { GeneratorBody }
- * 1. Return InstantiateGeneratorFunctionObject of
- *    GeneratorDeclaration with arguments env and privateEnv.
- *
- * AsyncGeneratorDeclaration :
- *         async function * BindingIdentifier ( FormalParameters ) { AsyncGeneratorBody }
- *         async function * ( FormalParameters ) { AsyncGeneratorBody }
- * 1. Return InstantiateAsyncGeneratorFunctionObject of
- *    AsyncGeneratorDeclaration with arguments env and privateEnv.
- *
- * AsyncFunctionDeclaration :
- *         async function BindingIdentifier ( FormalParameters ) { AsyncFunctionBody }
- *         async function ( FormalParameters ) { AsyncFunctionBody }
- * 1. Return InstantiateAsyncFunctionObject of
- *    AsyncFunctionDeclaration with arguments env and privateEnv.
- */
-export function InstantiateFunctionObject($: VM, env: EnvironmentRecord, privateEnv: PrivateEnvironmentRecord|null, node: ESTree.Node): Func {
-  Assert(node.type === 'FunctionDeclaration'
-    || node.type === 'FunctionExpression'
-    || node.type === 'ArrowFunctionExpression');
-  if (node.generator) {
-    Assert(node.type !== 'ArrowFunctionExpression');
-    if (node.async) return InstantiateAsyncGeneratorFunctionObject($, node, env, privateEnv);
-    return InstantiateGeneratorFunctionObject($, node, env, privateEnv);
-  }
-  if (node.async) return InstantiateAsyncFunctionObject($, node, env, privateEnv);
-  return InstantiateOrdinaryFunctionObject($, node, env, privateEnv);
-}
-declare const InstantiateAsyncGeneratorFunctionObject: any;
-declare const InstantiateAsyncFunctionObject: any;
 
 /**
  * 15.2.4 Runtime Semantics: InstantiateOrdinaryFunctionObject
@@ -1275,7 +1274,7 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
   for (const f of functionsToInitialize) {
     const [fn, ...rest] = BoundNames(f);
     Assert(fn != null && !rest.length);
-    const fo = InstantiateFunctionObject($, lexEnv, privateEnv, f);
+    const fo = $.InstantiateFunctionObject(f, lexEnv, privateEnv);
     CastNotAbrupt(yield* varEnv.SetMutableBinding($, fn, fo, false));
   }
 

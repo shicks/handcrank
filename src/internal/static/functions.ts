@@ -1,20 +1,16 @@
-import { ArrowFunctionExpression, ClassExpression, FunctionExpression, Node } from 'estree';
-import { PrivateName } from '../private_environment_record';
-import { CR, IsAbrupt } from '../completion_record';
-import { Func, InstantiateArrowFunctionExpression, InstantiateOrdinaryFunctionExpression } from '../func';
+// TODO - this file should get merged elsewhere?  though maybe rename func to functions?
+// and obj to objects?
+
+import { CR } from '../completion_record';
 import { EvalGen, VM } from '../vm';
 import { Source } from '../tree';
-import { PropertyKey } from '../val';
 import { IteratorRecord } from '../abstract_iterator';
 import { EnvironmentRecord } from '../environment_record';
-import * as ESTree from 'estree';
 import { UNUSED } from '../enums';
 
-declare const ClassDefinitionEvaluation: any;
-declare const InstantiateAsyncArrowFunctionExpression: any;
-declare const InstantiateAsyncGeneratorFunctionExpression: any;
-declare const InstantiateAsyncFunctionExpression: any;
-declare const InstantiateGeneratorFunctionExpression: any;
+import * as ESTree from 'estree';
+
+type Node = ESTree.Node;
 
 // 8.4 Function Name Inference
 
@@ -43,91 +39,6 @@ export function IsAnonymousFunctionDefinition(expr: Node): boolean {
       return false;
   }
 }
-
-/**
- * 8.4.5 Runtime Semantics: NamedEvaluation
- *
- * The syntax-directed operation NamedEvaluation takes argument name
- * (a property key or a Private Name) and returns either a normal
- * completion containing a function object or an abrupt completion. It
- * is defined piecewise over the following productions:
- *
- * PrimaryExpression : CoverParenthesizedExpressionAndArrowParameterList
- * 1. Let expr be the ParenthesizedExpression that is covered by
- *    CoverParenthesizedExpressionAndArrowParameterList.
- * 2. Return ? NamedEvaluation of expr with argument name.
- *
- * ParenthesizedExpression : ( Expression )
- * 1. Assert: IsAnonymousFunctionDefinition(Expression) is true.
- * 2. Return ? NamedEvaluation of Expression with argument name.
- *
- * FunctionExpression : function ( FormalParameters ) { FunctionBody }
- * 1. Return InstantiateOrdinaryFunctionExpression of
- *    FunctionExpression with argument name.
- *
- * GeneratorExpression : function * ( FormalParameters ) { GeneratorBody }
- * 1. Return InstantiateGeneratorFunctionExpression of
- *    GeneratorExpression with argument name.
- *
- * AsyncGeneratorExpression :
- *     async function * ( FormalParameters ) { AsyncGeneratorBody }
- * 1. Return InstantiateAsyncGeneratorFunctionExpression of
- *    AsyncGeneratorExpression with argument name.
- *
- * AsyncFunctionExpression :
- *     async function ( FormalParameters ) { AsyncFunctionBody }
- * 1. Return InstantiateAsyncFunctionExpression of
- *    AsyncFunctionExpression with argument name.
- *
- * ArrowFunction : ArrowParameters => ConciseBody
- * 1. Return InstantiateArrowFunctionExpression of ArrowFunction with
- *    argument name.
- *
- * AsyncArrowFunction :
- *     async AsyncArrowBindingIdentifier => AsyncConciseBody
- *     CoverCallExpressionAndAsyncArrowHead => AsyncConciseBody
- * 1. Return InstantiateAsyncArrowFunctionExpression of
- *    AsyncArrowFunction with argument name.
- *
- * ClassExpression : class ClassTail
- * 1. Let value be ? ClassDefinitionEvaluation of ClassTail with
- *    arguments undefined and name.
- * 2. Set value.[[SourceText]] to the source text matched by
- *    ClassExpression.
- * 3. Return value.
- */
-
-export function* NamedEvaluation(
-  $: VM,
-  node: FunctionExpression|ArrowFunctionExpression|ClassExpression,
-  name: PropertyKey|PrivateName,
-): EvalGen<CR<Func>> {
-  if (node.type === 'ClassExpression') {
-    const value = ClassDefinitionEvaluation($, node, undefined, name);
-    if (!IsAbrupt(value)) value.SourceText = GetSourceText(node);
-    return value;
-  } else if (node.type === 'ArrowFunctionExpression') {
-    if (node.async) { // async arrow
-      return InstantiateAsyncArrowFunctionExpression($, node, name);
-    } else { // ordinary arrow
-      return InstantiateArrowFunctionExpression($, node, name);
-    }
-  } else {
-    if (node.async) {
-      if (node.generator) { // async generator
-        return InstantiateAsyncGeneratorFunctionExpression($, node, name);
-      } else { // async function
-        return InstantiateAsyncFunctionExpression($, node, name);
-      }
-    } else if (node.generator) { // generator
-      return InstantiateGeneratorFunctionExpression($, node, name);
-    } else { // ordinary function
-      return yield* InstantiateOrdinaryFunctionExpression($, node, name);
-    }
-  }
-}
-
-
 
 /**
  * 8.6.3 Runtime Semantics: IteratorBindingInitialization

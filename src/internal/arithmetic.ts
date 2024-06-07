@@ -3,7 +3,7 @@ import { ToBoolean, ToNumber, ToNumeric, ToObject, ToPrimitive, ToPropertyKey, T
 import { Call, GetMethod, HasProperty, OrdinaryHasInstance } from './abstract_object';
 import { Assert } from './assert';
 import { CR, IsAbrupt } from './completion_record';
-import { EMPTY, NOT_APPLICABLE } from './enums';
+import { EMPTY } from './enums';
 import { EnvironmentRecord } from './environment_record';
 import { IsFunc } from './func';
 import { Obj } from './obj';
@@ -11,7 +11,7 @@ import { prop0 } from './property_descriptor';
 import { defineProperties } from './realm_record';
 import { GetValue, IsPrivateReference, IsPropertyReference, IsUnresolvableReference, PutValue, ReferenceRecord } from './reference_record';
 import { PropertyKey, Val } from './val';
-import { DebugString, ECR, EvalGen, Plugin, VM } from './vm';
+import { DebugString, ECR, EvalGen, Plugin, VM, when } from './vm';
 import { BinaryExpression, Expression, UnaryExpression, UpdateExpression } from 'estree';
 
 declare const ResolvePrivateIdentifier: any;
@@ -21,16 +21,14 @@ export const arithmetic: Plugin = {
   id: 'arithmetic',
 
   syntax: {
-    Evaluation($, on) {
-      on('UnaryExpression', (n) => {
-        if (!UNARY_OPS.has(n.operator)) return NOT_APPLICABLE;
-        return Evaluate_UnaryExpression($, n);
-      });
-      on('UpdateExpression', (n) => {
-        if (n.operator !== '++' && n.operator !== '--') return NOT_APPLICABLE;
-        return Evaluate_UpdateExpression($, n);
-      });
-      on('BinaryExpression', (n) => Evaluate_BinaryExpression($, n));
+    Evaluation(on) {
+      on('UnaryExpression',
+         when(n => UNARY_OPS.has(n.operator),
+              Evaluate_UnaryExpression));
+      on('UpdateExpression',
+         when(n => n.operator === '++' || n.operator === '--',
+              Evaluate_UpdateExpression));
+      on('BinaryExpression', Evaluate_BinaryExpression);
     },
   },
 

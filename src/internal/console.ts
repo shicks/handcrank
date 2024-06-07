@@ -7,7 +7,7 @@ import { defineProperties } from './realm_record';
 
 export const consoleObject: Plugin = {
   id: 'consoleObject',
-  deps: [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       const ns = OrdinaryObjectCreate({
