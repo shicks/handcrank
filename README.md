@@ -49,7 +49,7 @@ browser or on the server.
     - [x] vanilla declarations
     - [x] vanilla expressions
     - [x] arrow functions
-    - [ ] generators
+    - [x] generators
     - [ ] async
     - [ ] async arrows
 - [x] Call functions

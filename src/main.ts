@@ -20,6 +20,14 @@ export const vm = new VM({
   parseScript(source) { return esprima.parseScript(source, {loc: true, range: true}); },
   parseModule(source) { return esprima.parseModule(source, {loc: true, range: true}); },
 });
+
+// TODO - reasonable fallback when missing intrinsics?
+//        i.e. %String.prototype% might fall back to an ordinary object?
+// TODO - rewrite deps as provides/requires for intrinsics?
+//        would this still allow overriding modules?  same id still a thing?
+//          - but better still to just not install it in the first place?
+//          - maybe deps still allows grouping?
+
 vm.install(fundamental);
 vm.install(stringObject);
 vm.install(syntax);
