@@ -90,7 +90,7 @@ export function* ScriptEvaluation($: VM, scriptRecord: ScriptRecord): ECR<Val> {
     // 8. Set the PrivateEnvironment of scriptContext to null.
   );
   $.getRunningContext().suspend();
-  $.executionStack.push(scriptContext);
+  $.enterContext(scriptContext);
   const script = scriptRecord.ECMAScriptCode;
   let result: CR<UNUSED|Val> =
     yield* GlobalDeclarationInstantiation($, script, globalEnv);

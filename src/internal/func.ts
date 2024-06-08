@@ -381,13 +381,17 @@ export const OrdinaryFunction = memoize(() => class OrdinaryFunction extends Ord
       return ThrowCompletion(error);
     }
     OrdinaryCallBindThis($, this, calleeContext, thisArgument);
-    const result = yield* OrdinaryCallEvaluateBody($, this, argumentsList);
+    const result = yield* this.EvaluateBody($, this, argumentsList);
     $.popContext();
     if (IsAbrupt(result)) {
       if (result.Type === 'return') return result.Value;
       return result;
     }
     return undefined;
+  }
+
+  EvaluateBody($: VM, thisArg: Func, argumentsList: Val[]): ECR<Val> {
+    return OrdinaryCallEvaluateBody($, thisArg, argumentsList);
   }
 });
 
@@ -1430,7 +1434,7 @@ export const BuiltinFunction = memoize(() => class BuiltinFunction extends Ordin
  *     F. The this value is uninitialized, argumentsList provides the named
  *     parameters, and newTarget provides the NewTarget value.
  */
-function wrapBehavior<B extends CallBehavior|ConstructBehavior>(
+export function wrapBehavior<B extends CallBehavior|ConstructBehavior>(
   F: Func,
   behavior: B,
 ): B {
@@ -1439,12 +1443,10 @@ function wrapBehavior<B extends CallBehavior|ConstructBehavior>(
     callerContext.suspend();
     const calleeContext =
       new BuiltinExecutionContext(F);
-    try {
-      $.enterContext(calleeContext);
-      return yield* behavior.apply(this, arguments);
-    } finally {
-      $.popContext(calleeContext);
-    }
+    $.enterContext(calleeContext);
+    const result = yield* behavior.apply(this, arguments);
+    $.popContext(calleeContext); // TODO - finally? catch/rethrow??
+    return result;
   } as any;
 }
 

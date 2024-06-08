@@ -197,12 +197,12 @@ export function InitializeHostDefinedRealm($: VM): CR<UNUSED> {
   const newContext = new RootExecutionContext(realm);
   // 6. Push newContext onto the execution context stack; newContext
   //    is now the running execution context.
-  $.executionStack.push(newContext);
+  $.enterContext(newContext);
   CreateIntrinsics($, realm);
 
   for (const [k, v] of realm.Intrinsics) {
     intrinsicName.set(v, k);
-    v[INTRINSIC_NAME] = k;
+    (v as any)[INTRINSIC_NAME] = k; // for debugging
   }
 
   // 7. If the host requires use of an exotic object to serve as

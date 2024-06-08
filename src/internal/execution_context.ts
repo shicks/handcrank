@@ -12,6 +12,8 @@ import { ScriptRecord } from './script_record';
 import { Val } from './val';
 import { ECR, VM } from './vm';
 
+let ecid = 0;
+
 /**
  * 9.4 Execution Contexts
  *
@@ -75,6 +77,8 @@ import { ECR, VM } from './vm';
  * access or observe an execution context.
  */
 export abstract class ExecutionContext {
+
+  id = ++ecid;
 
   // TODO - is there an ExecutionContext that isn't a CodeExecutionContext?
   //      - if so, then maybe the ctor params below are pulled out for code only

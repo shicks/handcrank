@@ -12,6 +12,11 @@ operations are fully emulated.  Additional objects can be added to the
 environment to allow safe evaluation of user-provided scripts in the
 browser or on the server.
 
+## TODO
+
+- fix suspend/resume with yield*
+- array spread
+
 ## Features
 
 - [x] Evaluate arithmetic

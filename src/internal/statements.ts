@@ -51,6 +51,7 @@ export function* Evaluation_BlockStatement($: VM, n: BlockStatement): EvalGen<CR
   yield* BlockDeclarationInstantiation($, n.body, blockEnv);
   context.LexicalEnvironment = blockEnv;
   let blockValue: CR<Val> = yield* $.evaluateValue(n.body[0]);
+  let caught: unknown;
   try {
     for (let i = 1; i < n.body.length; i++) {
       if (IsAbrupt(blockValue)) return blockValue;
@@ -58,8 +59,11 @@ export function* Evaluation_BlockStatement($: VM, n: BlockStatement): EvalGen<CR
       const s = yield* $.evaluateValue(stmt);
       blockValue = UpdateEmpty(s, blockValue);
     }
+  } catch (err) {
+    caught = err;
   } finally {
     context.LexicalEnvironment = oldEnv || undefined;
+    if (caught) throw caught;
   }
   return blockValue;
 }
