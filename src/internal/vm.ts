@@ -79,18 +79,14 @@ export class VM {
 
   enterContext(context: ExecutionContext) {
     // TODO - resume? suspend previous?
-    //console.log(`\x1b[34menter ${this.executionStack.length} ${DebugString(context)}${new Error().stack.split('\n')[2]}\x1b[0m`);
     this.executionStack.push(context);
-  //console.log('  ===\n  ' + this.executionStack.map(DebugString).join('\n  ') + '\n  ===');
     context.resume();
   }
 
   popContext(context?: ExecutionContext) {
     Assert(this.executionStack.length > 1, 'Cannot pop last context');
     if (context) Assert(this.executionStack.at(-1) === context, `Wrong context to pop`);
-    //console.log(`\x1b[34mpop ${this.executionStack.length - 1} ${DebugString(this.executionStack.at(-1))}${new Error().stack.split('\n')[2]}\x1b[0m`);
     this.executionStack.pop()!.suspend();
-  //console.log('  ===\n  ' + this.executionStack.map(DebugString).join('\n  ') + '\n  ===');
     this.getRunningContext().resume();
   }
 
@@ -120,7 +116,7 @@ export class VM {
     try {
       Assert(1 > 2);
     } catch (e) {
-      /**/ throw /**/ (this as any).lastThrow = new Error(message ? `${name}: ${message}` : name);
+      /* throw /**/ (this as any).lastThrow = new Error(message ? `${name}: ${message}` : name);
     }
 
     const prototype = this.getIntrinsic(`%${name}.prototype%`);
@@ -357,9 +353,9 @@ export function DebugString(
   // TODO - consider adding an optional `color = false` argument
   //  - color null bright white, undefined dark gray, num/bool yellow, strings green, objs cyan
   if (v instanceof ExecutionContext) {
-    return `${v.constructor.name} ${v.id} ${String(v.Function ? (v.Function.InitialName ??
+    return `${v.constructor.name} ${String(v.Function ? (v.Function.InitialName ??
               v.Function.InternalName ?? v.Function.OwnProps?.get('name')?.Value) :
-              v.Generator ? v.Generator.DebugStr : '')}`;
+              v.Generator ? v.Generator.InternalName : '')}`;
   }
   if (v instanceof ReferenceRecord) {
     if (v.Base instanceof EnvironmentRecord) {

@@ -125,10 +125,8 @@ export function* EvaluateGeneratorBody(
       GeneratorState: undefined,
       GeneratorContext: undefined,
       GeneratorBrand: EMPTY,
-      // TODO - REMOVE THIS AFTER DEBUGGING:
-      InternalName: `${this.InternalName}()`,
+      InternalName: `${this.InternalName}()`, // for debugging
     });
-  Object.defineProperties(G, {DebugStr: {get() { return `${this.InternalName} (${GeneratorState[this.GeneratorState]})`; }}});
   if (IsAbrupt(G)) return G;
   Assert(this.ECMAScriptCode.type === 'BlockStatement');
   GeneratorStart($, G, this.ECMAScriptCode /* FunctionBody */);
@@ -590,7 +588,6 @@ export function GeneratorStart(
   };
   genContext.CodeEvaluationState = closure();
   generator.GeneratorContext = genContext;
-  //console.log(`\x1b[1;33mGeneratorStart: ${generator.InternalName}.state <- suspendedStart\x1b[m`);
   generator.GeneratorState = GeneratorState.suspendedStart;
   return UNUSED;
 }
@@ -660,7 +657,6 @@ export function* GeneratorResume(
   value: Val,
   generatorBrand: string|EMPTY,
 ): ECR<Val> {
-  //console.log(`\x1b[1;33mGeneratorResume: ${generator.InternalName}.state == ${GeneratorState[generator.GeneratorState]}\x1b[m`);
   const state = GeneratorValidate($, generator, generatorBrand);
   if (IsAbrupt(state)) return state;
   if (state === GeneratorState.completed) return CreateIterResultObject($, undefined, true);
@@ -668,7 +664,6 @@ export function* GeneratorResume(
   const genContext = generator.GeneratorContext!;
   const methodContext = $.getRunningContext();
   methodContext.suspend(); // $.popContext(methodContext);
-  //console.log(`\x1b[1;33m  GeneratorResume: ${generator.InternalName}.state <- executing\x1b[m`);
   generator.GeneratorState = GeneratorState.executing;
   $.enterContext(genContext);
 
@@ -683,13 +678,9 @@ export function* GeneratorResume(
   // yield; // ???
   debugger;
   let iterResult = iter.next(value);
-  //console.log(`iterResult(${generator.InternalName}): ${iterResult.done} ${iterResult.value}`);
-  //console.log('  ===\n  ' + $.executionStack.map(DebugString).join('\n  ') + '\n  ===');
   while (!iterResult.done && !iterResult.value) {
     yield;
     iterResult = iter.next();
-    //console.log(`iterResult(${generator.InternalName}): ${iterResult.done} ${iterResult.value}`);
-    //console.log('  ===\n  ' + $.executionStack.map(DebugString).join('\n  ') + '\n  ===');
   }
   const result = iterResult.done ? iterResult.value : iterResult.value!.yield;
 
@@ -744,7 +735,6 @@ export function* GeneratorResumeAbrupt(
   abruptCompletion: Abrupt,
   generatorBrand: string|EMPTY,
 ): ECR<Val> {
-  //console.log(`\x1b[1;33mGeneratorResumeAbrupt: ${generator.InternalName}.state == ${GeneratorState[generator.GeneratorState]}\x1b[m`);
   let state = GeneratorValidate($, generator, generatorBrand);
   if (IsAbrupt(state)) return state;
   if (state === GeneratorState.suspendedStart) {
@@ -752,7 +742,6 @@ export function* GeneratorResumeAbrupt(
     // it and its associated execution context is never resumed. Any
     // execution state associated with generator can be discarded at this
     // point.
-    //console.log(`\x1b[1;33m  GeneratorResumeAbrupt: ${generator.InternalName}.state <- completed from suspendedStart\x1b[m`);
     state = generator.GeneratorState = GeneratorState.completed;
   }
   if (state === GeneratorState.completed) {
@@ -765,7 +754,6 @@ export function* GeneratorResumeAbrupt(
   const genContext = generator.GeneratorContext!;
   const methodContext = $.getRunningContext();
   methodContext.suspend();
-  //console.log(`\x1b[1;33m  GeneratorResumeAbrupt: ${generator.InternalName}.state <- executing\x1b[m`);
   generator.GeneratorState = GeneratorState.executing;
   $.enterContext(genContext);
 
@@ -837,11 +825,8 @@ export function* GeneratorYield(
 ): ECR<Val> {
   const genContext = $.getRunningContext();
   const generator = genContext.Generator;
-//console.dir($.executionStack.map(DebugString).join('\n'));
   Assert(generator);
-  //console.log(`\x1b[1;33mGeneratorYield: ${generator.InternalName}.state == ${GeneratorState[generator.GeneratorState]}\x1b[m`);
   Assert(GetGeneratorKind($) === SYNC);
-  //console.log(`\x1b[1;33m  GeneratorYield: ${generator.InternalName}.state <- suspendedYield\x1b[m`);
   generator.GeneratorState = GeneratorState.suspendedYield;
   $.popContext(genContext);
   const callerContext = $.getRunningContext();
@@ -850,7 +835,6 @@ export function* GeneratorYield(
   // Completion Record with which it is resumed.
 
   const resumptionValue = yield {yield: iterNextObj};
-  //console.log(`\x1b[1;33m  GeneratorYield AFTER: ${generator.InternalName}.state <- suspendedYield\x1b[m`);
 
   // Assert: If control reaches here, then genContext is the running
   // execution context again.

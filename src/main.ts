@@ -44,6 +44,7 @@ function runScript(script: string, filename: string, printResult = false) {
   if (IsAbrupt(cr)) {
     if (cr.Type === 'throw') {
       console.error(`Uncaught ${DebugString(cr.Value)}`);
+      return 1;
     } else {
       console.dir(cr);
     }
@@ -51,6 +52,7 @@ function runScript(script: string, filename: string, printResult = false) {
     const s = DebugString(cr, 2);
     console.log(s);
   }
+  return 0;
 }
 
 if (process.argv.length > 2) {
@@ -59,10 +61,10 @@ if (process.argv.length > 2) {
   //   main file.js  run file from disk
   //   main -e '...' run script from command line
   if (process.argv[2] === '-e') {
-    runScript(process.argv[3], 'input.js');
+    process.exit(runScript(process.argv[3], 'input.js'));
   } else {
     const script = String(fs.readFileSync(process.argv[2], 'utf8'));
-    runScript(script, process.argv[2]);
+    process.exit(runScript(script, process.argv[2]));
   }
 } else {
   const rl = readline.createInterface({input: process.stdin, output: process.stdout});
