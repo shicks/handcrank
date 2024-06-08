@@ -2,7 +2,7 @@ import { IsCallable, IsLessThan, IsLooselyEqual, IsStrictlyEqual } from './abstr
 import { ToBoolean, ToNumber, ToNumeric, ToObject, ToPrimitive, ToPropertyKey, ToString } from './abstract_conversion';
 import { Call, GetMethod, HasProperty, OrdinaryHasInstance } from './abstract_object';
 import { Assert } from './assert';
-import { CR, IsAbrupt } from './completion_record';
+import { CR, IsAbrupt, NotGen } from './completion_record';
 import { EMPTY } from './enums';
 import { EnvironmentRecord } from './environment_record';
 import { IsFunc } from './func';
@@ -371,11 +371,11 @@ export function* Evaluation_ComparisonExpression(
     case '===': return IsStrictlyEqual(lval, rval);
     case '!==': return fmap(IsStrictlyEqual(lval, rval), x => !x);
     case '==': return yield* IsLooselyEqual($, lval, rval);
-    case '!=': return fmap(IsLooselyEqual($, lval, rval), x => !x);
+    case '!=': return fmap(yield* IsLooselyEqual($, lval, rval), x => !x);
     case '<': return fmap(yield* IsLessThan($, lval, rval, true), x => x ?? false);
     case '>': return fmap(yield* IsLessThan($, rval, lval, false), x => x ?? false);
-    case '<=': return fmap(IsLessThan($, rval, lval, false), x => !x ?? false);
-    case '>=': return fmap(IsLessThan($, lval, rval, true), x => !x ?? false);
+    case '<=': return fmap(yield* IsLessThan($, rval, lval, false), x => !x ?? false);
+    case '>=': return fmap(yield* IsLessThan($, lval, rval, true), x => !x ?? false);
     case 'in': {
       if (!(rval instanceof Obj)) {
         return $.throw('TypeError', `Cannot use 'in' operator to search for '${
@@ -389,8 +389,8 @@ export function* Evaluation_ComparisonExpression(
   }
   throw new Error(`Unexpected comparison operator ${opText}`);
 }
-function fmap<T, U>(v: CR<T>, f: (arg: T) => CR<U>): CR<U> {
-  return (IsAbrupt as any)(v) ? v : f(v as any) as any;
+function fmap<T, U>(v: CR<T>, f: (arg: T) => CR<U>, ...rest: NotGen<T>): CR<U> {
+  return IsAbrupt(v, ...rest) ? v : f(v as any) as any;
 }
 
 /**

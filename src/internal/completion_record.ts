@@ -56,7 +56,7 @@ export enum CompletionType {
   Break = 'break',
 }
 
-type NotGen<T> = T extends Generator ? [never] : [];
+export type NotGen<T> = T extends Generator ? [never] : [];
 
 /**
  * Abrupt completion refers to any Completion Record with a [[Type]]
@@ -65,7 +65,7 @@ type NotGen<T> = T extends Generator ? [never] : [];
  * as well as a runtime check, since this is a common error that is
  * hard to debug.
  */
-export function IsAbrupt<T>(x: CR<T>, ...rest: NotGen<T>): x is Abrupt {
+export function IsAbrupt<T>(x: CR<T>, ..._: NotGen<T>): x is Abrupt {
   if (x && typeof (x as any).next === 'function') {
     throw new Error('IsAbrupt on generator: forgot to yield?');
   }

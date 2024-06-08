@@ -5,7 +5,7 @@ import { Abrupt, CR, CompletionType, IsAbrupt } from './completion_record';
 import { ResolveBinding, ResolveThisBinding } from './execution_context';
 import { ReferenceRecord } from './reference_record';
 import { StrictNode } from './tree';
-import { ToPropertyKey } from './abstract_conversion';
+import { ToBoolean, ToPropertyKey } from './abstract_conversion';
 import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from './statements';
 import { Evaluation_AssignmentExpression } from './assignment';
 import { Evaluation_CallExpression, Evaluation_NewExpression } from './func';
@@ -85,6 +85,23 @@ export const syntax: Plugin = {
       });
       on('CallExpression', Evaluation_CallExpression);
       on('NewExpression', Evaluation_NewExpression);
+      on('SequenceExpression', function*($, n) {
+        let result: CR<Val> = undefined;
+        for (const expr of n.expressions) {
+          result = yield* $.evaluateValue(expr);
+          if (IsAbrupt(result)) return result;
+        }
+        return result;
+      });
+      on('ConditionalExpression', function*($, n) {
+        const test = yield* $.evaluateValue(n.test);
+        if (IsAbrupt(test)) return test;
+        if (ToBoolean(test)) {
+          return yield* $.evaluateValue(n.consequent);
+        } else {
+          return yield* $.evaluateValue(n.alternate);
+        }
+      });
     },
   },
 };
