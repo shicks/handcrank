@@ -1,7 +1,7 @@
 import { ToBoolean } from './abstract_conversion';
 import { Call, Get, GetMethod, GetV } from './abstract_object';
 import { Assert } from './assert';
-import { CR, IsAbrupt, IsThrowCompletion } from './completion_record';
+import { CR, IsAbrupt, IsThrowCompletion, NotGen } from './completion_record';
 import { ASYNC, EMPTY, SYNC } from './enums';
 import { CreateBuiltinFunction, Func, IsFunc } from './func';
 import { Obj, OrdinaryObjectCreate } from './obj';
@@ -34,7 +34,7 @@ export class IteratorRecord {
   constructor(
     readonly Iterator: Obj,
     readonly NextMethod: Func,
-    readonly Done: boolean,
+    public Done: boolean,
   ) {}
 }
 
@@ -237,11 +237,12 @@ export function* IteratorStep(
  * 7. If innerResult.[[Value]] is not an Object, throw a TypeError exception.
  * 8. Return ? completion.
  */
-export function* IteratorClose(
+export function* IteratorClose<T>(
   $: VM,
   iteratorRecord: IteratorRecord,
-  completion: CR<Val|EMPTY>,
-): ECR<Val> {
+  completion: CR<T>,
+  ...rest: NotGen<T>
+): ECR<T> {
   Assert(iteratorRecord.Iterator instanceof Obj);
   const iterator = iteratorRecord.Iterator;
   let innerResult = yield* GetMethod($, iterator, 'return');
@@ -249,7 +250,7 @@ export function* IteratorClose(
     if (innerResult === undefined) return completion;
     innerResult = yield* Call($, innerResult, iterator);
   }
-  if (IsThrowCompletion(completion)) return completion;
+  if (IsThrowCompletion(completion, ...rest)) return completion;
   if (IsThrowCompletion(innerResult)) return innerResult;
   if (!(innerResult instanceof Obj)) return $.throw('TypeError', 'not an object');
   return completion;
@@ -298,7 +299,7 @@ export function* AsyncIteratorClose(
   $: VM,
   iteratorRecord: IteratorRecord,
   completion: CR<Val|EMPTY>,
-): ECR<Val> {
+): ECR<Val|EMPTY> {
   Assert(iteratorRecord.Iterator instanceof Obj);
   const iterator = iteratorRecord.Iterator;
   let innerResult = yield* GetMethod($, iterator, 'return');

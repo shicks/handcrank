@@ -1,6 +1,6 @@
 // 14
 
-import { BlockStatement, FunctionExpression, Node, VariableDeclaration } from "estree";
+import { BlockStatement, Node, VariableDeclaration } from "estree";
 import { Assert } from "./assert";
 import { CR, CastNotAbrupt, IsAbrupt, UpdateEmpty } from "./completion_record";
 import { EMPTY, UNUSED } from "./enums";
@@ -160,30 +160,30 @@ export function* BlockDeclarationInstantiation(
 export function* Evaluation_LexicalDeclaration($: VM, n: VariableDeclaration): EvalGen<CR<EMPTY>> {
   Assert(n.kind !== 'var');
   for (const binding of n.declarations) {
-    switch (binding.id.type) {
-      case 'Identifier': {
-        const lhs = CastNotAbrupt(ResolveBinding($, binding.id.name));
-        if (binding.init == null) {
-          // LexicalBinding : BindingIdentifier
-          CastNotAbrupt(yield* InitializeReferencedBinding($, lhs, undefined));
-          break;
-        } else {
-          // LexicalBinding : BindingIdentifier Initializer
-          let value;
-          if (IsAnonymousFunctionDefinition(binding.init)) {
-            value = yield* $.NamedEvaluation(binding.init, binding.id.name)
-          } else {
-            value = yield* $.evaluateValue(binding.init);
-          }
-          if (IsAbrupt(value)) return value;
-          CastNotAbrupt(yield* InitializeReferencedBinding($, lhs, value));
-        }
+    if (binding.id.type === 'Identifier') {
+      const lhs = CastNotAbrupt(ResolveBinding($, binding.id.name));
+      if (binding.init == null) {
+        // LexicalBinding : BindingIdentifier
+        CastNotAbrupt(yield* InitializeReferencedBinding($, lhs, undefined));
         break;
+      } else {
+        // LexicalBinding : BindingIdentifier Initializer
+        let value;
+        if (IsAnonymousFunctionDefinition(binding.init)) {
+          value = yield* $.NamedEvaluation(binding.init, binding.id.name)
+        } else {
+          value = yield* $.evaluateValue(binding.init);
+        }
+        if (IsAbrupt(value)) return value;
+        CastNotAbrupt(yield* InitializeReferencedBinding($, lhs, value));
       }
-      case 'ObjectPattern':
-      case 'ArrayPattern':
-      default:
-        throw new Error(`not implemented: binding to ${binding.id.type}`);
+    } else {
+      Assert(binding.init);
+      const value = yield* $.evaluateValue(binding.init);
+      if (IsAbrupt(value)) return value;
+      const env = $.getRunningContext().LexicalEnvironment;
+      const status = yield* $.BindingInitialization(binding.id, value, env);
+      if (IsAbrupt(status)) return status;
     }
   }
   return EMPTY;

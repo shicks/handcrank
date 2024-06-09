@@ -31,7 +31,7 @@ export function BoundNames(node: Node, names: string[] = []): string[] {
         node.properties.forEach(visit)
         return;
       case 'Property':
-        visit(node.key);
+        visit(node.value); // NOTE: was node.key but I think that was wrong?
         return;
       case 'RestElement':
         visit(node.argument);

@@ -1026,7 +1026,7 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
         } else if (prop.key.type === 'Literal') {
           key = String(prop.key.value);
         } else {
-          throw new Error(`bad key type for non-computed property: ${(prop as any).type}`);
+          throw new Error(`bad key type for non-computed property: ${prop.key.type}`);
         }
         if (key === '__proto__' && !$.isJsonParse()) {
           isProtoSetter = true;

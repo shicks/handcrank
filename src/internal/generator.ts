@@ -1,8 +1,8 @@
 import * as ESTree from 'estree';
 import { GetSourceText } from './static/functions';
-import { CreateBuiltinFunction, Func, FunctionDeclarationInstantiation, OrdinaryFunction, OrdinaryFunctionCreate, SetFunctionName, callOrConstruct, functions, methodO, wrapBehavior } from './func';
+import { CreateBuiltinFunction, Func, FunctionDeclarationInstantiation, OrdinaryFunction, OrdinaryFunctionCreate, SetFunctionName, callOrConstruct, functions, methodO } from './func';
 import { prop0, propC, propW } from './property_descriptor';
-import { DebugString, ECR, Plugin, VM, mapJust, runImmediate, when } from './vm';
+import { ECR, Plugin, VM, mapJust, runImmediate, when } from './vm';
 import { functionConstructor } from './fundamental';
 import { ASYNC, EMPTY, NON_LEXICAL_THIS, SYNC, UNUSED } from './enums';
 import { Abrupt, CR, CastNotAbrupt, IsAbrupt, IsReturnCompletion, IsThrowCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';

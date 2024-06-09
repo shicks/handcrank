@@ -5,12 +5,14 @@ import { Abrupt, CR, CompletionType, IsAbrupt } from './completion_record';
 import { ResolveBinding, ResolveThisBinding } from './execution_context';
 import { ReferenceRecord } from './reference_record';
 import { StrictNode } from './tree';
-import { ToBoolean, ToPropertyKey } from './abstract_conversion';
+import { ToPropertyKey } from './abstract_conversion';
 import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from './statements';
 import { Evaluation_AssignmentExpression } from './assignment';
 import { Evaluation_CallExpression, Evaluation_NewExpression } from './func';
 import { Evaluation_ObjectExpression } from './obj';
 import { Evaluation_ArrayExpression } from './exotic_array';
+import { Evaluation_ConditionalExpression, Evaluation_SequenceExpression } from './control_flow';
+import { BindingInitialization_ArrayPattern, BindingInitialization_Identifier, BindingInitialization_ObjectPattern } from './binding';
 
 // TODO - split out basic from advanced syntax??
 
@@ -85,23 +87,16 @@ export const syntax: Plugin = {
       });
       on('CallExpression', Evaluation_CallExpression);
       on('NewExpression', Evaluation_NewExpression);
-      on('SequenceExpression', function*($, n) {
-        let result: CR<Val> = undefined;
-        for (const expr of n.expressions) {
-          result = yield* $.evaluateValue(expr);
-          if (IsAbrupt(result)) return result;
-        }
-        return result;
-      });
-      on('ConditionalExpression', function*($, n) {
-        const test = yield* $.evaluateValue(n.test);
-        if (IsAbrupt(test)) return test;
-        if (ToBoolean(test)) {
-          return yield* $.evaluateValue(n.consequent);
-        } else {
-          return yield* $.evaluateValue(n.alternate);
-        }
-      });
+      on('SequenceExpression', Evaluation_SequenceExpression);
+      on('ConditionalExpression', Evaluation_ConditionalExpression);
+    },
+
+    BindingInitialization(on) {
+      // TODO - variable binding is itself a plugin????
+      on('Identifier', BindingInitialization_Identifier);
+      // TODO - separate destructuring into a plugin
+      on('ObjectPattern', BindingInitialization_ObjectPattern);
+      on('ArrayPattern', BindingInitialization_ArrayPattern);
     },
   },
 };

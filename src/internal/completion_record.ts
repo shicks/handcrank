@@ -21,7 +21,7 @@ export class Abrupt {
     /** The type of completion that occurred. */
     readonly Type: CompletionType,
     /** The value that was produced. */
-    readonly Value: Val,
+    readonly Value: Val|EMPTY,
     /** The target label for directed control transfers. */
     readonly Target: string|EMPTY,
   ) {}
@@ -72,7 +72,7 @@ export function IsAbrupt<T>(x: CR<T>, ..._: NotGen<T>): x is Abrupt {
   return x instanceof Abrupt;
 }
 
-export function CastNotAbrupt<T>(x: CR<T>): T {
+export function CastNotAbrupt<T>(x: CR<T>, ..._: NotGen<T>): T {
   try {
     Assert(!IsAbrupt(x as any));
   } catch (e) {
@@ -104,7 +104,7 @@ export function ThrowCompletion(value: Val): CR<never> {
   return new Abrupt(CompletionType.Throw, value, EMPTY);
 }
 
-type ThrowCompletion = Abrupt & {type: CompletionType.Throw};
+type ThrowCompletion = Abrupt & {Type: CompletionType.Throw, Value: Val};
 export function IsThrowCompletion<T>(
   completion: CR<T>,
   ...rest: NotGen<T>
@@ -116,7 +116,7 @@ export function ReturnCompletion(value: Val): CR<never> {
   return new Abrupt(CompletionType.Return, value, EMPTY);
 }
 
-type ReturnCompletion = Abrupt & {type: CompletionType.Return};
+type ReturnCompletion = Abrupt & {Type: CompletionType.Return, Value: Val};
 export function IsReturnCompletion<T>(
   completion: CR<T>,
   ...rest: NotGen<T>
@@ -143,4 +143,8 @@ export function UpdateEmpty<T, U extends Val>(
   return IsAbrupt(completionRecord) ?
       new Abrupt(completionRecord.Type, value, completionRecord.Target) :
       value;
+}
+
+export function CompletionValue<T>(completion: CR<T>, ...rest: NotGen<T>): T|Val|EMPTY {
+  return IsAbrupt(completion, ...rest) ? completion.Value : completion;
 }

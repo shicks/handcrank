@@ -1,7 +1,7 @@
 import { CR, CastNotAbrupt, IsAbrupt, ThrowCompletion } from './completion_record';
 import { Val } from './val';
 import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext, ResolveThisBinding } from './execution_context';
-import { EMPTY, NOT_APPLICABLE, UNRESOLVABLE } from './enums';
+import { EMPTY, NOT_APPLICABLE, UNRESOLVABLE, UNUSED } from './enums';
 import { NodeType, NodeMap, Node, Esprima, preprocess, Source } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
 import { InitializeHostDefinedRealm, RealmAdvice, RealmRecord, getIntrinsicName } from './realm_record';
@@ -22,10 +22,12 @@ export type ECR<T> = EvalGen<CR<T>>;
 interface SyntaxOp {
   Evaluation(): ECR<Val|ReferenceRecord|EMPTY>;
   NamedEvaluation(name: string): ECR<Val>;
+  LabelledEvaluation(labelSet: string[]): ECR<Val|EMPTY>;
   InstantiateFunctionObject(
     env: EnvironmentRecord,
     privateEnv: PrivateEnvironmentRecord|null,
   ): Func;
+  BindingInitialization(value: Val, environment: EnvironmentRecord|undefined): ECR<UNUSED>;
 }
 
 export interface Plugin {
@@ -59,7 +61,9 @@ export class VM {
   syntaxOperations: SyntaxHandlers = {
     Evaluation: {},
     NamedEvaluation: {},
+    LabelledEvaluation: {},
     InstantiateFunctionObject: {},
+    BindingInitialization: {},
   };
 
   constructor(private readonly esprima?: Esprima) {}
@@ -116,7 +120,7 @@ export class VM {
     try {
       Assert(1 > 2);
     } catch (e) {
-      /* throw /**/ (this as any).lastThrow = new Error(message ? `${name}: ${message}` : name);
+      /**/ throw /**/ (this as any).lastThrow = new Error(message ? `${name}: ${message}` : name);
     }
 
     const prototype = this.getIntrinsic(`%${name}.prototype%`);
@@ -174,7 +178,7 @@ export class VM {
   // an rvalue is required from a child.
   * evaluateValue(node: Node): ECR<Val> {
     this.initialize()
-    const result: CR<EMPTY|Val|ReferenceRecord> = yield* this.operate('Evaluation', node);
+    const result: CR<EMPTY|Val|ReferenceRecord> = yield* this.Evaluation(node);
     if (IsAbrupt(result)) return result;
     if (EMPTY.is(result)) return undefined;
     if (result instanceof ReferenceRecord) return yield* GetValue(this, result);
@@ -237,20 +241,39 @@ export class VM {
   }
 
   Evaluation(n: Node): ECR<Val|ReferenceRecord|EMPTY> {
-    return this.operate('Evaluation', n);
+    return this.operate('Evaluation', n, []);
   }
   NamedEvaluation(n: Node, name: string): ECR<Val> {
-    return this.operate('NamedEvaluation', n, name);
+    return this.operate('NamedEvaluation', n, [name]);
+  }
+  LabelledEvaluation(n: Node, labelSet: string[]): ECR<Val|EMPTY> {
+    return this.operate('LabelledEvaluation', n, [labelSet],
+                        () => this.evaluateValue(n));
   }
   InstantiateFunctionObject(
     n: Node,
     env: EnvironmentRecord,
     privateEnv: PrivateEnvironmentRecord|null,
   ): Func {
-    return this.operate('InstantiateFunctionObject', n, env, privateEnv);
+    return this.operate('InstantiateFunctionObject', n, [env, privateEnv]);
+  }
+  BindingInitialization(
+    n: Node,
+    value: Val,
+    environment: EnvironmentRecord|undefined,
+  ): ECR<UNUSED> {
+    return this.operate('BindingInitialization', n, [value, environment]);
   }
 
-  private operate<O extends keyof SyntaxOp>(op: O, n: Node, ...rest: SyntaxArgs<O>): SyntaxResult<O> {
+  private operate<O extends keyof SyntaxOp>(
+    op: O,
+    n: Node,
+    args: SyntaxArgs<O>,
+    fallback: () => SyntaxResult<O> = () => {
+      throw new Error(`Cannot do '${op}' on ${n.type}({\n  ${
+          Object.entries(n).map(([k, v]) => `${k}: ${v}`).join(',\n  ')}\n})`);
+    },
+  ): SyntaxResult<O> {
     if (op === 'Evaluation') {
       const ctx = this.getRunningContext();
       if (ctx instanceof CodeExecutionContext) {
@@ -258,12 +281,11 @@ export class VM {
       }
     }
     for (const impl of this.syntaxOperations[op][n.type] || []) {
-      const result = impl(this, n as any, ...rest);
+      const result = impl(this, n as any, ...args);
       if (!NOT_APPLICABLE.is(result)) return result;
     }
     // TODO - might be nice to print to depth 2?
-    throw new Error(`Cannot do '${op}' on ${n.type}({\n  ${
-        Object.entries(n).map(([k, v]) => `${k}: ${v}`).join(',\n  ')}\n})`);
+    return fallback();
   }
 
   install(plugin: Plugin): void {

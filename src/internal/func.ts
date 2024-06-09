@@ -1,4 +1,4 @@
-import { Abrupt, CR, CastNotAbrupt, CompletionType, IsAbrupt, ThrowCompletion } from './completion_record';
+import { Abrupt, CR, CastNotAbrupt, CompletionType, IsAbrupt, IsReturnCompletion, ThrowCompletion } from './completion_record';
 import { DebugString, ECR, EvalGen, Plugin, VM, just, mapJust, when } from './vm';
 import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, STRICT, SYNC, UNINITIALIZED, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
@@ -28,7 +28,7 @@ type Node = ESTree.Node;
 type PrivateElement = never;
 type ClassFieldDefinitionRecord = never;
 
-function PrepareForTailCall(...args: any): void {}
+function PrepareForTailCall(..._: any): void {}
 
 export const functions: Plugin = {
   id: 'functions',
@@ -384,7 +384,7 @@ export const OrdinaryFunction = memoize(() => class OrdinaryFunction extends Ord
     const result = yield* this.EvaluateBody($, this, argumentsList);
     $.popContext();
     if (IsAbrupt(result)) {
-      if (result.Type === 'return') return result.Value;
+      if (IsReturnCompletion(result)) return result.Value;
       return result;
     }
     return undefined;

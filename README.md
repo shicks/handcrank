@@ -14,8 +14,11 @@ browser or on the server.
 
 ## TODO
 
-- fix suspend/resume with yield*
-- array spread
+- array spread (done?)
+- finish binding
+    - array destructuring, destructured property assignments
+      (will need to teach assignop to do this)
+- finish control_flow lexical for loop that started the rathole
 
 ## Features
 

@@ -6,7 +6,7 @@ import { arithmetic } from './internal/arithmetic';
 import * as esprima from 'esprima-next';
 import * as readline from 'readline';
 import { fundamental } from './internal/fundamental';
-import { IsAbrupt } from './internal/completion_record';
+import { IsAbrupt, IsThrowCompletion } from './internal/completion_record';
 import { arrayObject } from './internal/exotic_array';
 import { stringObject } from './internal/exotic_string';
 import { errorObject } from './internal/error_object';
@@ -15,6 +15,7 @@ import { iterators } from './internal/iterators';
 import { generators } from './internal/generator';
 import * as fs from 'node:fs';
 import { functions } from './internal/func';
+import { controlFlow } from './internal/control_flow';
 
 export const vm = new VM({
   parseScript(source) { return esprima.parseScript(source, {loc: true, range: true}); },
@@ -38,11 +39,12 @@ vm.install(consoleObject);
 vm.install(iterators);
 vm.install(functions);
 vm.install(generators);
+vm.install(controlFlow);
 
 function runScript(script: string, filename: string, printResult = false) {
   const cr = run(vm.evaluateScript(script, filename));
   if (IsAbrupt(cr)) {
-    if (cr.Type === 'throw') {
+    if (IsThrowCompletion(cr)) {
       console.error(`Uncaught ${DebugString(cr.Value)}`);
       return 1;
     } else {

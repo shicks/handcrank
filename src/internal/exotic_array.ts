@@ -1,24 +1,34 @@
 import { ArrayExpression } from 'estree';
 import { IsArray, IsArrayIndex, IsCallable, IsConstructor, IsIntegralNumber, SameValue, SameValueZero } from './abstract_compare';
-import { ToNumber, ToObject, ToUint32 } from './abstract_conversion';
+import { ToIntegerOrInfinity, ToNumber, ToObject, ToUint32 } from './abstract_conversion';
 import { Call, Construct, CreateArrayFromList, CreateDataPropertyOrThrow, Get, GetMethod, LengthOfArrayLike, Set } from './abstract_object';
 import { Assert } from './assert';
 import { Abrupt, CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { CreateBuiltinFunction, callOrConstruct, method } from './func';
+import { CreateBuiltinFunction, callOrConstruct, method, methodO } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
-import { GetPrototypeFromConstructor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject } from './obj';
-import { HasValueField, IsDataDescriptor, PropertyDescriptor, prop0, propW, propWC, propWEC } from './property_descriptor';
+import { GetPrototypeFromConstructor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject, OrdinaryObjectCreate } from './obj';
+import { HasValueField, IsDataDescriptor, PropertyDescriptor, prop0, propC, propW, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { memoize } from './slots';
 import { PropertyKey, Val } from './val';
 import { DebugString, ECR, Plugin, VM, run } from './vm';
+import { CreateIteratorFromClosure, GeneratorResume, GeneratorYield } from './generator';
+import { CreateIterResultObject, IteratorRecord } from './abstract_iterator';
+import { iterators } from './iterators';
 
 declare const GetIteratorFromMethod: any;
 declare const IteratorStep: any;
 declare const IteratorClose: any;
 declare const IteratorValue: any;
+declare const IsDetachedBuffer: any;
+declare global {
+  interface ObjectSlots {
+    TypedArrayName?: never;
+    ViewedArrayBuffer?: never;
+    ArrayLength?: number;
+  }
+}
 
-type IteratorRecord = unknown;
 // TODO - move to iterator.ts
 export function CloseIteratorWhenAbrupt(ab: Abrupt, it: IteratorRecord): Abrupt {
   return ab;
@@ -318,7 +328,7 @@ function ArraySetLength($: VM, A: ArrayExoticObject, Desc: PropertyDescriptor): 
  */
 export const arrayObject: Plugin = {
   id: 'arrayObject',
-  deps: () => [objectAndFunctionPrototype],
+  deps: () => [objectAndFunctionPrototype, iterators],
   realm: {
     CreateIntrinsics(realm: RealmRecord, stagedGlobals: Map<string, PropertyDescriptor>) {
       
@@ -550,7 +560,7 @@ export const arrayObject: Plugin = {
          * 
          * 1. Return ? IsArray(arg).
          */
-        'isArray': method(function*($, thisValue, arg) {
+        'isArray': method(function*($, _thisValue, arg) {
           return IsArray($, arg);
         }),
 
@@ -628,10 +638,177 @@ export const arrayObject: Plugin = {
         },
       });
 
+      /**
+       * 23.1.3.38 Array.prototype.values ( )
+       * 
+       * This method performs the following steps when called:
+       * 
+       * 1. Let O be ? ToObject(this value).
+       * 2. Return CreateArrayIterator(O, value).
+       */
+      const arrayPrototypeValues = CreateBuiltinFunction(
+        {
+          *Call($, thisValue) {
+            const O = ToObject($, thisValue);
+            if (IsAbrupt(O)) return O;
+            return CreateArrayIterator($, O, 'value');
+          },
+        }, 0, 'values', realm, realm.Intrinsics.get('%Function.prototype%')!);
+      realm.Intrinsics.set('%Array.prototype.values%', arrayPrototypeValues);
+      arrayPrototype.OwnProps.set('values', propWC(arrayPrototypeValues));
+      arrayPrototype.OwnProps.set(Symbol.iterator, propWC(arrayPrototypeValues));
 
+      defineProperties(realm, arrayPrototype, {
+        /**
+         * 23.1.3.1 Array.prototype.at ( index )
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let relativeIndex be ? ToIntegerOrInfinity(index).
+         * 4. If relativeIndex ≥ 0, then
+         *     a. Let k be relativeIndex.
+         * 5. Else,
+         *     a. Let k be len + relativeIndex.
+         * 6. If k < 0 or k ≥ len, return undefined.
+         * 7. Return ? Get(O, ! ToString(𝔽(k))).
+         */
+        'at': method(function*($, thisValue, index) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          const relativeIndex = yield* ToIntegerOrInfinity($, index);
+          if (IsAbrupt(relativeIndex)) return relativeIndex;
+          let k: number;
+          if (relativeIndex >= 0) {
+            k = relativeIndex;
+          } else {
+            k = len + relativeIndex;
+          }
+          if (k < 0 || k >= len) return undefined;
+          return yield* Get($, O, String(k));
+        }),
+      });
+
+      // TODO - peel this off - arrays are only iterable if we _have_ an iterator.
+      // We could also peel off IteratorPrototype as a fundamental intrinsic and
+      // only populate it in the plugin?
+
+      /**
+       * 23.1.5.2 The %ArrayIteratorPrototype% Object
+       *  
+       * The %ArrayIteratorPrototype% object:
+       * 
+       *   - has properties that are inherited by all Array Iterator Objects.
+       *   - is an ordinary object.
+       *   - has a [[Prototype]] internal slot whose value is %IteratorPrototype%.
+       *   - has the following properties:
+       */
+      const arrayIteratorPrototype = OrdinaryObjectCreate({
+        Prototype: realm.Intrinsics.get('%IteratorPrototype%')!,
+      });
+      realm.Intrinsics.set('%ArrayIteratorPrototype%', arrayIteratorPrototype);
+
+      defineProperties(realm, arrayIteratorPrototype, {
+        /**
+         * 23.1.5.2.1 %ArrayIteratorPrototype%.next ( )
+         * 
+         * 1. Return ? GeneratorResume(this value, empty, "%ArrayIteratorPrototype%").
+         */
+        'next': methodO(function*($, thisValue) {
+          return yield* GeneratorResume(
+            $, thisValue, undefined /*EMPTY*/, '%ArrayIteratorPrototype%');
+        }),
+
+        /**
+         * 23.1.5.2.2 %ArrayIteratorPrototype% [ @@toStringTag ]
+         * 
+         * The initial value of the @@toStringTag property is the
+         * String value "Array Iterator".
+         * 
+         * This property has the attributes { [[Writable]]: false,
+         * [[Enumerable]]: false, [[Configurable]]: true }.
+         */
+        [Symbol.toStringTag]: propC('Array Iterator'),
+      });
     },
   },
 };
+
+/**
+ * 23.1.5.1 CreateArrayIterator ( array, kind )
+ * 
+ * The abstract operation CreateArrayIterator takes arguments array
+ * (an Object) and kind (key+value, key, or value) and returns a
+ * Generator. It is used to create iterator objects for Array methods
+ * that return such iterators. It performs the following steps when
+ * called:
+ * 
+ * 1. Let closure be a new Abstract Closure with no parameters that
+ *    captures kind and array and performs the following steps when
+ *    called:
+ *     a. Let index be 0.
+ *     b. Repeat,
+ *         i. If array has a [[TypedArrayName]] internal slot, then
+ *             1. If IsDetachedBuffer(array.[[ViewedArrayBuffer]]) is
+ *                true, throw a TypeError exception.
+ *             2. Let len be array.[[ArrayLength]].
+ *         ii. Else,
+ *             1. Let len be ? LengthOfArrayLike(array).
+ *         iii. If index ≥ len, return NormalCompletion(undefined).
+ *         iv. If kind is key, perform ?
+ *             GeneratorYield(CreateIterResultObject(𝔽(index), false)).
+ *         v. Else,
+ *             1. Let elementKey be ! ToString(𝔽(index)).
+ *             2. Let elementValue be ? Get(array, elementKey).
+ *             3. If kind is value, perform ?
+ *                GeneratorYield(CreateIterResultObject(elementValue, false)).
+ *             4. Else,
+ *                 a. Assert: kind is key+value.
+ *                 b. Let result be CreateArrayFromList(« 𝔽(index), elementValue »).
+ *                 c. Perform ? GeneratorYield(CreateIterResultObject(result, false)).
+ *         vi. Set index to index + 1.
+ * 2. Return CreateIteratorFromClosure(closure,
+ *    "%ArrayIteratorPrototype%", %ArrayIteratorPrototype%).
+ */
+export function CreateArrayIterator(
+  $: VM,
+  array: Obj,
+  kind: 'key'|'value'|'key+value',
+): Obj {
+  function* closure() {
+    let index = 0;
+    let len: CR<number>;
+    while (true) {
+      if (array.TypedArrayName) {
+        if (IsDetachedBuffer($, array.ViewedArrayBuffer)) {
+          return $.throw('TypeError', '23.1.5.1 / 1.b.i.1');
+        }
+        len = array.ArrayLength!;
+      } else {
+        len = yield* LengthOfArrayLike($, array);
+        if (IsAbrupt(len)) return len;
+      }
+      if (index >= len) return undefined;
+      if (kind === 'key') {
+        const status = yield* GeneratorYield($, CreateIterResultObject($, index, false));
+        if (IsAbrupt(status)) return status;
+      } else {
+        const elementKey = String(index);
+        const elementValue = yield* Get($, array, elementKey);
+        if (IsAbrupt(elementValue)) return elementValue;
+        if (kind === 'value') {
+          yield* GeneratorYield($, CreateIterResultObject($, elementValue, false));
+        } else {
+          const result = CreateArrayFromList($, [index, elementValue]);
+          yield* GeneratorYield($, CreateIterResultObject($, result, false));
+        }
+      }
+      index++;
+    }
+  };
+  return CreateIteratorFromClosure(
+    $, closure, '%ArrayIteratorPrototype%', $.getIntrinsic('%ArrayIteratorPrototype%')!);
+}
 
 /**
  * 13.2.4.1 Runtime Semantics: ArrayAccumulation
