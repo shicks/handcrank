@@ -4,7 +4,7 @@ import { ToBoolean, ToObject } from './abstract_conversion';
 import { AsyncIteratorClose, CreateIterResultObject, GetIterator, IteratorClose, IteratorComplete, IteratorRecord, IteratorValue } from './abstract_iterator';
 import { Call, GetV } from './abstract_object';
 import { Assert } from './assert';
-import { Abrupt, CR, CastNotAbrupt, CompletionType, CompletionValue, IsAbrupt, UpdateEmpty } from './completion_record';
+import { Abrupt, CR, CastNotAbrupt, CompletionType, CompletionValue, IsAbrupt, IsThrowCompletion, UpdateEmpty } from './completion_record';
 import { ASYNC, EMPTY, SYNC, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord } from './environment_record';
 import { IsFunc, methodO } from './func';
@@ -21,7 +21,7 @@ declare function Await(...args: unknown[]): ECR<Val>;
 
 export const controlFlow: Plugin = {
   id: 'controlFlow',
-  deps: () => [labels, loops, conditionals, /*switchStatement*/],
+  deps: () => [labels, loops, conditionals, tryStatement, /*switchStatement*/],
 };
 
 export const labels: Plugin = {
@@ -57,6 +57,13 @@ export const conditionals: Plugin = {
 //     Evaluation: (on) => on('SwitchStatement', Evaluation_SwitchStatement),
 //   },
 // };
+
+export const tryStatement: Plugin = {
+  id: 'tryStatement',
+  syntax: {
+    Evaluation: (on) => on('TryStatement', Evaluation_TryStatement),
+  },
+};
 
 export const breakContinue: Plugin = {
   syntax: {
@@ -1220,4 +1227,84 @@ function BreakableStatement(
     return EMPTY.is(completion.Value) ? undefined : completion.Value;
   }
   return completion;
+}
+
+/**
+ * 14.15 The try Statement
+ * 
+ * 14.15.2 Runtime Semantics: CatchClauseEvaluation
+ * The syntax-directed operation CatchClauseEvaluation takes argument thrownValue (an ECMAScript language value) and returns either a normal completion containing an ECMAScript language value or an abrupt completion. It is defined piecewise over the following productions:
+ * 
+ * Catch : catch ( CatchParameter ) Block
+ * 1. Let oldEnv be the running execution context's LexicalEnvironment.
+ * 2. Let catchEnv be NewDeclarativeEnvironment(oldEnv).
+ * 3. For each element argName of the BoundNames of CatchParameter, do
+ *     a. Perform ! catchEnv.CreateMutableBinding(argName, false).
+ * 4. Set the running execution context's LexicalEnvironment to catchEnv.
+ * 5. Let status be Completion(BindingInitialization of CatchParameter with arguments thrownValue and catchEnv).
+ * 6. If status is an abrupt completion, then
+ *     a. Set the running execution context's LexicalEnvironment to oldEnv.
+ *     b. Return ? status.
+ * 7. Let B be Completion(Evaluation of Block).
+ * 8. Set the running execution context's LexicalEnvironment to oldEnv.
+ * 9. Return ? B.
+ * 
+ * Catch : catch Block
+ * 1. Return ? Evaluation of Block.
+ * 
+ * NOTE: No matter how control leaves the Block the LexicalEnvironment
+ * is always restored to its former state.
+ */
+function* CatchClauseEvaluation(
+  $: VM,
+  n: ESTree.CatchClause,
+  thrownValue: Val,
+): ECR<Val|EMPTY> {
+  if (!n.param) return yield* $.evaluateValue(n.body);
+  const oldEnv = $.getRunningContext().LexicalEnvironment;
+  const catchEnv = new DeclarativeEnvironmentRecord(oldEnv || null);
+  for (const argName of BoundNames(n.param)) {
+    CastNotAbrupt(catchEnv.CreateMutableBinding($, argName, false));
+  }
+  $.getRunningContext().LexicalEnvironment = catchEnv;
+  const status = yield* $.BindingInitialization(n.param, thrownValue, catchEnv);
+  if (IsAbrupt(status)) return ($.getRunningContext().LexicalEnvironment = oldEnv, status);
+  const B = yield* $.evaluateValue(n.body);
+  $.getRunningContext().LexicalEnvironment = oldEnv;
+  return B;
+}
+
+/**
+ * 14.15.3 Runtime Semantics: Evaluation
+ * 
+ * TryStatement : try Block Catch
+ * 1. Let B be Completion(Evaluation of Block).
+ * 2. If B.[[Type]] is throw, let C be Completion(CatchClauseEvaluation of Catch with argument B.[[Value]]).
+ * 3. Else, let C be B.
+ * 4. Return ? UpdateEmpty(C, undefined).
+ * 
+ * TryStatement : try Block Finally
+ * 1. Let B be Completion(Evaluation of Block).
+ * 2. Let F be Completion(Evaluation of Finally).
+ * 3. If F.[[Type]] is normal, set F to B.
+ * 4. Return ? UpdateEmpty(F, undefined).
+ * 
+ * TryStatement : try Block Catch Finally
+ * 1. Let B be Completion(Evaluation of Block).
+ * 2. If B.[[Type]] is throw, let C be Completion(CatchClauseEvaluation of Catch with argument B.[[Value]]).
+ * 3. Else, let C be B.
+ * 4. Let F be Completion(Evaluation of Finally).
+ * 5. If F.[[Type]] is normal, set F to C.
+ * 6. Return ? UpdateEmpty(F, undefined).
+ */
+export function* Evaluation_TryStatement($: VM, n: ESTree.TryStatement): ECR<Val> {
+  let B: CR<Val|EMPTY> = yield* $.evaluateValue(n.block);
+  if (IsThrowCompletion(B) && n.handler) {
+    B = yield* CatchClauseEvaluation($, n.handler, B.Value);
+  }
+  if (n.finalizer) {
+    const F = yield* $.evaluateValue(n.finalizer);
+    if (IsAbrupt(F)) B = F;
+  }    
+  return UpdateEmpty(B, undefined);
 }
