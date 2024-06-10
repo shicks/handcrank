@@ -15,10 +15,6 @@ browser or on the server.
 ## TODO
 
 - array spread (done?)
-- finish binding
-    - array destructuring, destructured property assignments
-      (will need to teach assignop to do this)
-- finish control_flow lexical for loop that started the rathole
 
 ## Features
 
@@ -47,7 +43,7 @@ browser or on the server.
         - [x] throwable
         - [x] stack traces
     - [x] Array
-    - [ ] Iterators
+    - [x] Iterators
     - [ ] RegExp
     - [ ] Arguments
     - [ ] Map
@@ -65,15 +61,17 @@ browser or on the server.
 - [ ] Syntax
     - [x] Object literals
     - [x] Array literals
-    - [ ] Destructuring
+    - [x] Destructuring
     - [x] binary operators
     - [x] unary operators
     - [x] ++ and -- operators
-    - [ ] Control structures
-        - [ ] for
-        - [ ] if
-        - [ ] while
-        - [ ] try
+    - [x] Control structures
+        - [x] for
+        - [x] if
+        - [x] while
+        - [x] try
+        - [x] switch
+        - [ ] with (??)
     - [ ] Classes
         - [ ] class fields
         - [ ] private fields

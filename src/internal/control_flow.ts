@@ -1,5 +1,6 @@
 /** @fileoverview Evaluation for control flow operators. */
 
+import { IsStrictlyEqual } from './abstract_compare';
 import { ToBoolean, ToObject } from './abstract_conversion';
 import { AsyncIteratorClose, CreateIterResultObject, GetIterator, IteratorClose, IteratorComplete, IteratorRecord, IteratorValue } from './abstract_iterator';
 import { Call, GetV } from './abstract_object';
@@ -11,6 +12,7 @@ import { IsFunc, methodO } from './func';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { defineProperties } from './realm_record';
 import { GetValue } from './reference_record';
+import { BlockDeclarationInstantiation } from './statements';
 import { BoundNames, IsConstantDeclaration } from './static/scope';
 import { NodeMap, NodeType } from './tree';
 import { Val } from './val';
@@ -21,7 +23,7 @@ declare function Await(...args: unknown[]): ECR<Val>;
 
 export const controlFlow: Plugin = {
   id: 'controlFlow',
-  deps: () => [labels, loops, conditionals, tryStatement, /*switchStatement*/],
+  deps: () => [labels, loops, conditionals, tryStatement, switchStatement],
 };
 
 export const labels: Plugin = {
@@ -51,12 +53,12 @@ export const conditionals: Plugin = {
   },
 };
 
-// export const switchStatement: Plugin = {
-//   id: 'switchStatement',
-//   syntax: {
-//     Evaluation: (on) => on('SwitchStatement', Evaluation_SwitchStatement),
-//   },
-// };
+export const switchStatement: Plugin = {
+  id: 'switchStatement',
+  syntax: {
+    Evaluation: (on) => on('SwitchStatement', Evaluation_SwitchStatement),
+  },
+};
 
 export const tryStatement: Plugin = {
   id: 'tryStatement',
@@ -1134,7 +1136,168 @@ export function Evaluation_BreakStatement(
 }
 
 // TODO - 14.11 with???
-// TODO - 14.12 switch
+
+/**
+ * 14.12 The switch Statement
+ * 
+ * 14.12.2 Runtime Semantics: CaseBlockEvaluation
+ * 
+ * The syntax-directed operation CaseBlockEvaluation takes argument
+ * input (an ECMAScript language value) and returns either a normal
+ * completion containing an ECMAScript language value or an abrupt
+ * completion. It is defined piecewise over the following productions:
+ * 
+ * CaseBlock : { }
+ * 1. Return undefined.
+ * 
+ * CaseBlock : { CaseClauses }
+ * 1. Let V be undefined.
+ * 2. Let A be the List of CaseClause items in CaseClauses, in source text order.
+ * 3. Let found be false.
+ * 4. For each CaseClause C of A, do
+ *     a. If found is false, then
+ *         i. Set found to ? CaseClauseIsSelected(C, input).
+ *     b. If found is true, then
+ *         i. Let R be Completion(Evaluation of C).
+ *         ii. If R.[[Value]] is not empty, set V to R.[[Value]].
+ *         iii. If R is an abrupt completion, return ? UpdateEmpty(R, V).
+ * 5. Return V.
+ * 
+ * CaseBlock : { CaseClausesopt DefaultClause CaseClausesopt }
+ * 1. Let V be undefined.
+ * 2. If the first CaseClauses is present, then
+ *     a. Let A be the List of CaseClause items in the first CaseClauses, in source text order.
+ * 3. Else,
+ *     a. Let A be a new empty List.
+ * 4. Let found be false.
+ * 5. For each CaseClause C of A, do
+ *     a. If found is false, then
+ *         i. Set found to ? CaseClauseIsSelected(C, input).
+ *     b. If found is true, then
+ *         i. Let R be Completion(Evaluation of C).
+ *         ii. If R.[[Value]] is not empty, set V to R.[[Value]].
+ *         iii. If R is an abrupt completion, return ? UpdateEmpty(R, V).
+ * 6. Let foundInB be false.
+ * 7. If the second CaseClauses is present, then
+ *     a. Let B be the List of CaseClause items in the second CaseClauses, in source text order.
+ * 8. Else,
+ *     a. Let B be a new empty List.
+ * 9. If found is false, then
+ *     a. For each CaseClause C of B, do
+ *         i. If foundInB is false, then
+ *             1. Set foundInB to ? CaseClauseIsSelected(C, input).
+ *         ii. If foundInB is true, then
+ *             1. Let R be Completion(Evaluation of CaseClause C).
+ *             2. If R.[[Value]] is not empty, set V to R.[[Value]].
+ *             3. If R is an abrupt completion, return ? UpdateEmpty(R, V).
+ * 10. If foundInB is true, return V.
+ * 11. Let R be Completion(Evaluation of DefaultClause).
+ * 12. If R.[[Value]] is not empty, set V to R.[[Value]].
+ * 13. If R is an abrupt completion, return ? UpdateEmpty(R, V).
+ * 14. NOTE: The following is another complete iteration of the second CaseClauses.
+ * 15. For each CaseClause C of B, do
+ *     a. Let R be Completion(Evaluation of CaseClause C).
+ *     b. If R.[[Value]] is not empty, set V to R.[[Value]].
+ *     c. If R is an abrupt completion, return ? UpdateEmpty(R, V).
+ * 16. Return V.
+ */
+function* CaseBlockEvaluation(
+  $: VM,
+  cases: ESTree.SwitchCase[],
+  input: Val,
+): ECR<Val|EMPTY> {
+  let V: CR<Val> = undefined;
+  let A = cases;
+  let found = false;
+  for (const C of A) {
+    if (!found) {
+      const result = yield* CaseClauseIsSelected($, C, input);
+      if (IsAbrupt(result)) return result;
+      found = result;
+    }
+    if (found) {
+      for (const stmt of C.consequent) {
+        const R = yield* $.evaluateValue(stmt);
+        if (IsAbrupt(R)) return UpdateEmpty(R, V);
+        if (!EMPTY.is(R)) V = R;
+      }
+    }
+  }
+  return V;
+}
+
+/**
+ * 14.12.3 CaseClauseIsSelected ( C, input )
+ * 
+ * The abstract operation CaseClauseIsSelected takes arguments C (a
+ * CaseClause Parse Node) and input (an ECMAScript language value) and
+ * returns either a normal completion containing a Boolean or an
+ * abrupt completion. It determines whether C matches input. It
+ * performs the following steps when called:
+ * 
+ * 1. Assert: C is an instance of the production CaseClause : case Expression : StatementListopt .
+ * 2. Let exprRef be ? Evaluation of the Expression of C.
+ * 3. Let clauseSelector be ? GetValue(exprRef).
+ * 4. Return IsStrictlyEqual(input, clauseSelector).
+ * 
+ * NOTE: This operation does not execute C's StatementList (if
+ * any). The CaseBlock algorithm uses its return value to determine
+ * which StatementList to start executing.
+ */
+function* CaseClauseIsSelected(
+  $: VM,
+  C: ESTree.SwitchCase,
+  input: Val,
+): ECR<boolean> {
+  if (!C.test) return true;
+  const clauseSelector = yield* $.evaluateValue(C.test);
+  if (IsAbrupt(clauseSelector)) return clauseSelector;
+  return IsStrictlyEqual(input, clauseSelector);
+}
+
+/**
+ * 14.12.4 Runtime Semantics: Evaluation
+ * 
+ * SwitchStatement : switch ( Expression ) CaseBlock
+ * 1. Let exprRef be ? Evaluation of Expression.
+ * 2. Let switchValue be ? GetValue(exprRef).
+ * 3. Let oldEnv be the running execution context's LexicalEnvironment.
+ * 4. Let blockEnv be NewDeclarativeEnvironment(oldEnv).
+ * 5. Perform BlockDeclarationInstantiation(CaseBlock, blockEnv).
+ * 6. Set the running execution context's LexicalEnvironment to blockEnv.
+ * 7. Let R be Completion(CaseBlockEvaluation of CaseBlock with argument switchValue).
+ * 8. Set the running execution context's LexicalEnvironment to oldEnv.
+ * 9. Return R.
+ * 
+ * NOTE: No matter how control leaves the SwitchStatement the
+ * LexicalEnvironment is always restored to its former state.
+ * 
+ * CaseClause : case Expression :
+ * 1. Return empty.
+ * 
+ * CaseClause : case Expression : StatementList
+ * 1. Return ? Evaluation of StatementList.
+ * 
+ * DefaultClause : default :
+ * 1. Return empty.
+ * 
+ * DefaultClause : default : StatementList
+ * 1. Return ? Evaluation of StatementList.
+ */
+export function* Evaluation_SwitchStatement(
+  $: VM,
+  n: ESTree.SwitchStatement,
+): ECR<Val|EMPTY> {
+  const switchValue = yield* $.evaluateValue(n.discriminant);
+  if (IsAbrupt(switchValue)) return switchValue;
+  const oldEnv = $.getRunningContext().LexicalEnvironment;
+  const blockEnv = new DeclarativeEnvironmentRecord(oldEnv ?? null);
+  BlockDeclarationInstantiation($, n, blockEnv);
+  $.getRunningContext().LexicalEnvironment = blockEnv;
+  const R = yield* CaseBlockEvaluation($, n.cases, switchValue);
+  $.getRunningContext().LexicalEnvironment = oldEnv;
+  return BreakableStatement(R);
+}
 
 /**
  * 14.13.3 Runtime Semantics: Evaluation
@@ -1262,7 +1425,7 @@ function* CatchClauseEvaluation(
 ): ECR<Val|EMPTY> {
   if (!n.param) return yield* $.evaluateValue(n.body);
   const oldEnv = $.getRunningContext().LexicalEnvironment;
-  const catchEnv = new DeclarativeEnvironmentRecord(oldEnv || null);
+  const catchEnv = new DeclarativeEnvironmentRecord(oldEnv ?? null);
   for (const argName of BoundNames(n.param)) {
     CastNotAbrupt(catchEnv.CreateMutableBinding($, argName, false));
   }
