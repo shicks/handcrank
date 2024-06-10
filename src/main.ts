@@ -41,11 +41,18 @@ vm.install(functions);
 vm.install(generators);
 vm.install(controlFlow);
 
+// TODO - consider adding REPL directives like .report to dump the
+// most recent trace.
+let reportStackTraceOnThrow = true;
+
 function runScript(script: string, filename: string, printResult = false) {
   const cr = run(vm.evaluateScript(script, filename));
   if (IsAbrupt(cr)) {
     if (IsThrowCompletion(cr)) {
       console.error(`Uncaught ${DebugString(cr.Value)}`);
+      if (reportStackTraceOnThrow && (vm as any).lastThrow) {
+        console.error((vm as any).lastThrow);
+      }
       return 1;
     } else {
       console.dir(cr);

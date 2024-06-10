@@ -12,10 +12,6 @@ operations are fully emulated.  Additional objects can be added to the
 environment to allow safe evaluation of user-provided scripts in the
 browser or on the server.
 
-## TODO
-
-- array spread (done?)
-
 ## Features
 
 - [x] Evaluate arithmetic
@@ -59,19 +55,20 @@ browser or on the server.
 - [x] Call functions
 - [ ] Template string literals
 - [ ] Syntax
-    - [x] Object literals
-    - [x] Array literals
-    - [x] Destructuring
+    - [x] object literals
+    - [x] array literals
+    - [x] destructuring
+    - [x] spread
     - [x] binary operators
     - [x] unary operators
     - [x] ++ and -- operators
-    - [x] Control structures
+    - [x] control structures
         - [x] for
         - [x] if
         - [x] while
         - [x] try
         - [x] switch
         - [x] with
-    - [ ] Classes
+    - [ ] classes
         - [ ] class fields
         - [ ] private fields

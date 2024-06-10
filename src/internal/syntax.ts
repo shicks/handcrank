@@ -12,7 +12,7 @@ import { Evaluation_CallExpression, Evaluation_NewExpression } from './func';
 import { Evaluation_ObjectExpression } from './obj';
 import { Evaluation_ArrayExpression } from './exotic_array';
 import { Evaluation_ConditionalExpression, Evaluation_SequenceExpression } from './control_flow';
-import { BindingInitialization_ArrayPattern, BindingInitialization_Identifier, BindingInitialization_ObjectPattern } from './binding';
+import { BindingInitialization_ArrayPattern, BindingInitialization_Identifier, BindingInitialization_MemberExpression, BindingInitialization_ObjectPattern } from './binding';
 
 // TODO - split out basic from advanced syntax??
 
@@ -94,6 +94,7 @@ export const syntax: Plugin = {
     BindingInitialization(on) {
       // TODO - variable binding is itself a plugin????
       on('Identifier', BindingInitialization_Identifier);
+      on('MemberExpression', BindingInitialization_MemberExpression);
       // TODO - separate destructuring into a plugin
       on('ObjectPattern', BindingInitialization_ObjectPattern);
       on('ArrayPattern', BindingInitialization_ArrayPattern);

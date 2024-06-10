@@ -30,7 +30,7 @@ import { EMPTY } from './enums';
 import { GetValue, PutValue } from './reference_record';
 import { IsAnonymousFunctionDefinition } from './static/functions';
 import { Val } from './val';
-import { EvalGen, VM } from './vm';
+import { ECR, VM } from './vm';
 import { AssignmentExpression, MemberExpression, Pattern } from 'estree';
 
 /**
@@ -125,9 +125,13 @@ import { AssignmentExpression, MemberExpression, Pattern } from 'estree';
  * object for which the IsExtensible predicate returns the value
  * false. In these cases a TypeError exception is thrown.
  */
-export function* Evaluation_AssignmentExpression($: VM, n: AssignmentExpression): EvalGen<CR<Val>> {
+export function* Evaluation_AssignmentExpression($: VM, n: AssignmentExpression): ECR<Val> {
   if (n.left.type === 'ObjectPattern' || n.left.type === 'ArrayPattern') {
-    return yield* Evaluation_AssignmentExpression_pattern($, n);
+    const rval = yield* $.evaluateValue(n.right);
+    if (IsAbrupt(rval)) return rval;
+    const status = yield* $.BindingInitialization(n.left, rval, undefined);
+    if (IsAbrupt(status)) return status;
+    return rval;
   }
   const lref = yield* $.Evaluation(n.left);
   if (IsAbrupt(lref)) return lref;
@@ -174,15 +178,4 @@ function computeInternalName(n: Pattern|MemberExpression): string {
       if (n.property.type === 'Identifier') return n.property.name;
   }
   return '';
-}
-
-function Evaluation_AssignmentExpression_pattern(_$: VM, _n: AssignmentExpression): EvalGen<CR<Val>> {
-  // 2. Let assignmentPattern be the AssignmentPattern that is covered
-  //    by LeftHandSideExpression.
-  // 3. Let rref be ? Evaluation of AssignmentExpression.
-  // 4. Let rval be ? GetValue(rref).
-  // 5. Perform ? DestructuringAssignmentEvaluation of assignmentPattern
-  //    with argument rval.
-  // 6. Return rval.
-  throw new Error('not implemented');
 }

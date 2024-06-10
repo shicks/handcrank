@@ -3,7 +3,7 @@ import { IsArray, IsArrayIndex, IsCallable, IsConstructor, IsIntegralNumber, Sam
 import { ToIntegerOrInfinity, ToNumber, ToObject, ToUint32 } from './abstract_conversion';
 import { Call, Construct, CreateArrayFromList, CreateDataPropertyOrThrow, Get, GetMethod, LengthOfArrayLike, Set } from './abstract_object';
 import { Assert } from './assert';
-import { Abrupt, CR, CastNotAbrupt, IsAbrupt } from './completion_record';
+import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, callOrConstruct, method, methodO } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
 import { GetPrototypeFromConstructor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject, OrdinaryObjectCreate } from './obj';
@@ -13,13 +13,11 @@ import { memoize } from './slots';
 import { PropertyKey, Val } from './val';
 import { DebugString, ECR, Plugin, VM, run } from './vm';
 import { CreateIteratorFromClosure, GeneratorResume, GeneratorYield } from './generator';
-import { CreateIterResultObject, IteratorRecord } from './abstract_iterator';
+import { CreateIterResultObject, GetIterator, IteratorClose, IteratorStep, IteratorValue } from './abstract_iterator';
 import { iterators } from './iterators';
+import { SYNC } from './enums';
 
 declare const GetIteratorFromMethod: any;
-declare const IteratorStep: any;
-declare const IteratorClose: any;
-declare const IteratorValue: any;
 declare const IsDetachedBuffer: any;
 declare global {
   interface ObjectSlots {
@@ -27,13 +25,6 @@ declare global {
     ViewedArrayBuffer?: never;
     ArrayLength?: number;
   }
-}
-
-// TODO - move to iterator.ts
-export function CloseIteratorWhenAbrupt(ab: Abrupt, it: IteratorRecord): Abrupt {
-  return ab;
-  // const result = IteratorClose(it);
-  // return IsAbrupt(result) ? result : ab;
 }
 
 /**
@@ -508,26 +499,22 @@ export const arrayObject: Plugin = {
             for (let k = 0;; k++) {
               if (k >= Number.MAX_SAFE_INTEGER) {
                 const error = $.throw('TypeError', 'Too many items');
-                return IteratorClose(iteratorRecord, error);
+                return yield* IteratorClose($, iteratorRecord, error);
               }
-              const next = IteratorStep(iteratorRecord);
+              const next = yield* IteratorStep($, iteratorRecord);
               if (IsAbrupt(next)) return next;
               if (!next) {
                 const result = yield* Set($, A, 'length', k, true);
                 if (IsAbrupt(result)) return result;
                 return A;
               }
-              const nextValue = IteratorValue(next);
+              const nextValue = yield* IteratorValue($, next);
               if (IsAbrupt(nextValue)) return nextValue;
               const mappedValue =
                 mapping ? yield* Call($, mapfn, thisArg, [nextValue, k]) : nextValue;
-              if (IsAbrupt(mappedValue)) {
-                return CloseIteratorWhenAbrupt(mappedValue, iteratorRecord);
-              }
+              if (IsAbrupt(mappedValue)) return yield* IteratorClose($, iteratorRecord, mappedValue);
               const defineStatus = CreateDataPropertyOrThrow($, A, String(k), mappedValue);
-              if (IsAbrupt(defineStatus)) {
-                return CloseIteratorWhenAbrupt(defineStatus, iteratorRecord);
-              }
+              if (IsAbrupt(defineStatus)) return yield* IteratorClose($, iteratorRecord, defineStatus);
             }
           }
           // 6. NOTE: `items` is not an iterable, so assume it's array-like.
@@ -894,17 +881,29 @@ export function CreateArrayIterator(
  * 4. Return array.
  */
 export function* Evaluation_ArrayExpression($: VM, node: ArrayExpression): ECR<Obj> {
-  // TODO - support spread
   const elements: Val[] = [];
   for (const e of node.elements) {
+    if (e?.type === 'SpreadElement') {
+      const spreadObj = yield* $.evaluateValue(e.argument);
+      if (IsAbrupt(spreadObj)) return spreadObj;
+      const iteratorRecord = yield* GetIterator($, spreadObj, SYNC);
+      if (IsAbrupt(iteratorRecord)) return iteratorRecord;
+      while (true) {
+        const next = yield* IteratorStep($, iteratorRecord);
+        if (IsAbrupt(next)) return next;
+        if (!next) break;
+        const nextValue = yield* IteratorValue($, next);
+        if (IsAbrupt(nextValue)) return nextValue;
+        elements.push(nextValue);
+      }
+      continue;
+    }
     const v = e == null ? undefined : yield* $.evaluateValue(e);
     if (IsAbrupt(v)) return v;
     elements.push(v);
   }
   return CreateArrayFromList($, elements);
 }
-
-
 
 /**
  * Do a double-binary search to find the range of keys that are array

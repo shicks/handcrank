@@ -1,13 +1,12 @@
 import { RequireObjectCoercible } from './abstract_compare';
 import { ToPropertyKey } from './abstract_conversion';
 import { GetIterator, IteratorClose, IteratorRecord, IteratorStep, IteratorValue } from './abstract_iterator';
-import { CopyDataProperties, CreateDataPropertyOrThrow, GetV } from './abstract_object';
+import { CopyDataProperties, CreateArrayFromList, GetV } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { SYNC, UNUSED } from './enums';
 import { EnvironmentRecord } from './environment_record';
 import { ResolveBinding } from './execution_context';
-import { ArrayCreate } from './exotic_array';
 import { OrdinaryObjectCreate } from './obj';
 import { InitializeReferencedBinding, PutValue, ReferenceRecord } from './reference_record';
 import { IsAnonymousFunctionDefinition } from './static/functions';
@@ -45,6 +44,24 @@ export function BindingInitialization_Identifier(
   environment: EnvironmentRecord|undefined,
 ): ECR<UNUSED> {
   return InitializeBoundName($, n.name, value, environment);
+}
+
+/**
+ * NOTE: This is not actually legit in the spec, but we've repurposed
+ * the BindingIdentifier production to handle all kinds of destructured
+ * assignments, so this additional production is required.
+ */
+export function* BindingInitialization_MemberExpression(
+  $: VM,
+  n: ESTree.MemberExpression,
+  value: Val,
+  environment: EnvironmentRecord|undefined,
+): ECR<UNUSED> {
+  Assert(environment == null);
+  const lref = yield* $.Evaluation(n);
+  if (IsAbrupt(lref)) return lref;
+  Assert(lref instanceof ReferenceRecord);
+  return yield* PutValue($, lref, value);
 }
 
 /** 
@@ -235,7 +252,6 @@ function* KeyedBindingInitialization(
     pattern = pattern.left;
   }
   Assert(pattern.type !== 'AssignmentPattern');
-  Assert(pattern.type !== 'MemberExpression'); // NOTE: this is only for let/const
   Assert(pattern.type !== 'RestElement'); // already handled
   if (pattern.type === 'Identifier') {
     // SingleNameBinding : BindingIdentifier Initializer(opt)
@@ -441,9 +457,7 @@ export function* IteratorBindingInitialization(
         ResolveBinding($, element.argument.name) :
         element.argument;
       if (IsAbrupt(lhs)) return lhs;
-      // TODO - rewrite with ListToArray
-      const A = CastNotAbrupt(ArrayCreate($, 0));
-      let n = 0;
+      const A: Val[] = [];
       while (!iteratorRecord.Done) {
         const next = yield* IteratorStep($, iteratorRecord);
         if (IsAbrupt(next)) return (iteratorRecord.Done = true, next);
@@ -452,13 +466,12 @@ export function* IteratorBindingInitialization(
         } else {
           const nextValue = yield* IteratorValue($, next);
           if (IsAbrupt(nextValue)) return (iteratorRecord.Done = true, nextValue);
-          CastNotAbrupt(CreateDataPropertyOrThrow($, A, String(n), nextValue));
-          n++;
+          A.push(nextValue);
         }
       }
       const status = yield* (lhs instanceof ReferenceRecord ?
-        InitializeReferencedBinding($, lhs, A) :
-        $.BindingInitialization(lhs, A, environment));
+        InitializeReferencedBinding($, lhs, CreateArrayFromList($, A)) :
+        $.BindingInitialization(lhs, CreateArrayFromList($, A), environment));
       if (IsAbrupt(status)) return status;
       continue;
     }

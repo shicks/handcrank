@@ -115,12 +115,11 @@ export class VM {
 
   throw(name: string, message?: string): CR<never> {
 
-    // NOTE: This can help with debugging... maybe we can
-    // just store it in the VM?
+    // NOTE: This can help with debugging; use Assert to compile it out in prod.
     try {
       Assert(1 > 2);
     } catch (e) {
-      /**/ throw /**/ (this as any).lastThrow = new Error(message ? `${name}: ${message}` : name);
+      (this as any).lastThrow = new Error(message ? `${name}: ${message}` : name);
     }
 
     const prototype = this.getIntrinsic(`%${name}.prototype%`);
