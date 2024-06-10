@@ -7,7 +7,7 @@ import { Call, GetV } from './abstract_object';
 import { Assert } from './assert';
 import { Abrupt, CR, CastNotAbrupt, CompletionType, CompletionValue, IsAbrupt, IsThrowCompletion, UpdateEmpty } from './completion_record';
 import { ASYNC, EMPTY, SYNC, UNUSED } from './enums';
-import { DeclarativeEnvironmentRecord } from './environment_record';
+import { DeclarativeEnvironmentRecord, ObjectEnvironmentRecord } from './environment_record';
 import { IsFunc, methodO } from './func';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { defineProperties } from './realm_record';
@@ -23,7 +23,7 @@ declare function Await(...args: unknown[]): ECR<Val>;
 
 export const controlFlow: Plugin = {
   id: 'controlFlow',
-  deps: () => [labels, loops, conditionals, tryStatement, switchStatement],
+  deps: () => [labels, loops, conditionals, tryStatement, switchStatement, withStatement],
 };
 
 export const labels: Plugin = {
@@ -73,6 +73,13 @@ export const breakContinue: Plugin = {
       on('BreakStatement', Evaluation_BreakStatement);
       on('ContinueStatement', Evaluation_ContinueStatement);
     },
+  },
+};
+
+export const withStatement: Plugin = {
+  id: 'withStatement',
+  syntax: {
+    Evaluation: (on) => on('WithStatement', Evaluation_WithStatement),
   },
 };
 
@@ -1135,7 +1142,49 @@ export function Evaluation_BreakStatement(
   return just(new Abrupt(CompletionType.Break, EMPTY, n.label ? n.label.name : EMPTY));
 }
 
-// TODO - 14.11 with???
+/**
+ * 14.11 The with Statement
+ * 
+ * NOTE 1: Use of the Legacy with statement is discouraged in new
+ * ECMAScript code. Consider alternatives that are permitted in both
+ * strict mode code and non-strict code, such as destructuring
+ * assignment.
+ * 
+ * NOTE 2: The with statement adds an Object Environment Record for a
+ * computed object to the lexical environment of the running execution
+ * context. It then executes a statement using this augmented lexical
+ * environment. Finally, it restores the original lexical environment.
+ * 
+ * 14.11.2 Runtime Semantics: Evaluation
+ * 
+ * WithStatement : with ( Expression ) Statement
+ * 1. Let val be ? Evaluation of Expression.
+ * 2. Let obj be ? ToObject(? GetValue(val)).
+ * 3. Let oldEnv be the running execution context's LexicalEnvironment.
+ * 4. Let newEnv be NewObjectEnvironment(obj, true, oldEnv).
+ * 5. Set the running execution context\'s LexicalEnvironment to newEnv.
+ * 6. Let C be Completion(Evaluation of Statement).
+ * 7. Set the running execution context\'s LexicalEnvironment to oldEnv.
+ * 8. Return ? UpdateEmpty(C, undefined).
+ * 
+ * NOTE: No matter how control leaves the embedded Statement, whether
+ * normally or by some form of abrupt completion or exception, the
+ * LexicalEnvironment is always restored to its former state.
+ */
+export function* Evaluation_WithStatement(
+  $: VM,
+  n: ESTree.WithStatement,
+): ECR<Val|EMPTY> {
+  const val = yield* $.evaluateValue(n.object);
+  if (IsAbrupt(val)) return val;
+  const obj = CastNotAbrupt(ToObject($, val));
+  const oldEnv = $.getRunningContext().LexicalEnvironment;
+  const newEnv = new ObjectEnvironmentRecord(obj, true, oldEnv ?? null);
+  $.getRunningContext().LexicalEnvironment = newEnv;
+  const C = yield* $.evaluateValue(n.body);
+  $.getRunningContext().LexicalEnvironment = oldEnv;
+  return UpdateEmpty(C, undefined);
+}
 
 /**
  * 14.12 The switch Statement

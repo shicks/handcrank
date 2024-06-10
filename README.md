@@ -71,7 +71,7 @@ browser or on the server.
         - [x] while
         - [x] try
         - [x] switch
-        - [ ] with (??)
+        - [x] with
     - [ ] Classes
         - [ ] class fields
         - [ ] private fields
