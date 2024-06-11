@@ -12,6 +12,11 @@ operations are fully emulated.  Additional objects can be added to the
 environment to allow safe evaluation of user-provided scripts in the
 browser or on the server.
 
+## TODO
+
+- classes
+- array/function instance methods
+
 ## Features
 
 - [x] Evaluate arithmetic
@@ -33,12 +38,12 @@ browser or on the server.
             - [ ] Object.fromEntries
         - [x] instance methods
     - [x] Function
-        - [ ] instance methods
     - [x] Error
         - [x] all subtypes
         - [x] throwable
         - [x] stack traces
     - [x] Array
+        - [ ] instance methods
     - [x] Iterators
     - [ ] RegExp
     - [ ] Arguments
@@ -69,6 +74,6 @@ browser or on the server.
         - [x] try
         - [x] switch
         - [x] with
-    - [ ] classes
+    - [x] classes
         - [ ] class fields
         - [ ] private fields

@@ -3,12 +3,12 @@
  * 7.3 Operations on Objects
  */
 
-import { IsCallable, IsConstructor } from './abstract_compare';
+import { IsCallable, IsConstructor, IsPropertyKey } from './abstract_compare';
 import { ToLength, ToObject } from './abstract_conversion';
 import { Assert } from './assert';
 import { InstanceofOperator } from './arithmetic';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { FROZEN, SEALED, UNUSED } from './enums';
+import { ACCESSOR, EMPTY, FIELD, FROZEN, METHOD, SEALED, UNUSED } from './enums';
 import { Func } from './func';
 import { Obj } from './obj';
 import { IsAccessorDescriptor, IsDataDescriptor, PropertyDescriptor, propW, propWC, propWEC } from './property_descriptor';
@@ -16,9 +16,9 @@ import { RealmRecord } from './realm_record';
 import { PropertyKey, Type, Val } from './val';
 import { DebugString, ECR, VM, just } from './vm';
 import { ArrayCreate } from './exotic_array';
+import { IsPrivateElementAccessor, IsPrivateElementField, IsPrivateElementMethod, PrivateElement, PrivateName } from './private_environment_record';
+import { ClassFieldDefinitionRecord } from './class';
 
-declare const PrivateMethodOrAccessorAdd: any;
-declare const DefineField: any;
 declare const ValidateNonRevokedProxy: any;
 declare global {
   interface ObjectSlots {
@@ -859,10 +859,220 @@ export function* CopyDataProperties(
   return UNUSED;
 }
 
+/**
+ * 7.3.27 PrivateElementFind ( O, P )
+ * 
+ * The abstract operation PrivateElementFind takes arguments O (an
+ * Object) and P (a Private Name) and returns a PrivateElement or
+ * empty. It performs the following steps when called:
+ * 
+ * 1. If O.[[PrivateElements]] contains a PrivateElement pe such that
+ *    pe.[[Key]] is P, then
+ *     a. Return pe.
+ * 2. Return empty.
+ */
+export function PrivateElementFind(O: Obj, P: PrivateName): PrivateElement|EMPTY {
+  if (!O.PrivateElements.has(P)) return EMPTY
+  return O.PrivateElements.get(P)!;
+}
 
-/////
+/**
+ * 7.3.28 PrivateFieldAdd ( O, P, value )
+ * 
+ * The abstract operation PrivateFieldAdd takes arguments O (an
+ * Object), P (a Private Name), and value (an ECMAScript language
+ * value) and returns either a normal completion containing unused
+ * or a throw completion. It performs the following steps when called:
+ * 
+ * 1. If the host is a web browser, then
+ *     a. Perform ? HostEnsureCanAddPrivateElement(O).
+ * 2. Let entry be PrivateElementFind(O, P).
+ * 3. If entry is not empty, throw a TypeError exception.
+ * 4. Append PrivateElement { [[Key]]: P, [[Kind]]: field,
+ *    [[Value]]: value } to O.[[PrivateElements]].
+ * 5. Return unused.
+ */
+export function PrivateFieldAdd($: VM, O: Obj, P: PrivateName, value: Val): CR<UNUSED> {
+  const status = HostEnsureCanAddPrivateElement($, O);
+  if (IsAbrupt(status)) return status;
+  if (O.PrivateElements.has(P)) {
+    return $.throw('TypeError', `Identifier '#${P}' has already been declared`);
+  }
+  O.PrivateElements.set(P, {Key: P, Kind: FIELD, Value: value});
+  return UNUSED;
+}
 
+/**
+ * 7.3.29 PrivateMethodOrAccessorAdd ( O, method )
+ * 
+ * The abstract operation PrivateMethodOrAccessorAdd takes arguments O
+ * (an Object) and method (a PrivateElement) and returns either a
+ * normal completion containing unused or a throw completion. It
+ * performs the following steps when called:
+ * 
+ * 1. Assert: method.[[Kind]] is either method or accessor.
+ * 2. If the host is a web browser, then
+ *     a. Perform ? HostEnsureCanAddPrivateElement(O).
+ * 3. Let entry be PrivateElementFind(O, method.[[Key]]).
+ * 4. If entry is not empty, throw a TypeError exception.
+ * 5. Append method to O.[[PrivateElements]].
+ * 6. Return unused.
+ * 
+ * NOTE: The values for private methods and accessors are shared
+ * across instances. This operation does not create a new copy of the
+ * method or accessor.
+ */
+export function PrivateMethodOrAccessorAdd($: VM, O: Obj, method: PrivateElement): CR<UNUSED> {
+  Assert(METHOD.is(method.Kind) || ACCESSOR.is(method.Kind));
+  const status = HostEnsureCanAddPrivateElement($, O);
+  if (IsAbrupt(status)) return status;
+  if (O.PrivateElements.has(method.Key)) {
+    return $.throw('TypeError', `Identifier '#${method.Key}' has already been declared`);
+  }
+  O.PrivateElements.set(method.Key, method);
+  return UNUSED;
+}
 
+/**
+ * 7.3.30 HostEnsureCanAddPrivateElement ( O )
+ * 
+ * The host-defined abstract operation HostEnsureCanAddPrivateElement
+ * takes argument O (an Object) and returns either a normal completion
+ * containing unused or a throw completion. It allows host
+ * environments to prevent the addition of private elements to
+ * particular host-defined exotic objects.
+ * 
+ * An implementation of HostEnsureCanAddPrivateElement must conform to
+ * the following requirements:
+ * 
+ * If O is not a host-defined exotic object, this abstract operation
+ * must return NormalCompletion(unused) and perform no other steps.
+ * 
+ * Any two calls of this abstract operation with the same argument
+ * must return the same kind of Completion Record.
+ * 
+ * The default implementation of HostEnsureCanAddPrivateElement is to
+ * return NormalCompletion(unused).
+ * 
+ * This abstract operation is only invoked by ECMAScript hosts that
+ * are web browsers.
+ */
+export function HostEnsureCanAddPrivateElement($: VM, O: Obj): CR<UNUSED> {
+  // TODO - allow hosts to override?
+  return UNUSED;
+}
+
+/**
+ * 7.3.31 PrivateGet ( O, P )
+ * 
+ * The abstract operation PrivateGet takes arguments O (an Object) and
+ * P (a Private Name) and returns either a normal completion
+ * containing an ECMAScript language value or a throw completion. It
+ * performs the following steps when called:
+ * 
+ * 1. Let entry be PrivateElementFind(O, P).
+ * 2. If entry is empty, throw a TypeError exception.
+ * 3. If entry.[[Kind]] is either field or method, then
+ *     a. Return entry.[[Value]].
+ * 4. Assert: entry.[[Kind]] is accessor.
+ * 5. If entry.[[Get]] is undefined, throw a TypeError exception.
+ * 6. Let getter be entry.[[Get]].
+ * 7. Return ? Call(getter, O).
+ */
+export function* PrivateGet($: VM, O: Obj, P: PrivateName): ECR<Val> {
+  const entry = PrivateElementFind(O, P);
+  if (EMPTY.is(entry)) {
+    return $.throw('TypeError',
+                   `Cannot read private member #${P
+                    } from an object whose class did not declare it`);
+  }
+  if (!IsPrivateElementAccessor(entry)) {
+    return entry.Value;
+  }
+  if (entry.Get == null) return $.throw('TypeError', `'#${P}' was defined without a getter`);
+  return yield* Call($, entry.Get, O);
+}
+
+/**
+ * 7.3.32 PrivateSet ( O, P, value )
+ * 
+ * The abstract operation PrivateSet takes arguments O (an Object), P
+ * (a Private Name), and value (an ECMAScript language value) and
+ * returns either a normal completion containing unused or a throw
+ * completion. It performs the following steps when called:
+ * 
+ * 1. Let entry be PrivateElementFind(O, P).
+ * 2. If entry is empty, throw a TypeError exception.
+ * 3. If entry.[[Kind]] is field, then
+ *     a. Set entry.[[Value]] to value.
+ * 4. Else if entry.[[Kind]] is method, then
+ *     a. Throw a TypeError exception.
+ * 5. Else,
+ *     a. Assert: entry.[[Kind]] is accessor.
+ *     b. If entry.[[Set]] is undefined, throw a TypeError exception.
+ *     c. Let setter be entry.[[Set]].
+ *     d. Perform ? Call(setter, O, « value »).
+ * 6. Return unused.
+ */
+export function* PrivateSet($: VM, O: Obj, P: PrivateName, value: Val): ECR<UNUSED> {
+  const entry = PrivateElementFind(O, P);
+  if (EMPTY.is(entry)) {
+    return $.throw('TypeError',
+                   `Cannot write private member #${P
+                    } to an object whose class did not declare it`);
+  }
+  if (IsPrivateElementField(entry)) {
+    entry.Value = value;
+  } else if (IsPrivateElementMethod(entry)) {
+    return $.throw('TypeError', `Private method #${P} is not writable`);
+  } else {
+    if (entry.Set == null) return $.throw('TypeError', `'#${P}' was defined without a setter`);
+    const status = yield* Call($, entry.Set, O, [value]);
+    if (IsAbrupt(status)) return status;
+  }
+  return UNUSED;
+}
+
+/**
+ * 7.3.33 DefineField ( receiver, fieldRecord )
+ * 
+ * The abstract operation DefineField takes arguments receiver (an
+ * Object) and fieldRecord (a ClassFieldDefinition Record) and returns
+ * either a normal completion containing unused or a throw
+ * completion. It performs the following steps when called:
+ * 
+ * 1. Let fieldName be fieldRecord.[[Name]].
+ * 2. Let initializer be fieldRecord.[[Initializer]].
+ * 3. If initializer is not empty, then
+ *     a. Let initValue be ? Call(initializer, receiver).
+ * 4. Else, let initValue be undefined.
+ * 5. If fieldName is a Private Name, then
+ *     a. Perform ? PrivateFieldAdd(receiver, fieldName, initValue).
+ * 6. Else,
+ *     a. Assert: IsPropertyKey(fieldName) is true.
+ *     b. Perform ? CreateDataPropertyOrThrow(receiver, fieldName, initValue).
+ * 7. Return unused.
+ */
+export function* DefineField($: VM, receiver: Obj, fieldRecord: ClassFieldDefinitionRecord): ECR<UNUSED> {
+  const fieldName = fieldRecord.Name;
+  const initializer = fieldRecord.Initializer;
+  let initValue: CR<Val>;
+  if (!EMPTY.is(initializer)) {
+    initValue = yield* Call($, initializer, receiver);
+    if (IsAbrupt(initValue)) return initValue;
+  } else {
+    initValue = undefined;
+  }
+  if (fieldName instanceof PrivateName) {
+    const status = PrivateFieldAdd($, receiver, fieldName, initValue);
+    if (IsAbrupt(status)) return status;
+  } else {
+    Assert(IsPropertyKey(fieldName));
+    const status = CreateDataPropertyOrThrow($, receiver, fieldName, initValue);
+    if (IsAbrupt(status)) return status;
+  }
+  return UNUSED;
+}
 
 /**
  * 7.3.34 InitializeInstanceElements ( O, constructor )
@@ -882,13 +1092,13 @@ export function* CopyDataProperties(
  */
 export function* InitializeInstanceElements($: VM, O: Obj, constructor: Func): ECR<UNUSED> {
   const methods = constructor.PrivateMethods;
-  for (const method of methods || []) {
+  for (const [,method] of methods || []) {
     const success = PrivateMethodOrAccessorAdd($, O, method);
     if (IsAbrupt(success)) return success;
   }
   const fields = constructor.Fields;
   for (const fieldRecord of fields || []) {
-    const success = DefineField($, O, fieldRecord);
+    const success = yield* DefineField($, O, fieldRecord);
     if (IsAbrupt(success)) return success;
   }
   return UNUSED;

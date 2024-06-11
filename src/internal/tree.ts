@@ -1,6 +1,15 @@
-import type { Node, Program } from 'estree';
+import type { BlockStatement, ClassBody, MethodDefinition, Node, Program, Property, PropertyDefinition, StaticBlock } from 'estree';
 
 export { Node, Program };
+
+export type BlockLike = BlockStatement | Program | StaticBlock;
+export function isBlockLike(n: Node): n is BlockLike {
+  return n.type === 'BlockStatement' || n.type === 'Program' || n.type === 'StaticBlock';
+}
+
+// NOTE: Esprima uses Property instead of PropertyDefinition for the type
+export type ClassElement = ClassBody['body'][number] | Property;
+export type PropertyLike = Property | PropertyDefinition | MethodDefinition;
 
 type TypeToNodeI<T> = T extends {type: string} ? (arg: {[K in T['type']]: T}) => void : never;
 type Intersection = TypeToNodeI<Node> extends (arg: infer T) => void ? T : never;

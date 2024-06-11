@@ -4,9 +4,11 @@ import { Call, CopyDataProperties, CreateDataProperty, Get, GetFunctionRealm } f
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { IsFunc, SetFunctionName, type Func } from './func';
+import { PrivateElement, PrivateName } from './private_environment_record';
 import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor, methodName, propWEC } from './property_descriptor';
 import { Slots, hasAnyFields, memoize } from './slots';
 import { GetSourceText, IsAnonymousFunctionDefinition } from './static/functions';
+import { PropertyLike } from './tree';
 import { PropertyKey, Val } from './val';
 import { ECR, VM } from './vm';
 import * as ESTree from 'estree';
@@ -31,6 +33,7 @@ export abstract class Obj extends Slots<ObjectSlots>() {
 
   // Implementation details not in spec
   abstract OwnProps: PropertyMap;
+  PrivateElements = new Map<PrivateName, PrivateElement>();
 
   // Required internal methods for all objects
 
@@ -1010,33 +1013,14 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
   for (const prop of n.properties) {
     if (prop.type === 'Property') {
       // Property includes computed, short-hand, etc
-      let isProtoSetter = false;
-      let key: PropertyKey;
-      let propValue: CR<Val>;
-      if (prop.computed) {
-        const result = yield* $.evaluateValue(prop.key);
-        if (IsAbrupt(result)) return result;
-        const kr = yield* ToPropertyKey($, result);
-        if (IsAbrupt(kr)) return kr;
-        key = kr;
-        propValue = yield* $.evaluateValue(prop.value);
-      } else {
-        if (prop.key.type === 'Identifier') {
-          key = prop.key.name;
-        } else if (prop.key.type === 'Literal') {
-          key = String(prop.key.value);
-        } else {
-          throw new Error(`bad key type for non-computed property: ${prop.key.type}`);
-        }
-        if (key === '__proto__' && !$.isJsonParse()) {
-          isProtoSetter = true;
-        }
-        if (IsAnonymousFunctionDefinition(prop.value) && !isProtoSetter) {
-          propValue = yield* $.NamedEvaluation(prop.value, key);
-        } else {
-          propValue = yield* $.evaluateValue(prop.value);
-        }
-      }
+      const key = yield* EvaluatePropertyKey($, prop);
+      Assert(!(key instanceof PrivateName));
+      if (IsAbrupt(key)) return key;
+      const isProtoSetter = !prop.computed && key === '__proto__' && !$.isJsonParse();
+      const propValue = yield* (
+        (!prop.computed && IsAnonymousFunctionDefinition(prop.value) && !isProtoSetter) ?
+          $.NamedEvaluation(prop.value, key as string) :
+          $.evaluateValue(prop.value));
       if (IsAbrupt(propValue)) return propValue;
       if (prop.method) {
         Assert(IsFunc(propValue));
@@ -1082,6 +1066,25 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
     }
   }
   return obj;
+}
+
+/** Non-spec helper to normalize computed and literal property keys. */
+export function* EvaluatePropertyKey($: VM, prop: PropertyLike|ESTree.MemberExpression): ECR<PropertyKey|PrivateName> {
+  const key = prop.type === 'MemberExpression' ? prop.property : prop.key;
+  if (prop.computed) {
+    const result = yield* $.evaluateValue(key);
+    if (IsAbrupt(result)) return result;
+    return yield* ToPropertyKey($, result);
+  }
+  if (key.type === 'Identifier') {
+    return key.name;
+  } else if (key.type === 'Literal') {
+    return String(key.value);
+  } else if (key.type === 'PrivateIdentifier') {
+    return new PrivateName(key.name);
+  } else {
+    throw new Error(`bad key type for non-computed property: ${key.type}`);
+  }
 }
 
 // Superinterface of Map<PropertyKey, PropertyDescriptor>

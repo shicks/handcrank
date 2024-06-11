@@ -95,7 +95,7 @@ export abstract class ExecutionContext {
     readonly ScriptOrModule: ScriptRecord|ModuleRecord|null,
     readonly Function: Func|null,
     readonly Realm: RealmRecord,
-    readonly PrivateEnvironment: PrivateEnvironmentRecord|null,
+    public PrivateEnvironment: PrivateEnvironmentRecord|null,
   ) { }
 
   suspend(): void {

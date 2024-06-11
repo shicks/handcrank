@@ -1,18 +1,13 @@
 import { ToObject } from './abstract_conversion';
-import { Set } from './abstract_object';
+import { PrivateGet, PrivateSet, Set } from './abstract_object';
 import { Assert } from './assert';
 import { IsAbrupt } from './completion_record';
 import { EMPTY, UNRESOLVABLE, UNUSED } from './enums';
 import { EnvironmentRecord } from './environment_record';
 import { GetGlobalObject } from './execution_context';
+import { PrivateName, ResolvePrivateIdentifier } from './private_environment_record';
 import { PropertyKey, Val } from './val';
 import { DebugString, ECR, VM } from './vm';
-
-declare type PrivateName = {__privatename__: true};
-declare const PrivateName: any;
-declare const PrivateGet: any;
-declare const PrivateSet: any;
-declare const ResolvePrivateIdentifier: any;
 
 /**
  * 6.2.5 The Reference Record Specification Type
@@ -153,7 +148,7 @@ export function* GetValue($: VM, V: ReferenceRecord|Val): ECR<Val> {
     const baseObj = ToObject($, V.Base);
     if (IsAbrupt(baseObj)) return baseObj;
     if (IsPrivateReference(V)) {
-      return PrivateGet(baseObj, V.ReferencedName);
+      return yield* PrivateGet($, baseObj, V.ReferencedName as PrivateName);
     }
     return yield* baseObj.Get($, V.ReferencedName as PropertyKey, GetThisValue($, V));
   }
@@ -183,7 +178,7 @@ export function* PutValue($: VM, V: ReferenceRecord|Val, W: Val): ECR<UNUSED> {
     const baseObj = ToObject($, V.Base);
     if (IsAbrupt(baseObj)) return baseObj;
     if (IsPrivateReference(V)) {
-      return PrivateSet($, baseObj, V.ReferencedName, W);
+      return yield* PrivateSet($, baseObj, V.ReferencedName as PrivateName, W);
     }
     const succeeded = yield* baseObj.Set(
       $, V.ReferencedName as PropertyKey, W, GetThisValue($, V));
@@ -238,7 +233,7 @@ export function* InitializeReferencedBinding($: VM, V: ReferenceRecord, W: Val):
 export function MakePrivateReference($: VM, baseValue: Val, privateIdentifier: string): ReferenceRecord {
   const privEnv = null!; // TODO - the running execution context\'s PrivateEnvironment.
   Assert(privEnv != null);
-  const privateName = ResolvePrivateIdentifier($, privEnv, privateIdentifier);
+  const privateName = ResolvePrivateIdentifier(privEnv, privateIdentifier);
   return new ReferenceRecord(baseValue, privateName, true, EMPTY);
 }
 

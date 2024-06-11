@@ -16,6 +16,7 @@ import { generators } from './internal/generator';
 import * as fs from 'node:fs';
 import { functions } from './internal/func';
 import { controlFlow } from './internal/control_flow';
+import { classes } from './internal/class';
 
 export const vm = new VM({
   parseScript(source) { return esprima.parseScript(source, {loc: true, range: true}); },
@@ -40,6 +41,7 @@ vm.install(iterators);
 vm.install(functions);
 vm.install(generators);
 vm.install(controlFlow);
+vm.install(classes);
 
 // TODO - consider adding REPL directives like .report to dump the
 // most recent trace.

@@ -1,32 +1,30 @@
 import { Abrupt, CR, CastNotAbrupt, CompletionType, IsAbrupt, IsReturnCompletion, ThrowCompletion } from './completion_record';
 import { DebugString, ECR, EvalGen, Plugin, VM, just, mapJust, when } from './vm';
-import { BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, NON_LEXICAL_THIS, STRICT, SYNC, UNINITIALIZED, UNUSED } from './enums';
+import { ACCESSOR, BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, METHOD, NON_LEXICAL_THIS, STRICT, SYNC, UNINITIALIZED, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
-import { PropertyDescriptor, PropertyRecord, propC, propWC } from './property_descriptor';
+import { PropertyDescriptor, PropertyRecord, propC, propW, propWC } from './property_descriptor';
 import { Assert } from './assert';
-import { Call, Construct, InitializeInstanceElements } from './abstract_object';
+import { Call, Construct, DefinePropertyOrThrow, InitializeInstanceElements } from './abstract_object';
 import * as ESTree from 'estree';
 import { RealmRecord } from './realm_record';
 import { ScriptRecord } from './script_record';
 import { ModuleRecord } from './module_record';
 import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext, GetActiveScriptOrModule, ResolveBinding } from './execution_context';
-import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
+import { PrivateElement, PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 import { BoundNames, IsConstantDeclaration, IsStrictMode, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
 import { ContainsExpression, ExpectedArgumentCount, GetSourceText, IsSimpleParameterList } from './static/functions';
-import { Obj, OrdinaryCreateFromConstructor, OrdinaryObject, OrdinaryObjectCreate, PropertyMap } from './obj';
+import { EvaluatePropertyKey, Obj, OrdinaryCreateFromConstructor, OrdinaryObject, OrdinaryObjectCreate, PropertyMap } from './obj';
 import { PropertyKey, Val } from './val';
-import { Source } from './tree';
+import { BlockLike, Source, isBlockLike } from './tree';
 import { ToObject } from './abstract_conversion';
 import { GetThisValue, GetValue, InitializeReferencedBinding, IsPropertyReference, PutValue, ReferenceRecord } from './reference_record';
 import { IsCallable, IsConstructor } from './abstract_compare';
 import { memoize } from './slots';
 import { GetIterator, IteratorStep, IteratorValue } from './abstract_iterator';
 import { functionConstructor } from './fundamental';
+import type { ClassFieldDefinitionRecord } from './class';
 
 type Node = ESTree.Node;
-
-type PrivateElement = never;
-type ClassFieldDefinitionRecord = never;
 
 function PrepareForTailCall(..._: any): void {}
 
@@ -108,7 +106,7 @@ declare global {
      * [[ECMAScriptCode]], a Parse Node - The root parse node of the
      * source text that defines the function's body.
      */
-    ECMAScriptCode?: ESTree.BlockStatement|ESTree.Expression;
+    ECMAScriptCode?: BlockLike|ESTree.Expression;
 
     /**
      * [[ConstructorKind]], base or derived - Whether or not the function
@@ -165,14 +163,14 @@ declare global {
      * function is a class, this is a list of Records representing the
      * non-static fields and corresponding initializers of the class.
      */
-    Fields?: ClassFieldDefinitionRecord[]; // TODO - Map?
+    Fields?: readonly ClassFieldDefinitionRecord[]; // TODO - Map?
 
     /**
      * [[PrivateMethods]], a List of PrivateElements - If the function is
      * a class, this is a list representing the non-static private methods
      * and accessors of the class.
      */
-    PrivateMethods?: PrivateElement[]; // TODO - Map?
+    PrivateMethods?: ReadonlyMap<PrivateName, PrivateElement>;
 
     /**
      * [[ClassFieldInitializerName]], a String, a Symbol, a Private Name,
@@ -271,7 +269,7 @@ export function OrdinaryFunctionCreate(
   functionPrototype: Obj,
   sourceText: string,
   ParameterList: ESTree.Pattern[],
-  Body: ESTree.BlockStatement|ESTree.Expression,
+  Body: BlockLike|ESTree.Expression,
   thisMode: LEXICAL_THIS|NON_LEXICAL_THIS,
   env: EnvironmentRecord,
   privateEnv: PrivateEnvironmentRecord|null,
@@ -304,7 +302,7 @@ export interface OrdinaryFunctionSlots extends ObjectSlots {
   Environment: EnvironmentRecord;
   PrivateEnvironment: PrivateEnvironmentRecord|null,
   FormalParameters: ESTree.Pattern[],
-  ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression,
+  ECMAScriptCode: BlockLike|ESTree.Expression,
   ScriptOrModule: ScriptRecord|ModuleRecord;
   ThisMode: LEXICAL|STRICT|GLOBAL;
   SourceText: string;
@@ -319,14 +317,14 @@ export const OrdinaryFunction = memoize(() => class OrdinaryFunction extends Ord
   declare Environment: EnvironmentRecord;
   declare PrivateEnvironment: PrivateEnvironmentRecord|null;
   declare FormalParameters: ESTree.Pattern[];
-  declare ECMAScriptCode: ESTree.BlockStatement|ESTree.Expression;
+  declare ECMAScriptCode: BlockLike|ESTree.Expression;
   declare ScriptOrModule: ScriptRecord|ModuleRecord;
   declare ThisMode: LEXICAL|STRICT|GLOBAL;
   declare Strict: boolean;
   declare SourceText: string;
   declare HomeObject: Obj|undefined;
-  declare Fields: ClassFieldDefinitionRecord[]; // TODO - Map?
-  declare PrivateMethods: PrivateElement[]; // TODO - Map?
+  declare Fields: readonly ClassFieldDefinitionRecord[];
+  declare PrivateMethods: ReadonlyMap<PrivateName, PrivateElement>;
   declare ClassFieldInitializerName: string|symbol|PrivateName|EMPTY;
   declare IsClassConstructor: boolean;
 
@@ -334,7 +332,7 @@ export const OrdinaryFunction = memoize(() => class OrdinaryFunction extends Ord
     super(slots, props);
     this.HomeObject ??= undefined;
     this.Fields ??= [];
-    this.PrivateMethods ??= [];
+    this.PrivateMethods ??= new Map();
     this.ClassFieldInitializerName ??= EMPTY;
     this.IsClassConstructor ??= false;
   }
@@ -450,7 +448,7 @@ export function InstantiateOrdinaryFunctionObject(
  * FunctionExpression : function ( FormalParameters ) { FunctionBody }
  * 1. If name is not present, set name to "".
  * 2. Let env be the LexicalEnvironment of the running execution context.
- * 3. Let privateEnv be the running execution context\'s PrivateEnvironment.
+ * 3. Let privateEnv be the running execution context's PrivateEnvironment.
  * 4. Let sourceText be the source text matched by FunctionExpression.
  * 5. Let closure be OrdinaryFunctionCreate(%Function.prototype%,
  *    sourceText, FormalParameters, FunctionBody, non-lexical-this, env,
@@ -477,7 +475,7 @@ export function InstantiateOrdinaryFunctionObject(
  * 12. Return closure.
  *
  * NOTE: The BindingIdentifier in a FunctionExpression can be
- * referenced from inside the FunctionExpression\'s FunctionBody to
+ * referenced from inside the FunctionExpression's FunctionBody to
  * allow the function to call itself recursively. However, unlike in a
  * FunctionDeclaration, the BindingIdentifier in a FunctionExpression
  * cannot be referenced from and does not affect the scope enclosing
@@ -547,7 +545,7 @@ function sourceText(node: Node): string {
  * ArrowFunction : ArrowParameters => ConciseBody
  * 1. If name is not present, set name to "".
  * 2. Let env be the LexicalEnvironment of the running execution context.
- * 3. Let privateEnv be the running execution context\'s PrivateEnvironment.
+ * 3. Let privateEnv be the running execution context's PrivateEnvironment.
  * 4. Let sourceText be the source text matched by ArrowFunction.
  * 5. Let closure be OrdinaryFunctionCreate(%Function.prototype%,
  *    sourceText, ArrowParameters, ConciseBody, lexical-this, env,
@@ -588,6 +586,199 @@ export function InstantiateArrowFunctionExpression(
   );
   SetFunctionName(closure, name);
   return closure;
+}
+
+/**
+ * 15.4.4 Runtime Semantics: DefineMethod
+ * 
+ * The syntax-directed operation DefineMethod takes argument object
+ * (an Object) and optional argument functionPrototype (an Object) and
+ * returns either a normal completion containing a Record with fields
+ * [[Key]] (a property key) and [[Closure]] (a function object) or an
+ * abrupt completion. It is defined piecewise over the following
+ * productions:
+ * 
+ * MethodDefinition : ClassElementName ( UniqueFormalParameters ) { FunctionBody }
+ * 1. Let propKey be ? Evaluation of ClassElementName.
+ * 2. Let env be the running execution context's LexicalEnvironment.
+ * 3. Let privateEnv be the running execution context's PrivateEnvironment.
+ * 4. If functionPrototype is present, then
+ *     a. Let prototype be functionPrototype.
+ * 5. Else,
+ *     a. Let prototype be %Function.prototype%.
+ * 6. Let sourceText be the source text matched by MethodDefinition.
+ * 7. Let closure be OrdinaryFunctionCreate(prototype, sourceText,
+ *    UniqueFormalParameters, FunctionBody, non-lexical-this, env,
+ *    privateEnv).
+ * 8. Perform MakeMethod(closure, object).
+ * 9. Return the Record { [[Key]]: propKey, [[Closure]]: closure }.
+ */
+export function* DefineMethod(
+  $: VM,
+  def: ESTree.MethodDefinition|ESTree.Property,
+  object: Obj,
+  functionPrototype?: Obj,
+): ECR<{Key: PropertyKey, Closure: Func}> {
+  const funcNode = def.value as ESTree.FunctionExpression;
+  Assert(!funcNode.async && !funcNode.generator); // NOTE: async/generator handled separately.
+  const propKey = yield* EvaluatePropertyKey($, def);
+  if (IsAbrupt(propKey)) return propKey;
+  Assert(!(propKey instanceof PrivateName));
+  const env = $.getRunningContext().LexicalEnvironment!;
+  const privateEnv = $.getRunningContext().PrivateEnvironment!;
+  const prototype = functionPrototype || $.getIntrinsic('%Function.prototype%');
+  const sourceText = GetSourceText(def);
+  const closure = OrdinaryFunctionCreate(
+    $,
+    prototype,
+    sourceText,
+    funcNode.params,
+    funcNode.body,
+    NON_LEXICAL_THIS,
+    env,
+    privateEnv,
+  );
+  MakeMethod(closure, object);
+  return {Key: propKey, Closure: closure};
+}
+
+/**
+ * 15.4.5 Runtime Semantics: MethodDefinitionEvaluation
+ * 
+ * The syntax-directed operation MethodDefinitionEvaluation takes
+ * arguments object (an Object) and enumerable (a Boolean) and returns
+ * either a normal completion containing either a PrivateElement or
+ * unused, or an abrupt completion. It is defined piecewise over the
+ * following productions:
+ * 
+ * MethodDefinition : ClassElementName ( UniqueFormalParameters ) { FunctionBody }
+ * 1. Let methodDef be ? DefineMethod of MethodDefinition with argument object.
+ * 2. Perform SetFunctionName(methodDef.[[Closure]], methodDef.[[Key]]).
+ * 3. Return DefineMethodProperty(object, methodDef.[[Key]], methodDef.[[Closure]], enumerable).
+ * 
+ * MethodDefinition : get ClassElementName ( ) { FunctionBody }
+ * 1. Let propKey be ? Evaluation of ClassElementName.
+ * 2. Let env be the running execution context's LexicalEnvironment.
+ * 3. Let privateEnv be the running execution context's PrivateEnvironment.
+ * 4. Let sourceText be the source text matched by MethodDefinition.
+ * 5. Let formalParameterList be an instance of the production FormalParameters : [empty] .
+ * 6. Let closure be OrdinaryFunctionCreate(%Function.prototype%, sourceText, formalParameterList, FunctionBody, non-lexical-this, env, privateEnv).
+ * 7. Perform MakeMethod(closure, object).
+ * 8. Perform SetFunctionName(closure, propKey, "get").
+ * 9. If propKey is a Private Name, then
+ *     a. Return PrivateElement { [[Key]]: propKey, [[Kind]]: accessor, [[Get]]: closure, [[Set]]: undefined }.
+ * 10. Else,
+ *     a. Let desc be the PropertyDescriptor { [[Get]]: closure, [[Enumerable]]: enumerable, [[Configurable]]: true }.
+ *     b. Perform ? DefinePropertyOrThrow(object, propKey, desc).
+ *     c. Return unused.
+ * 
+ * MethodDefinition : set ClassElementName ( PropertySetParameterList ) { FunctionBody }
+ * 1. Let propKey be ? Evaluation of ClassElementName.
+ * 2. Let env be the running execution context's LexicalEnvironment.
+ * 3. Let privateEnv be the running execution context's PrivateEnvironment.
+ * 4. Let sourceText be the source text matched by MethodDefinition.
+ * 5. Let closure be OrdinaryFunctionCreate(%Function.prototype%, sourceText, PropertySetParameterList, FunctionBody, non-lexical-this, env, privateEnv).
+ * 6. Perform MakeMethod(closure, object).
+ * 7. Perform SetFunctionName(closure, propKey, "set").
+ * 8. If propKey is a Private Name, then
+ *     a. Return PrivateElement { [[Key]]: propKey, [[Kind]]: accessor, [[Get]]: undefined, [[Set]]: closure }.
+ * 9. Else,
+ *     a. Let desc be the PropertyDescriptor { [[Set]]: closure, [[Enumerable]]: enumerable, [[Configurable]]: true }.
+ *     b. Perform ? DefinePropertyOrThrow(object, propKey, desc).
+ *     c. Return unused.
+ * 
+ * GeneratorMethod : * ClassElementName ( UniqueFormalParameters ) { GeneratorBody }
+ * 1. Let propKey be ? Evaluation of ClassElementName.
+ * 2. Let env be the running execution context's LexicalEnvironment.
+ * 3. Let privateEnv be the running execution context's PrivateEnvironment.
+ * 4. Let sourceText be the source text matched by GeneratorMethod.
+ * 5. Let closure be OrdinaryFunctionCreate(%GeneratorFunction.prototype%, sourceText, UniqueFormalParameters, GeneratorBody, non-lexical-this, env, privateEnv).
+ * 6. Perform MakeMethod(closure, object).
+ * 7. Perform SetFunctionName(closure, propKey).
+ * 8. Let prototype be OrdinaryObjectCreate(%GeneratorFunction.prototype.prototype%).
+ * 9. Perform ! DefinePropertyOrThrow(closure, "prototype", PropertyDescriptor { [[Value]]: prototype, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: false }).
+ * 10. Return DefineMethodProperty(object, propKey, closure, enumerable).
+ * 
+ * AsyncGeneratorMethod : async * ClassElementName ( UniqueFormalParameters ) { AsyncGeneratorBody }
+ * 1. Let propKey be ? Evaluation of ClassElementName.
+ * 2. Let env be the running execution context's LexicalEnvironment.
+ * 3. Let privateEnv be the running execution context's PrivateEnvironment.
+ * 4. Let sourceText be the source text matched by AsyncGeneratorMethod.
+ * 5. Let closure be OrdinaryFunctionCreate(%AsyncGeneratorFunction.prototype%, sourceText, UniqueFormalParameters, AsyncGeneratorBody, non-lexical-this, env, privateEnv).
+ * 6. Perform MakeMethod(closure, object).
+ * 7. Perform SetFunctionName(closure, propKey).
+ * 8. Let prototype be OrdinaryObjectCreate(%AsyncGeneratorFunction.prototype.prototype%).
+ * 9. Perform ! DefinePropertyOrThrow(closure, "prototype", PropertyDescriptor { [[Value]]: prototype, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: false }).
+ * 10. Return DefineMethodProperty(object, propKey, closure, enumerable).
+ * 
+ * AsyncMethod : async ClassElementName ( UniqueFormalParameters ) { AsyncFunctionBody }
+ * 1. Let propKey be ? Evaluation of ClassElementName.
+ * 2. Let env be the LexicalEnvironment of the running execution context.
+ * 3. Let privateEnv be the running execution context's PrivateEnvironment.
+ * 4. Let sourceText be the source text matched by AsyncMethod.
+ * 5. Let closure be OrdinaryFunctionCreate(%AsyncFunction.prototype%, sourceText, UniqueFormalParameters, AsyncFunctionBody, non-lexical-this, env, privateEnv).
+ * 6. Perform MakeMethod(closure, object).
+ * 7. Perform SetFunctionName(closure, propKey).
+ * 8. Return DefineMethodProperty(object, propKey, closure, enumerable).
+ */
+export function* MethodDefinitionEvaluation(
+  $: VM,
+  def: ESTree.MethodDefinition|ESTree.Property,
+  object: Obj,
+  enumerable: boolean,
+): ECR<PrivateElement|UNUSED> {
+  const propKey = yield* EvaluatePropertyKey($, def);
+  if (IsAbrupt(propKey)) return propKey;
+  const env = $.getRunningContext().LexicalEnvironment!;
+  const privateEnv = $.getRunningContext().PrivateEnvironment!;
+  const sourceText = GetSourceText(def);
+  switch (def.kind) {
+    case 'method': {
+      // NOTE: We've inlined DefineMethod into here.
+      const isGenerator = def.value.generator ? 'Generator' : '';
+      const isAsync = def.value.async ? 'Async' : '';
+      const functionProto = $.getIntrinsic(`%${isAsync}${isGenerator}Function.prototype%`)!;
+      const closure = OrdinaryFunctionCreate(
+        $, functionProto, sourceText, def.value.params, def.value.body, NON_LEXICAL_THIS,
+        env, privateEnv);
+      MakeMethod(closure, object);
+      SetFunctionName(closure, propKey);
+      if (isGenerator) {
+        const prototype = OrdinaryObjectCreate({
+          Prototype: $.getIntrinsic(`%${isAsync}${isGenerator}Function.prototype.prototype%`)!,
+        });
+        CastNotAbrupt(DefinePropertyOrThrow($, closure, 'prototype', propW(prototype)));
+      }
+      return DefineMethodProperty($, object, propKey, closure, enumerable);
+    }
+    case 'get': {
+      const closure = OrdinaryFunctionCreate(
+        $, $.getIntrinsic('%Function.prototype%'), sourceText, [],
+        (def.value as ESTree.FunctionExpression).body, NON_LEXICAL_THIS, env, privateEnv);
+      MakeMethod(closure, object);
+      SetFunctionName(closure, propKey, 'get');
+      if (propKey instanceof PrivateName) {
+        return {Key: propKey, Kind: ACCESSOR, Get: closure, Set: undefined};
+      }
+      const desc = {Get: closure, Enumerable: enumerable, Configurable: true};
+      return DefinePropertyOrThrow($, object, propKey, desc);
+    }
+    case 'set': {
+      const closure = OrdinaryFunctionCreate(
+        $, $.getIntrinsic('%Function.prototype%'), sourceText,
+        (def.value as ESTree.FunctionExpression).params,
+        (def.value as ESTree.FunctionExpression).body,
+        NON_LEXICAL_THIS, env, privateEnv);
+      MakeMethod(closure, object);
+      SetFunctionName(closure, propKey, 'set');
+      if (propKey instanceof PrivateName) {
+        return {Key: propKey, Kind: ACCESSOR, Get: undefined, Set: closure};
+      }
+      const desc = {Set: closure, Enumerable: enumerable, Configurable: true};
+      return DefinePropertyOrThrow($, object, propKey, desc);
+    }
+  }
+  throw new Error(`Invalid MethodDefinition kind: ${def.kind}`);
 }
 
 /**
@@ -731,7 +922,7 @@ export function OrdinaryCallBindThis($: VM, F: Func, calleeContext: ExecutionCon
  */
 export function* EvaluateBody(
   $: VM, functionObject: Func, argumentsList: Val[],
-  node: ESTree.BlockStatement|ESTree.Expression
+  node: BlockLike|ESTree.Expression
 ): ECR<Val> {
   // TODO - check for generator and/or async, which will probably be different
   // subtypes of Function.
@@ -772,7 +963,7 @@ export function* EvaluateBody(
 export function* OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]): ECR<Val> {
   Assert(F.ECMAScriptCode);
   const result = yield* EvaluateBody($, F, argumentsList, F.ECMAScriptCode);
-  if (!IsAbrupt(result) && F.ECMAScriptCode.type !== 'BlockStatement') {
+  if (!IsAbrupt(result) && !isBlockLike(F.ECMAScriptCode)) {
     // Handle concise bodies
     return new Abrupt(CompletionType.Return, result, EMPTY);
   }
@@ -895,6 +1086,79 @@ export function MakeConstructor(
 }
 
 /**
+ * 10.2.6 MakeClassConstructor ( F )
+ * 
+ * The abstract operation MakeClassConstructor takes argument F (an
+ * ECMAScript function object) and returns unused. It performs the
+ * following steps when called:
+ * 
+ * 1. Assert: F.[[IsClassConstructor]] is false.
+ * 2. Set F.[[IsClassConstructor]] to true.
+ * 3. Return unused.
+ */
+export function MakeClassConstructor(F: Func): UNUSED {
+  Assert(!F.IsClassConstructor);
+  F.IsClassConstructor = true;
+  return UNUSED;
+}
+
+/**
+ * 10.2.7 MakeMethod ( F, homeObject )
+ * 
+ * The abstract operation MakeMethod takes arguments F (an ECMAScript
+ * function object) and homeObject (an Object) and returns unused. It
+ * configures F as a method. It performs the following steps when
+ * called:
+ * 
+ * 1. Set F.[[HomeObject]] to homeObject.
+ * 2. Return unused.
+ */
+export function MakeMethod(F: Func, homeObject: Obj): UNUSED {
+  F.HomeObject = homeObject;
+  return UNUSED;
+}
+
+/**
+ * 10.2.8 DefineMethodProperty ( homeObject, key, closure, enumerable )
+ * 
+ * The abstract operation DefineMethodProperty takes arguments
+ * homeObject (an Object), key (a property key or Private Name),
+ * closure (a function object), and enumerable (a Boolean) and returns
+ * a PrivateElement or unused. It performs the following steps when
+ * called:
+ * 
+ * 1. Assert: homeObject is an ordinary, extensible object with no
+ *    non-configurable properties.
+ * 2. If key is a Private Name, then
+ *     a. Return PrivateElement { [[Key]]: key, [[Kind]]: method, [[Value]]: closure }.
+ * 3. Else,
+ *     a. Let desc be the PropertyDescriptor { [[Value]]: closure,
+ *     [[Writable]]: true, [[Enumerable]]: enumerable,
+ *     [[Configurable]]: true }.
+ *     b. Perform ! DefinePropertyOrThrow(homeObject, key, desc).
+ *     c. Return unused.
+ */
+export function DefineMethodProperty(
+  $: VM,
+  homeObject: Obj,
+  key: PropertyKey|PrivateName,
+  closure: Func,
+  enumerable: boolean,
+): PrivateElement|UNUSED {
+  if (key instanceof PrivateName) {
+    return {Key: key, Kind: METHOD, Value: closure};
+  }
+  const desc = {
+    Value: closure,
+    Writable: true,
+    Enumerable: enumerable,
+    Configurable: true,
+  };
+  CastNotAbrupt(DefinePropertyOrThrow($, homeObject, key, desc));
+  return UNUSED;
+}
+
+/**
  * 10.2.9 SetFunctionName ( F, name [ , prefix ] )
  *
  * The abstract operation SetFunctionName takes arguments F (a
@@ -985,7 +1249,7 @@ export function SetFunctionLength(F: Func, length: number): UNUSED {
  * ECMAScript function a new Function Environment Record is created
  * and bindings for each formal parameter are instantiated in that
  * Environment Record. Each declaration in the function body is also
- * instantiated. If the function\'s formal parameters do not include
+ * instantiated. If the function's formal parameters do not include
  * any default value initializers then the body declarations are
  * instantiated in the same Environment Record as the parameters. If
  * default value parameter initializers exist, a second Environment

@@ -5,11 +5,10 @@ import { Abrupt, CR, CompletionType, IsAbrupt } from './completion_record';
 import { ResolveBinding, ResolveThisBinding } from './execution_context';
 import { ReferenceRecord } from './reference_record';
 import { StrictNode } from './tree';
-import { ToPropertyKey } from './abstract_conversion';
-import { Evaluation_BlockStatement, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from './statements';
+import { Evaluation_BlockLike, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from './statements';
 import { Evaluation_AssignmentExpression } from './assignment';
 import { Evaluation_CallExpression, Evaluation_NewExpression } from './func';
-import { Evaluation_ObjectExpression } from './obj';
+import { EvaluatePropertyKey, Evaluation_ObjectExpression } from './obj';
 import { Evaluation_ArrayExpression } from './exotic_array';
 import { Evaluation_ConditionalExpression, Evaluation_SequenceExpression } from './control_flow';
 import { BindingInitialization_ArrayPattern, BindingInitialization_Identifier, BindingInitialization_MemberExpression, BindingInitialization_ObjectPattern } from './binding';
@@ -46,27 +45,12 @@ export const syntax: Plugin = {
         const baseValue = yield* $.evaluateValue(n.object);
         if (IsAbrupt(baseValue)) return baseValue;
         const strict = (n as StrictNode).strict || false;
-        let propertyKey;
-
         // TODO - handle super, imports, and calls?  (CallExpression productions)
-
-        if (n.computed) {
-          // 13.3.3 EvaluatePropertyAccessWithExpressionKey ( baseValue, expression, strict )
-          const propertyNameValue = yield* $.evaluateValue(n.property);
-          if (IsAbrupt(propertyNameValue)) return propertyNameValue;
-          propertyKey = yield* ToPropertyKey($, propertyNameValue);
-          if (IsAbrupt(propertyKey)) return propertyKey;
-        } else if (n.property.type === 'Identifier') {
-          propertyKey = String(n.property.name);
-        } else {
-          // NOTE: PrivateIdentifier is a valid type here
-          //    MemberExpression : MemberExpression . PrivateIdentifier
-          // ????
-          throw new Error(`Bad non-computed property: ${n.property.type}`);
-        }
+        const propertyKey = yield* EvaluatePropertyKey($, n);
+        if (IsAbrupt(propertyKey)) return propertyKey;
         return new ReferenceRecord(baseValue, propertyKey, strict, EMPTY);
       });
-      on('BlockStatement', Evaluation_BlockStatement);
+      on(['BlockStatement', 'Program'], Evaluation_BlockLike);
       on('VariableDeclaration', ($, n) => {
         if (n.kind !== 'var') {
           return Evaluation_LexicalDeclaration($, n);

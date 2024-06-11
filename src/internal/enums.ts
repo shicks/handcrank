@@ -180,3 +180,27 @@ export interface SYNC extends EnumSym<'sync'> {}
 
 export const ASYNC: ASYNC = new EnumSym('async');
 export interface ASYNC extends EnumSym<'async'> {}
+
+// For 14.7.5 For-in/of statements
+export const ENUMERATE: ENUMERATE = new EnumSym('enumerate');
+export interface ENUMERATE extends EnumSym<'enumerate'> {}
+
+export const ITERATE: ITERATE = new EnumSym('iterate');
+export interface ITERATE extends EnumSym<'iterate'> {}
+
+export const ASYNC_ITERATE: ASYNC_ITERATE = new EnumSym('async-iterate');
+export interface ASYNC_ITERATE extends EnumSym<'async-iterate'> {}
+
+// 6.2.10 PrivateElement
+
+/** PrivateElement.[[Kind]] "field" value */
+export const FIELD: FIELD = new EnumSym('field');
+export interface FIELD extends EnumSym<'field'> {}
+
+/** PrivateElement.[[Kind]] "method" value */
+export const METHOD: METHOD = new EnumSym('method');
+export interface METHOD extends EnumSym<'method'> {}
+
+/** PrivateElement.[[Kind]] "accessor" value */
+export const ACCESSOR: ACCESSOR = new EnumSym('accessor');
+export interface ACCESSOR extends EnumSym<'accessor'> {}

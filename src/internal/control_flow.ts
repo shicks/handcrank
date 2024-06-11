@@ -6,7 +6,7 @@ import { AsyncIteratorClose, CreateIterResultObject, GetIterator, IteratorClose,
 import { Call, GetV } from './abstract_object';
 import { Assert } from './assert';
 import { Abrupt, CR, CastNotAbrupt, CompletionType, CompletionValue, IsAbrupt, IsThrowCompletion, UpdateEmpty } from './completion_record';
-import { ASYNC, EMPTY, SYNC, UNUSED } from './enums';
+import { ASYNC, ASYNC_ITERATE, EMPTY, ENUMERATE, ITERATE, SYNC, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, ObjectEnvironmentRecord } from './environment_record';
 import { IsFunc, methodO } from './func';
 import { Obj, OrdinaryObjectCreate } from './obj';
@@ -692,15 +692,14 @@ export function* ForInOfLoopEvaluation(
   n: ESTree.ForOfStatement|ESTree.ForInStatement,
   labelSet: string[],
 ): ECR<Val|EMPTY> {
-  const lhsKind = n.left.type !== 'VariableDeclaration' ? 'assignment' as const :
-    n.left.kind === 'var' ? 'varBinding' as const : 'lexicalBinding' as const;
+  const isLexical = n.left.type === 'VariableDeclaration' && n.left.kind !== 'var';
   const lhs: ESTree.Pattern|ESTree.VariableDeclaration = n.left;
-  const iterationKind = n.type === 'ForInStatement' ? 'enumerate' as const : 'iterate' as const;
-  const lexicalNames = lhsKind === 'lexicalBinding' ? BoundNames(n.left) : [];
+  const iterationKind = n.type === 'ForInStatement' ? ENUMERATE : ITERATE;
+  const lexicalNames = isLexical ? BoundNames(n.left) : [];
   const keyResult = yield* ForInOfHeadEvaluation($, lexicalNames, n.right, iterationKind);
   if (IsAbrupt(keyResult)) return keyResult;
   return yield* ForInOfBodyEvaluation(
-    $, lhs, n.body, keyResult, iterationKind, lhsKind, labelSet,
+    $, lhs, n.body, keyResult, iterationKind, isLexical, labelSet,
     n.type === 'ForOfStatement' && n.await ? ASYNC : SYNC);
 }
 
@@ -743,7 +742,7 @@ function* ForInOfHeadEvaluation(
   $: VM,
   uninitializedBoundNames: string[],
   expr: ESTree.Expression,
-  iterationKind: 'enumerate'|'iterate'|'async-iterate',
+  iterationKind: ENUMERATE|ITERATE|ASYNC_ITERATE,
 ): ECR<IteratorRecord> {
   const oldEnv = $.getRunningContext().LexicalEnvironment;
   Assert(oldEnv);
@@ -761,7 +760,7 @@ function* ForInOfHeadEvaluation(
   Assert(!EMPTY.is(exprRef));
   const exprValue = yield* GetValue($, exprRef);
   if (IsAbrupt(exprValue)) return exprValue;
-  if (iterationKind === 'enumerate') {
+  if (iterationKind === ENUMERATE) {
     if (exprValue == null) return new Abrupt(CompletionType.Break, EMPTY, EMPTY);
     const obj = CastNotAbrupt(ToObject($, exprValue));
     const iterator = EnumerateObjectProperties($, obj);
@@ -769,7 +768,7 @@ function* ForInOfHeadEvaluation(
     Assert(IsFunc(nextMethod));
     return new IteratorRecord(iterator, nextMethod, false);
   } else {
-    const iteratorKind = iterationKind === 'async-iterate' ? ASYNC : SYNC;
+    const iteratorKind = iterationKind === ASYNC_ITERATE ? ASYNC : SYNC;
     return yield* GetIterator($, exprValue, iteratorKind);
   }
 }
@@ -860,8 +859,8 @@ function* ForInOfBodyEvaluation(
   lhs: ESTree.Pattern|ESTree.VariableDeclaration,
   stmt: ESTree.Statement,
   iteratorRecord: IteratorRecord,
-  iterationKind: 'enumerate'|'iterate',
-  lhsKind: 'assignment'|'varBinding'|'lexicalBinding',
+  iterationKind: ENUMERATE|ITERATE,
+  isLexical: boolean,
   labelSet: string[],
   iteratorKind: SYNC|ASYNC = SYNC,
 ): ECR<Val|EMPTY> {
@@ -888,7 +887,7 @@ function* ForInOfBodyEvaluation(
     const nextValue = yield* IteratorValue($, nextResult);
     if (IsAbrupt(nextValue)) return nextValue;
     let status;
-    if (lhsKind !== 'lexicalBinding') {
+    if (!isLexical) {
       // NOTE: We've folded all these cases together...
       status = yield* $.BindingInitialization(assignmentPattern, nextValue, undefined);
     } else {
@@ -901,13 +900,13 @@ function* ForInOfBodyEvaluation(
     if (IsAbrupt(status)) {
       $.getRunningContext().LexicalEnvironment = oldEnv;
       if (iteratorKind === ASYNC) return yield* AsyncIteratorClose($, iteratorRecord, status);
-      if (iterationKind === 'iterate') return yield* IteratorClose($, iteratorRecord, status);
+      if (iterationKind === ITERATE) return yield* IteratorClose($, iteratorRecord, status);
       return status;
     }
     const result = yield* $.evaluateValue(stmt);
     $.getRunningContext().LexicalEnvironment = oldEnv;
     if (!LoopContinues(result, labelSet)) {
-      if (iterationKind === 'enumerate') return UpdateEmpty(result, V);
+      if (iterationKind === ENUMERATE) return UpdateEmpty(result, V);
       status = UpdateEmpty(result, V);
       if (iteratorKind === ASYNC) return yield* AsyncIteratorClose($, iteratorRecord, status);
       return yield* IteratorClose($, iteratorRecord, status);

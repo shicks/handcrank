@@ -1,6 +1,6 @@
 // 14
 
-import { BlockStatement, Node, VariableDeclaration } from "estree";
+import { Node, VariableDeclaration } from "estree";
 import { Assert } from "./assert";
 import { CR, CastNotAbrupt, IsAbrupt, UpdateEmpty } from "./completion_record";
 import { EMPTY, UNUSED } from "./enums";
@@ -11,6 +11,7 @@ import { Val } from "./val";
 import { ResolveBinding } from "./execution_context";
 import { InitializeReferencedBinding, PutValue } from "./reference_record";
 import { IsAnonymousFunctionDefinition } from "./static/functions";
+import { BlockLike } from "./tree";
 
 /**
  * 14.2.2 Runtime Semantics: Evaluation
@@ -43,7 +44,7 @@ import { IsAnonymousFunctionDefinition } from "./static/functions";
  * eval("1;{}")
  * eval("1;var a;")
  */
-export function* Evaluation_BlockStatement($: VM, n: BlockStatement): EvalGen<CR<Val|EMPTY>> {
+export function* Evaluation_BlockLike($: VM, n: BlockLike): EvalGen<CR<Val|EMPTY>> {
   if (!n.body.length) return EMPTY;
   const context = $.getRunningContext();
   const oldEnv = context.LexicalEnvironment || null;
