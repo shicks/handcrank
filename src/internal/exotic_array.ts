@@ -674,6 +674,50 @@ export const arrayObject: Plugin = {
           if (k < 0 || k >= len) return undefined;
           return yield* Get($, O, String(k));
         }),
+
+        /**
+         * 23.1.3.23 Array.prototype.push ( ...items )
+         * 
+         * NOTE 1: This method appends the arguments to the end of the
+         * array, in the order in which they appear. It returns the new
+         * length of the array.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let argCount be the number of elements in items.
+         * 4. If len + argCount > 253 - 1, throw a TypeError exception.
+         * 5. For each element E of items, do
+         *     a. Perform ? Set(O, ! ToString(𝔽(len)), E, true).
+         *     b. Set len to len + 1.
+         * 6. Perform ? Set(O, "length", 𝔽(len), true).
+         * 7. Return 𝔽(len).
+         * 
+         * The "length" property of this method is 1𝔽.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can be
+         * transferred to other kinds of objects for use as a method.
+         */
+        'push': method(function*($, thisValue, ...items) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          let len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          const argCount = items.length;
+          if (len + argCount > Number.MAX_SAFE_INTEGER) {
+            return $.throw('TypeError', 'Too many items');
+          }
+          for (const E of items) {
+            const setStatus = yield* Set($, O, String(len), E, true);
+            if (IsAbrupt(setStatus)) return setStatus;
+            len++;
+          }
+          const setStatus = yield* Set($, O, 'length', len, true);
+          if (IsAbrupt(setStatus)) return setStatus;
+          return len;
+        }),
       });
 
       // TODO - peel this off - arrays are only iterable if we _have_ an iterator.

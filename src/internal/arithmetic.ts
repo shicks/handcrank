@@ -377,8 +377,8 @@ export function* Evaluation_ComparisonExpression(
     case '!=': return fmap(yield* IsLooselyEqual($, lval, rval), x => !x);
     case '<': return fmap(yield* IsLessThan($, lval, rval, true), x => x ?? false);
     case '>': return fmap(yield* IsLessThan($, rval, lval, false), x => x ?? false);
-    case '<=': return fmap(yield* IsLessThan($, rval, lval, false), x => !x ?? false);
-    case '>=': return fmap(yield* IsLessThan($, lval, rval, true), x => !x ?? false);
+    case '<=': return fmap(yield* IsLessThan($, rval, lval, false), x => !x);
+    case '>=': return fmap(yield* IsLessThan($, lval, rval, true), x => !x);
     case 'in': {
       if (!(rval instanceof Obj)) {
         return $.throw('TypeError', `Cannot use 'in' operator to search for '${

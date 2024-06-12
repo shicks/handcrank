@@ -4,6 +4,7 @@
   "description": "A JavaScript virtual machine for ESTree syntax trees",
   "main": "index.js",
   "scripts": {
+    "build": "npx esbuild src/main.ts --minify --bundle --platform=node --outfile=dist/main.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

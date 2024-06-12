@@ -44,12 +44,15 @@ browser or on the server.
         - [x] stack traces
     - [x] Array
         - [ ] instance methods
+    - [ ] Date
     - [x] Iterators
     - [ ] RegExp
     - [ ] Arguments
     - [ ] Map
     - [ ] Set
     - [ ] WeakMap / WeakSet
+    - [ ] Reflect
+    - [ ] Proxy
 - [x] Functions
     - [x] vanilla declarations
     - [x] vanilla expressions
@@ -81,5 +84,8 @@ browser or on the server.
         - [x] super
     - [x] use strict
     - [x] optional chaining
+    - [ ] meta properties (i.e. `new.target`, `import.meta`)
 - [ ] Modules
 - [ ] Debugger statement
+- [ ] SPI for host integration
+- [ ] Test-262 integration
