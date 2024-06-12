@@ -36,6 +36,9 @@ export const arithmetic: Plugin = {
     SetDefaultGlobalBindings(realm) {
       defineProperties(realm, realm.GlobalObject!, {
         'Infinity': prop0(Infinity),
+        'NaN': prop0(NaN),
+        // TODO - does this belong elsewhere?
+        'undefined': prop0(undefined),
       });
     },
   },

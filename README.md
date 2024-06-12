@@ -50,15 +50,15 @@ browser or on the server.
     - [ ] Map
     - [ ] Set
     - [ ] WeakMap / WeakSet
-- [x] Define functions
+- [x] Functions
     - [x] vanilla declarations
     - [x] vanilla expressions
     - [x] arrow functions
     - [x] generators
     - [ ] async
     - [ ] async arrows
-- [x] Call functions
-- [ ] Template string literals
+    - [x] function calls
+    - [x] constructor calls
 - [ ] Syntax
     - [x] object literals
     - [x] array literals
@@ -67,6 +67,7 @@ browser or on the server.
     - [x] binary operators
     - [x] unary operators
     - [x] ++ and -- operators
+    - [ ] template literals
     - [x] control structures
         - [x] for
         - [x] if
@@ -77,5 +78,8 @@ browser or on the server.
     - [x] classes
         - [x] class fields
         - [x] private fields
-        - [ ] super
+        - [x] super
     - [x] use strict
+    - [x] optional chaining
+- [ ] Modules
+- [ ] Debugger statement

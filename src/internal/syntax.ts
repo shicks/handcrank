@@ -29,7 +29,7 @@ export const syntax: Plugin = {
         }
         return result;
       });
-      on('ExpressionStatement', ($, n) => $.Evaluation(n.expression));
+      on(['ExpressionStatement', 'ChainExpression'], ($, n) => $.Evaluation(n.expression));
       // Primary elements
       on('Literal', (_$, n) => {
         if (n.value instanceof RegExp) return NOT_APPLICABLE;
@@ -79,11 +79,15 @@ export const syntax: Plugin = {
   },
 };
 
-function* Evaluation_MemberExpression($: VM, n: ESTree.MemberExpression): ECR<ReferenceRecord> {
+function* Evaluation_MemberExpression(
+  $: VM,
+  n: ESTree.MemberExpression,
+): ECR<ReferenceRecord|undefined> {
   const baseValue = yield* $.evaluateValue(n.object);
   if (IsAbrupt(baseValue)) return baseValue;
+  if (n.optional && baseValue == null) return undefined;
   const strict = IsStrictMode(n);
-  // TODO - handle super, imports, and calls?  (CallExpression productions)
+  // TODO - handle imports?  (CallExpression productions)
   const propertyKey = yield* EvaluatePropertyKey($, n);
   if (IsAbrupt(propertyKey)) return propertyKey;
   return new ReferenceRecord(baseValue, propertyKey, strict, EMPTY);
