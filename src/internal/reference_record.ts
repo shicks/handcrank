@@ -88,6 +88,9 @@ export function IsEnvironmentReference(V: ReferenceRecord): V is EnvironmentRefe
  * The abstract operation IsPropertyReference takes argument V (a
  * Reference Record) and returns a Boolean. It performs the following
  * steps when called:
+ * 
+ * 1. If V.[[Base]] is unresolvable, return false.
+ * 2. If V.[[Base]] is an Environment Record, return false; otherwise return true.
  */
 export function IsPropertyReference(V: ReferenceRecord): V is PropertyReferenceRecord {
   return V.Base !== UNRESOLVABLE && !(V.Base instanceof EnvironmentRecord);
@@ -99,6 +102,8 @@ export function IsPropertyReference(V: ReferenceRecord): V is PropertyReferenceR
  * The abstract operation IsUnresolvableReference takes argument V
  * (a Reference Record) and returns a Boolean. It performs the
  * following steps when called:
+ * 
+ * 1. If V.[[Base]] is unresolvable, return true; otherwise return false.
  */
 export function IsUnresolvableReference(V: ReferenceRecord): V is UnresolvableReferenceRecord {
   return V.Base === UNRESOLVABLE;
@@ -110,6 +115,8 @@ export function IsUnresolvableReference(V: ReferenceRecord): V is UnresolvableRe
  * The abstract operation IsSuperReference takes argument V (a
  * Reference Record) and returns a Boolean. It performs the
  * following steps when called:
+ * 
+ * 1. If V.[[ThisValue]] is not empty, return true; otherwise return false.
  */
 export function IsSuperReference(V: ReferenceRecord): V is SuperReferenceRecord {
   return V.ThisValue !== EMPTY;
@@ -121,6 +128,8 @@ export function IsSuperReference(V: ReferenceRecord): V is SuperReferenceRecord 
  * The abstract operation IsPrivateReference takes argument V
  * (a Reference Record) and returns a Boolean. It performs the
  * following steps when called:
+ * 
+ * 1. If V.[[ReferencedName]] is a Private Name, return true; otherwise return false.
  */
 export function IsPrivateReference(V: ReferenceRecord): V is PrivateReferenceRecord {
   if (typeof PrivateName !== 'function') return false;
@@ -138,6 +147,23 @@ interface PrivateReferenceRecord extends ReferenceRecord {
  * Record or an ECMAScript language value) and returns either a normal
  * completion containing an ECMAScript language value or an abrupt
  * completion. It performs the following steps when called:
+ * 
+ * 1. If V is not a Reference Record, return V.
+ * 2. If IsUnresolvableReference(V) is true, throw a ReferenceError exception.
+ * 3. If IsPropertyReference(V) is true, then
+ *     a. Let baseObj be ? ToObject(V.[[Base]]).
+ *     b. If IsPrivateReference(V) is true, then
+ *         i. Return ? PrivateGet(baseObj, V.[[ReferencedName]]).
+ *     c. Return ? baseObj.[[Get]](V.[[ReferencedName]], GetThisValue(V)).
+ * 4. Else,
+ *     a. Let base be V.[[Base]].
+ *     b. Assert: base is an Environment Record.
+ *     c. Return ? base.GetBindingValue(V.[[ReferencedName]], V.[[Strict]]) (see 9.1).
+ * 
+ * NOTE: The object that may be created in step 3.a is not accessible
+ * outside of the above abstract operation and the ordinary object
+ * [[Get]] internal method. An implementation might choose to avoid
+ * the actual creation of the object.
  */
 export function* GetValue($: VM, V: ReferenceRecord|Val): ECR<Val> {
   if (!(V instanceof ReferenceRecord)) return V;
@@ -164,11 +190,36 @@ export function* GetValue($: VM, V: ReferenceRecord|Val): ECR<Val> {
  * language value) and returns either a normal completion containing
  * unused or an abrupt completion. It performs the following steps
  * when called:
+ * 
+ * 1. If V is not a Reference Record, throw a ReferenceError exception.
+ * 2. If IsUnresolvableReference(V) is true, then
+ *     a. If V.[[Strict]] is true, throw a ReferenceError exception.
+ *     b. Let globalObj be GetGlobalObject().
+ *     c. Perform ? Set(globalObj, V.[[ReferencedName]], W, false).
+ *     d. Return unused.
+ * 3. If IsPropertyReference(V) is true, then
+ *     a. Let baseObj be ? ToObject(V.[[Base]]).
+ *     b. If IsPrivateReference(V) is true, then
+ *         i. Return ? PrivateSet(baseObj, V.[[ReferencedName]], W).
+ *     c. Let succeeded be ? baseObj.[[Set]](V.[[ReferencedName]], W, GetThisValue(V)).
+ *     d. If succeeded is false and V.[[Strict]] is true, throw a TypeError exception.
+ *     e. Return unused.
+ * 4. Else,
+ *     a. Let base be V.[[Base]].
+ *     b. Assert: base is an Environment Record.
+ *     c. Return ? base.SetMutableBinding(V.[[ReferencedName]], W, V.[[Strict]]) (see 9.1).
+ * 
+ * NOTE: The object that may be created in step 3.a is not accessible
+ * outside of the above abstract operation and the ordinary object
+ * [[Set]] internal method. An implementation might choose to avoid
+ * the actual creation of that object.
  */
 export function* PutValue($: VM, V: ReferenceRecord|Val, W: Val): ECR<UNUSED> {
-  if (!(V instanceof ReferenceRecord)) return $.throw('ReferenceError');
+  if (!(V instanceof ReferenceRecord)) {
+    return $.throw('ReferenceError', 'Invalid left-hand side in assignment');
+  }
   if (IsUnresolvableReference(V)) {
-    if (V.Strict) return $.throw('ReferenceError');
+    if (V.Strict) return $.throw('ReferenceError', `${V.ReferencedName} is not defined`);
     Assert(typeof V.ReferencedName !== 'object'); // class bodies are strict.
     const globalObj = GetGlobalObject($);
     const result = yield* Set($, globalObj, V.ReferencedName, W, false);
@@ -199,6 +250,9 @@ export function* PutValue($: VM, V: ReferenceRecord|Val, W: Val): ECR<UNUSED> {
  * The abstract operation GetThisValue takes argument V (a Reference
  * Record) and returns an ECMAScript language value. It performs the
  * following steps when called:
+ * 
+ * 1. Assert: IsPropertyReference(V) is true.
+ * 2. If IsSuperReference(V) is true, return V.[[ThisValue]]; otherwise return V.[[Base]].
  */
 export function GetThisValue(_$: VM, V: ReferenceRecord): Val {
   Assert(IsPropertyReference(V));
@@ -213,6 +267,11 @@ export function GetThisValue(_$: VM, V: ReferenceRecord): Val {
  * V (a Reference Record) and W (an ECMAScript language value) and
  * returns either a normal completion containing unused or an abrupt
  * completion. It performs the following steps when called:
+ * 
+ * 1. Assert: IsUnresolvableReference(V) is false.
+ * 2. Let base be V.[[Base]].
+ * 3. Assert: base is an Environment Record.
+ * 4. Return ? base.InitializeBinding(V.[[ReferencedName]], W).
  */
 export function* InitializeReferencedBinding($: VM, V: ReferenceRecord, W: Val): ECR<UNUSED> {
   Assert(!IsUnresolvableReference(V));
@@ -229,6 +288,13 @@ export function* InitializeReferencedBinding($: VM, V: ReferenceRecord, W: Val):
  * baseValue (an ECMAScript language value) and privateIdentifier (a
  * String) and returns a Reference Record. It performs the following
  * steps when called:
+ * 
+ * 1. Let privEnv be the running execution context's PrivateEnvironment.
+ * 2. Assert: privEnv is not null.
+ * 3. Let privateName be ResolvePrivateIdentifier(privEnv, privateIdentifier).
+ * 4. Return the Reference Record { [[Base]]: baseValue,
+ *    [[ReferencedName]]: privateName, [[Strict]]: true, [[ThisValue]]:
+ *    empty }.
  */
 export function MakePrivateReference($: VM, baseValue: Val, privateIdentifier: string): ReferenceRecord {
   const privEnv = null!; // TODO - the running execution context\'s PrivateEnvironment.

@@ -15,6 +15,7 @@ import { Func, IsFunc } from './func';
 import { ArrayExoticObject } from './exotic_array';
 import { PrivateEnvironmentRecord } from './private_environment_record';
 import { IsConstructor } from './abstract_compare';
+import { IsStrictMode } from './static/scope';
 
 export type Yield = {yield: Val};
 export type EvalGen<T> = Generator<Yield|undefined, T, CR<Val>|undefined>;
@@ -66,6 +67,8 @@ export class VM {
     InstantiateFunctionObject: {},
     BindingInitialization: {},
   };
+
+  isStrict = false;
 
   constructor(private readonly esprima?: Esprima) {}
 
@@ -251,6 +254,7 @@ export class VM {
   }
 
   Evaluation(n: Node): ECR<Val|ReferenceRecord|EMPTY> {
+    this.isStrict = IsStrictMode(n);
     return this.operate('Evaluation', n, []);
   }
   NamedEvaluation(n: Node, name: string): ECR<Val> {

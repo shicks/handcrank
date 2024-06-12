@@ -4,7 +4,6 @@ import { Val } from './val';
 import { Abrupt, CR, CompletionType, IsAbrupt } from './completion_record';
 import { ResolveBinding, ResolveThisBinding } from './execution_context';
 import { ReferenceRecord } from './reference_record';
-import { StrictNode } from './tree';
 import { Evaluation_BlockLike, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from './statements';
 import { Evaluation_AssignmentExpression } from './assignment';
 import { Evaluation_CallExpression, Evaluation_NewExpression } from './func';
@@ -12,6 +11,7 @@ import { EvaluatePropertyKey, Evaluation_ObjectExpression } from './obj';
 import { Evaluation_ArrayExpression } from './exotic_array';
 import { Evaluation_ConditionalExpression, Evaluation_SequenceExpression } from './control_flow';
 import { BindingInitialization_ArrayPattern, BindingInitialization_Identifier, BindingInitialization_MemberExpression, BindingInitialization_ObjectPattern } from './binding';
+import { IsStrictMode } from './static/scope';
 
 // TODO - split out basic from advanced syntax??
 
@@ -44,7 +44,7 @@ export const syntax: Plugin = {
       on('MemberExpression', function*($, n) {
         const baseValue = yield* $.evaluateValue(n.object);
         if (IsAbrupt(baseValue)) return baseValue;
-        const strict = (n as StrictNode).strict || false;
+        const strict = IsStrictMode(n);
         // TODO - handle super, imports, and calls?  (CallExpression productions)
         const propertyKey = yield* EvaluatePropertyKey($, n);
         if (IsAbrupt(propertyKey)) return propertyKey;

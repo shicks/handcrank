@@ -1,6 +1,6 @@
 /** @fileoverview 8.2 Scope Analysis */
 
-import { Node, TopLevelNode } from '../tree';
+import { Node, StrictNode, TopLevelNode } from '../tree';
 
 /**
  * 8.2.1 Static Semantics: BoundNames
@@ -312,5 +312,5 @@ function visitLexicallyScopedDecls(node: Node, visitor: Visitor): void {
 }
 
 export function IsStrictMode(n: Node): boolean {
-  return false;
+  return !!(n as StrictNode).strict;
 }

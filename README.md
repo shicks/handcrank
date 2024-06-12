@@ -78,4 +78,4 @@ browser or on the server.
         - [x] class fields
         - [x] private fields
         - [ ] super
-    - [ ] use strict
+    - [x] use strict

@@ -79,7 +79,6 @@ export abstract class ExecutionContext {
   // TODO - is there an ExecutionContext that isn't a CodeExecutionContext?
   //      - if so, then maybe the ctor params below are pulled out for code only
 
-  isStrict: boolean = false;
   isRunning: boolean = false;
 
   CodeEvaluationState: ECR<Val>|undefined = undefined;
@@ -229,7 +228,7 @@ export function ResolveBinding($: VM, name: string,
   // that is being evaluated is contained in strict mode code, let
   // strict be true; else let strict be false.
   //      -> how do we determine this? what is it hung onto?
-  const strict = null!; // ???
+  const strict = $.isStrict; // ???
   return GetIdentifierReference($, env, name, strict);
 }
 
