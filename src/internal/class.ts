@@ -1,7 +1,7 @@
 /** @fileoverview 15.7 Class Definitions */
 
 import { IsConstructor } from './abstract_compare';
-import { Call, Construct, DefineField, Get, PrivateMethodOrAccessorAdd } from './abstract_object';
+import { Call, Construct, DefineField, Get, InitializeInstanceElements, PrivateMethodOrAccessorAdd } from './abstract_object';
 import { Assert } from './assert';
 import { InitializeBoundName } from './binding';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
@@ -78,6 +78,84 @@ export class ClassFieldDefinitionRecord {
 class ClassStaticBlockDefinitionRecord {
   constructor(readonly BodyFunction: Func) {}
 }
+
+/**
+ * 13.3.7 The super Keyword
+ * 
+ * 13.3.7.1 Runtime Semantics: Evaluation
+ * 
+ * SuperProperty : super [ Expression ]
+ * 1. Let env be GetThisEnvironment().
+ * 2. Let actualThis be ? env.GetThisBinding().
+ * 3. Let propertyNameReference be ? Evaluation of Expression.
+ * 4. Let propertyNameValue be ? GetValue(propertyNameReference).
+ * 5. Let propertyKey be ? ToPropertyKey(propertyNameValue).
+ * 6. If the source text matched by this SuperProperty is strict mode
+ *    code, let strict be true; else let strict be false.
+ * 7. Return ? MakeSuperPropertyReference(actualThis, propertyKey, strict).
+ * 
+ * SuperProperty : super . IdentifierName
+ * 1. Let env be GetThisEnvironment().
+ * 2. Let actualThis be ? env.GetThisBinding().
+ * 3. Let propertyKey be StringValue of IdentifierName.
+ * 4. If the source text matched by this SuperProperty is strict mode
+ *    code, let strict be true; else let strict be false.
+ * 5. Return ? MakeSuperPropertyReference(actualThis, propertyKey, strict).
+ * 
+ * SuperCall : super Arguments
+ * 1. Let newTarget be GetNewTarget().
+ * 2. Assert: newTarget is an Object.
+ * 3. Let func be GetSuperConstructor().
+ * 4. Let argList be ? ArgumentListEvaluation of Arguments.
+ * 5. If IsConstructor(func) is false, throw a TypeError exception.
+ * 6. Let result be ? Construct(func, argList, newTarget).
+ * 7. Let thisER be GetThisEnvironment().
+ * 8. Perform ? thisER.BindThisValue(result).
+ * 9. Let F be thisER.[[FunctionObject]].
+ * 10. Assert: F is an ECMAScript function object.
+ * 11. Perform ? InitializeInstanceElements(result, F).
+ * 12. Return result.
+ */
+export function* Evaluation_Super($: VM, node: ESTree.Super): ECR<Val> {
+  // NOTE: This is tricky because we need more context!!
+  // By the time we're here, it's already too late...
+  // Essentially, MemberExpression and Call need to recognize super and bail out.
+  // Alternatively, we could try to work beckwards by returning some sort of
+  // exotic object that will getprop and call correctly???
+}
+
+/**
+ * 13.3.7.2 GetSuperConstructor ( )
+ * 
+ * The abstract operation GetSuperConstructor takes no arguments and
+ * returns an ECMAScript language value. It performs the following
+ * steps when called:
+ * 
+ * 1. Let envRec be GetThisEnvironment().
+ * 2. Assert: envRec is a Function Environment Record.
+ * 3. Let activeFunction be envRec.[[FunctionObject]].
+ * 4. Assert: activeFunction is an ECMAScript function object.
+ * 5. Let superConstructor be ! activeFunction.[[GetPrototypeOf]]().
+ * 6. Return superConstructor.
+ */
+
+/**
+ * 13.3.7.3 MakeSuperPropertyReference ( actualThis, propertyKey, strict )
+ * 
+ * The abstract operation MakeSuperPropertyReference takes arguments
+ * actualThis (an ECMAScript language value), propertyKey (a property
+ * key), and strict (a Boolean) and returns either a normal completion
+ * containing a Super Reference Record or a throw completion. It
+ * performs the following steps when called:
+ * 
+ * 1. Let env be GetThisEnvironment().
+ * 2. Assert: env.HasSuperBinding() is true.
+ * 3. Let baseValue be ? env.GetSuperBase().
+ * 4. Return the Reference Record { [[Base]]: baseValue,
+ *    [[ReferencedName]]: propertyKey, [[Strict]]: strict,
+ *    [[ThisValue]]: actualThis }.
+ */
+
 
 /**
  * 15.7.4 Static Semantics: IsStatic
@@ -521,14 +599,10 @@ export function* ClassDefinitionEvaluation(
   const constructor = body && body.body.find(e => e.type === 'MethodDefinition' && e.kind === 'constructor');
   ec.LexicalEnvironment = classEnv;
   ec.PrivateEnvironment = classPrivateEnvironment;
+
+  // 14.
   let F: Func;
   if (!constructor) {
-
-
-    // TODO - we don't appear to be calling the constructor
-    //  see demo/class-private.js (which is public for now)
-
-
     F = CreateBuiltinFunction(
       {
         *Construct($, args, newTarget) {
@@ -537,15 +611,20 @@ export function* ClassDefinitionEvaluation(
           }
           const F = $.getActiveFunctionObject()!;
           Assert(IsFunc(newTarget));
+          let result: CR<Obj>;
           if (DERIVED.is(F.ConstructorKind)) {
             const func = CastNotAbrupt(F.GetPrototypeOf($));
             if (!IsConstructor(func)) {
               return $.throw('TypeError', 'Invalid constructor');
             }
-            return yield* Construct($, func, args, newTarget);
+            result = yield* Construct($, func, args, newTarget);
           } else {
-            return yield* OrdinaryCreateFromConstructor($, newTarget, '%Object.prototype%');
+            result = yield* OrdinaryCreateFromConstructor($, newTarget, '%Object.prototype%');
           }
+          if (IsAbrupt(result)) return result;
+          const status = yield* InitializeInstanceElements($, result, F);
+          if (IsAbrupt(status)) return status;
+          return result;
         },
       }, 0, className, $.getRealm()!, constructorParent);
   } else {
@@ -587,7 +666,7 @@ export function* ClassDefinitionEvaluation(
             || element.Set && prev.Set
         ) {
           abrupt = $.throw('SyntaxError',
-                           `Identifier '#${element.Key.Description}' has already been declared`);
+                           `Identifier '${element.Key}' has already been declared`);
         } else {
           const combined = {
             Key: element.Key,

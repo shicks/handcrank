@@ -11,6 +11,7 @@ import { Func } from './func';
 import { Obj } from './obj';
 import { ToBoolean } from './abstract_conversion';
 import { IsExtensible } from './abstract_compare';
+import { trimInternal } from './util';
 
 /**
  * 6.2.7 The Environment Record Specification Type
@@ -305,7 +306,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    */
   override *SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
     if (!this.bindings.has(N)) {
-      if (S) return $.throw('ReferenceError');
+      if (S) return $.throw('ReferenceError', `${N} is not defined`);
       Assert(!IsAbrupt(this.CreateMutableBinding($, N, true)));
       Assert(!IsAbrupt(yield* this.InitializeBinding($, N, V)));
       return UNUSED;
@@ -313,14 +314,16 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
 
     const binding = this.bindings.get(N)!;
     S ||= binding.Strict;
-    if (!binding.Initialized) return $.throw('ReferenceError');
+    if (!binding.Initialized) {
+      return $.throw('ReferenceError', `Cannot access '${N}' before initialization`);
+    }
     if (binding instanceof MutableBinding) {
       binding.Value = V;
       (binding as UninitializedBinding).Initialized = true;
       return UNUSED;
     }
     // Assert: Attempt to change value of an immutable binding
-    if (S) return $.throw('TypeError');
+    if (S) return $.throw('TypeError', `Assignment to constant variable '${N}'`);
     return UNUSED;
   }
 
@@ -338,7 +341,9 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
   override *GetBindingValue($: VM, N: string, _S: boolean): ECR<Val> {
     Assert(this.bindings.has(N));
     const binding = this.bindings.get(N)!;
-    if (!binding.Initialized) return $.throw('ReferenceError', '');
+    if (!binding.Initialized) {
+      return $.throw('ReferenceError', `Cannot access '${N}' before initialization`);
+    }
     return binding.Value;
   }
 
@@ -531,7 +536,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    * Record envRec takes arguments N (a String), V (an ECMAScript
    * language value), and S (a Boolean) and returns either a normal
    * completion containing unused or a throw completion. It attempts
-   * to set the value of the Environment Record\'s associated binding
+   * to set the value of the Environment Record's associated binding
    * object's property whose name is N to the value V. A property
    * named N normally already exists but if it does not or is not
    * currently writable, error handling is determined by S. It
@@ -541,7 +546,9 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
     const bindingObject = this.BindingObject;
     const stillExists = HasProperty($, bindingObject, N);
     if (IsAbrupt(stillExists)) return stillExists;
-    if (!stillExists && S) return $.throw('ReferenceError');
+    if (!stillExists && S) {
+      return $.throw('ReferenceError', `Property '${N}' no longer exists`);
+    }
     const result = yield* Set$($, bindingObject, N, V, S);
     if (IsAbrupt(result)) return result;
     return UNUSED;
@@ -564,7 +571,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
     if (IsAbrupt(value)) return value;
     if (!value) {
       if (!S) return undefined;
-      return $.throw('ReferenceError');
+      return $.throw('ReferenceError', `Property '${N}' does not exist`);
     }
     return yield* Get($, bindingObject, N);
   }
@@ -690,7 +697,9 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
    */
   BindThisValue($: VM, V: Val): CR<Val> {
     Assert(this.ThisBindingStatus !== LEXICAL);
-    if (this.ThisBindingStatus === INITIALIZED) return $.throw('ReferenceError');
+    if (this.ThisBindingStatus === INITIALIZED) {
+      return $.throw('ReferenceError', `'this' already initialized`);
+    }
     this.ThisValue = V;
     this.ThisBindingStatus = INITIALIZED;
     return V;
@@ -730,7 +739,12 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
    */
   override GetThisBinding($: VM): CR<Val> {
     Assert(this.ThisBindingStatus !== LEXICAL);
-    if (this.ThisBindingStatus === UNINITIALIZED) return $.throw('ReferenecError');
+    if (this.ThisBindingStatus === UNINITIALIZED) {
+      return $.throw(
+        'ReferenceError', trimInternal`
+        Must call super constructor in derived class before accessing
+        'this' or returning from derived constructor`);
+    }
     return this.ThisValue;
   }
 

@@ -1,7 +1,8 @@
 class C {
-  x = 1;
+  #x = 1;
+  #y() {}
   foo() {
-    console.log(this.x++);
+    console.log(this.#x++);
   }
 }
 

@@ -1,19 +1,20 @@
 import { CR, CastNotAbrupt, IsAbrupt, ThrowCompletion } from './completion_record';
 import { Val } from './val';
 import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext, ResolveThisBinding } from './execution_context';
-import { EMPTY, NOT_APPLICABLE, UNRESOLVABLE, UNUSED } from './enums';
+import { EMPTY, NOT_APPLICABLE, UNINITIALIZED, UNRESOLVABLE, UNUSED } from './enums';
 import { NodeType, NodeMap, Node, Esprima, preprocess, Source } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
 import { InitializeHostDefinedRealm, RealmAdvice, RealmRecord, getIntrinsicName } from './realm_record';
 import { ParseScript, ScriptEvaluation } from './script_record';
 import * as ESTree from 'estree';
 import { Obj, OrdinaryObjectCreate } from './obj';
-import { EnvironmentRecord } from './environment_record';
+import { EnvironmentRecord, FunctionEnvironmentRecord } from './environment_record';
 import { HasValueField, propWC } from './property_descriptor';
 import { Assert } from './assert';
 import { Func, IsFunc } from './func';
 import { ArrayExoticObject } from './exotic_array';
 import { PrivateEnvironmentRecord } from './private_environment_record';
+import { IsConstructor } from './abstract_compare';
 
 export type Yield = {yield: Val};
 export type EvalGen<T> = Generator<Yield|undefined, T, CR<Val>|undefined>;
@@ -147,13 +148,23 @@ export class VM {
         let func = frame.Function?.OwnProps.get('name')?.Value;
         if (!func) func = frame.Function?.InternalName;
         if (func) {
-          const thisValue = ResolveThisBinding(this);
-          if (!IsAbrupt(thisValue) && thisValue instanceof Obj) {
-            // TODO - read internal name from `this`?
-            const className =
-              (thisValue!.OwnProps?.get('constructor') as unknown as Obj)
-              ?.OwnProps?.get('name')?.Value;
-            if (className) func = `${String(className)}.${String(func)}`;
+          const thisEnv = frame.GetThisEnvironment();
+          if (IsConstructor(frame.Function)) {
+            func = `new ${String(func)}`;
+          } else if (
+            thisEnv instanceof FunctionEnvironmentRecord &&
+              thisEnv.ThisBindingStatus === UNINITIALIZED
+          ) {
+            func = `UNINITIALIZED_THIS.${String(func)}`;
+          } else {
+            const thisValue = ResolveThisBinding(this);
+            if (!IsAbrupt(thisValue) && thisValue instanceof Obj) {
+              // TODO - read internal name from `this`?
+              const className =
+                (thisValue!.OwnProps?.get('constructor') as unknown as Obj)
+                ?.OwnProps?.get('name')?.Value;
+              if (className) func = `${String(className)}.${String(func)}`;
+            }
           }
         }
         const lineCol = currentNode.loc?.start ?

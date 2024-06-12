@@ -4,7 +4,7 @@ import { Call, CopyDataProperties, CreateDataProperty, Get, GetFunctionRealm } f
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { IsFunc, SetFunctionName, type Func } from './func';
-import { PrivateElement, PrivateName } from './private_environment_record';
+import { PrivateElement, PrivateName, ResolvePrivateIdentifier } from './private_environment_record';
 import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor, methodName, propWEC } from './property_descriptor';
 import { Slots, hasAnyFields, memoize } from './slots';
 import { GetSourceText, IsAnonymousFunctionDefinition } from './static/functions';
@@ -1081,7 +1081,7 @@ export function* EvaluatePropertyKey($: VM, prop: PropertyLike|ESTree.MemberExpr
   } else if (key.type === 'Literal') {
     return String(key.value);
   } else if (key.type === 'PrivateIdentifier') {
-    return new PrivateName(key.name);
+    return ResolvePrivateIdentifier($.getRunningContext().PrivateEnvironment!, key.name);
   } else {
     throw new Error(`bad key type for non-computed property: ${key.type}`);
   }

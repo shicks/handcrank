@@ -896,7 +896,7 @@ export function PrivateFieldAdd($: VM, O: Obj, P: PrivateName, value: Val): CR<U
   const status = HostEnsureCanAddPrivateElement($, O);
   if (IsAbrupt(status)) return status;
   if (O.PrivateElements.has(P)) {
-    return $.throw('TypeError', `Identifier '#${P}' has already been declared`);
+    return $.throw('TypeError', `Identifier '${P}' has already been declared`);
   }
   O.PrivateElements.set(P, {Key: P, Kind: FIELD, Value: value});
   return UNUSED;
@@ -927,7 +927,7 @@ export function PrivateMethodOrAccessorAdd($: VM, O: Obj, method: PrivateElement
   const status = HostEnsureCanAddPrivateElement($, O);
   if (IsAbrupt(status)) return status;
   if (O.PrivateElements.has(method.Key)) {
-    return $.throw('TypeError', `Identifier '#${method.Key}' has already been declared`);
+    return $.throw('TypeError', `Identifier '${method.Key}' has already been declared`);
   }
   O.PrivateElements.set(method.Key, method);
   return UNUSED;
@@ -983,13 +983,13 @@ export function* PrivateGet($: VM, O: Obj, P: PrivateName): ECR<Val> {
   const entry = PrivateElementFind(O, P);
   if (EMPTY.is(entry)) {
     return $.throw('TypeError',
-                   `Cannot read private member #${P
+                   `Cannot read private member ${P
                     } from an object whose class did not declare it`);
   }
   if (!IsPrivateElementAccessor(entry)) {
     return entry.Value;
   }
-  if (entry.Get == null) return $.throw('TypeError', `'#${P}' was defined without a getter`);
+  if (entry.Get == null) return $.throw('TypeError', `'${P}' was defined without a getter`);
   return yield* Call($, entry.Get, O);
 }
 
@@ -1018,15 +1018,15 @@ export function* PrivateSet($: VM, O: Obj, P: PrivateName, value: Val): ECR<UNUS
   const entry = PrivateElementFind(O, P);
   if (EMPTY.is(entry)) {
     return $.throw('TypeError',
-                   `Cannot write private member #${P
+                   `Cannot write private member ${P
                     } to an object whose class did not declare it`);
   }
   if (IsPrivateElementField(entry)) {
     entry.Value = value;
   } else if (IsPrivateElementMethod(entry)) {
-    return $.throw('TypeError', `Private method #${P} is not writable`);
+    return $.throw('TypeError', `Private method ${P} is not writable`);
   } else {
-    if (entry.Set == null) return $.throw('TypeError', `'#${P}' was defined without a setter`);
+    if (entry.Set == null) return $.throw('TypeError', `'${P}' was defined without a setter`);
     const status = yield* Call($, entry.Set, O, [value]);
     if (IsAbrupt(status)) return status;
   }

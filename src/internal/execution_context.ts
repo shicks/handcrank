@@ -107,6 +107,20 @@ export abstract class ExecutionContext {
     this.isRunning = true;
     // TODO ???
   }
+
+  GetThisEnvironment(): EnvironmentRecord {
+    let env = this.LexicalEnvironment;
+    Assert(env instanceof EnvironmentRecord); // NOTE: this assert not in spec
+    // NOTE: The loop in step 2 will always terminate because the list
+    // of environments always ends with the global environment which has
+    // a this binding.
+    for (;;) {
+      const exists = env.HasThisBinding();
+      if (exists) return env;
+      Assert(env.OuterEnv != null);
+      env = env.OuterEnv;
+    }
+  }
 }
 
 /**
@@ -228,17 +242,7 @@ export function ResolveBinding($: VM, name: string,
  * following steps when called:
  */
 export function GetThisEnvironment($: VM): EnvironmentRecord {
-  let env = GetLexicalEnvironment($);
-  Assert(env instanceof EnvironmentRecord); // NOTE: this assert not in spec
-  // NOTE: The loop in step 2 will always terminate because the list
-  // of environments always ends with the global environment which has
-  // a this binding.
-  for (;;) {
-    const exists = env.HasThisBinding();
-    if (exists) return env;
-    Assert(env.OuterEnv != null);
-    env = env.OuterEnv;
-  }
+  return $.getRunningContext().GetThisEnvironment();
 }
 
 /**

@@ -75,5 +75,7 @@ browser or on the server.
         - [x] switch
         - [x] with
     - [x] classes
-        - [ ] class fields
-        - [ ] private fields
+        - [x] class fields
+        - [x] private fields
+        - [ ] super
+    - [ ] use strict
