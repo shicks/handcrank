@@ -1,22 +1,25 @@
 /** @fileoverview 15.7 Class Definitions */
 
 import { IsConstructor } from './abstract_compare';
+import { ToPropertyKey } from './abstract_conversion';
 import { Call, Construct, DefineField, Get, InitializeInstanceElements, PrivateMethodOrAccessorAdd } from './abstract_object';
 import { Assert } from './assert';
 import { InitializeBoundName } from './binding';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { ACCESSOR, BASE, DERIVED, EMPTY, METHOD, NON_LEXICAL_THIS, UNUSED } from './enums';
-import { DeclarativeEnvironmentRecord } from './environment_record';
-import { CreateBuiltinFunction, DefineMethod, Func, FunctionDeclarationInstantiation, IsFunc, MakeClassConstructor, MakeConstructor, MakeMethod, MethodDefinitionEvaluation, OrdinaryFunctionCreate, SetFunctionName } from './func';
+import { DeclarativeEnvironmentRecord, FunctionEnvironmentRecord } from './environment_record';
+import { GetNewTarget, GetThisEnvironment } from './execution_context';
+import { ArgumentListEvaluation, CreateBuiltinFunction, DefineMethod, Func, FunctionDeclarationInstantiation, IsFunc, MakeClassConstructor, MakeConstructor, MakeMethod, MethodDefinitionEvaluation, OrdinaryFunctionCreate, SetFunctionName } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
 import { EvaluatePropertyKey, Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
 import { IsPrivateElement, IsPrivateElementAccessor, PrivateElement, PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
-import { GetValue } from './reference_record';
+import { GetValue, ReferenceRecord } from './reference_record';
 import { Evaluation_BlockLike } from './statements';
 import { GetSourceText } from './static/functions';
+import { IsStrictMode } from './static/scope';
 import { ClassElement } from './tree';
-import { Val } from './val';
-import { DebugString, ECR, Plugin, VM } from './vm';
+import { PropertyKey, Val } from './val';
+import { DebugString, ECR, Plugin, VM, when } from './vm';
 import * as ESTree from 'estree';
 
 export const classes: Plugin = {
@@ -25,6 +28,8 @@ export const classes: Plugin = {
   syntax: {
     Evaluation(on) {
       on(['ClassDeclaration', 'ClassExpression'], Evaluation_ClassExpression);
+      on('MemberExpression', when(n => n.object.type === 'Super', Evaluation_SuperProperty));
+      on('CallExpression', when(n => n.callee.type === 'Super', Evaluation_SuperCall));
     },
     NamedEvaluation(on) {
       /**
@@ -101,7 +106,23 @@ class ClassStaticBlockDefinitionRecord {
  * 4. If the source text matched by this SuperProperty is strict mode
  *    code, let strict be true; else let strict be false.
  * 5. Return ? MakeSuperPropertyReference(actualThis, propertyKey, strict).
- * 
+ */
+export function* Evaluation_SuperProperty(
+  $: VM,
+  node: ESTree.MemberExpression,
+): ECR<ReferenceRecord> {
+  Assert(node.object.type === 'Super');
+  const env = GetThisEnvironment($);
+  const actualThis = env.GetThisBinding($);
+  if (IsAbrupt(actualThis)) return actualThis;
+  const propertyKey = yield* EvaluatePropertyKey($, node);
+  if (IsAbrupt(propertyKey)) return propertyKey;
+  const strict = IsStrictMode(node);
+  Assert(!(propertyKey instanceof PrivateName));
+  return MakeSuperPropertyReference($, actualThis, propertyKey, strict);
+}
+
+/**
  * SuperCall : super Arguments
  * 1. Let newTarget be GetNewTarget().
  * 2. Assert: newTarget is an Object.
@@ -116,12 +137,26 @@ class ClassStaticBlockDefinitionRecord {
  * 11. Perform ? InitializeInstanceElements(result, F).
  * 12. Return result.
  */
-export function* Evaluation_Super($: VM, node: ESTree.Super): ECR<Val> {
-  // NOTE: This is tricky because we need more context!!
-  // By the time we're here, it's already too late...
-  // Essentially, MemberExpression and Call need to recognize super and bail out.
-  // Alternatively, we could try to work beckwards by returning some sort of
-  // exotic object that will getprop and call correctly???
+function* Evaluation_SuperCall(
+  $: VM,
+  node: ESTree.CallExpression,
+): ECR<Obj> {
+  const newTarget = GetNewTarget($);
+  Assert(IsFunc(newTarget));
+  const func = GetSuperConstructor($);
+  const argList = yield* ArgumentListEvaluation($, node.arguments);
+  if (IsAbrupt(argList)) return argList;
+  if (!IsConstructor(func)) return $.throw('TypeError', 'super is not a constructor');
+  const result = yield* Construct($, func, argList, newTarget);
+  if (IsAbrupt(result)) return result;
+  const thisER = GetThisEnvironment($);
+  Assert(thisER instanceof FunctionEnvironmentRecord);
+  CastNotAbrupt(thisER.BindThisValue($, result));
+  const F = thisER.FunctionObject;
+  Assert(IsFunc(F));
+  const status = yield* InitializeInstanceElements($, result, F);
+  if (IsAbrupt(status)) return status;
+  return result;
 }
 
 /**
@@ -138,6 +173,13 @@ export function* Evaluation_Super($: VM, node: ESTree.Super): ECR<Val> {
  * 5. Let superConstructor be ! activeFunction.[[GetPrototypeOf]]().
  * 6. Return superConstructor.
  */
+function GetSuperConstructor($: VM): Val {
+  const envRec = GetThisEnvironment($);
+  Assert(envRec instanceof FunctionEnvironmentRecord);
+  const activeFunction = envRec.FunctionObject;
+  Assert(IsFunc(activeFunction));
+  return CastNotAbrupt(activeFunction.GetPrototypeOf($));
+}
 
 /**
  * 13.3.7.3 MakeSuperPropertyReference ( actualThis, propertyKey, strict )
@@ -155,7 +197,19 @@ export function* Evaluation_Super($: VM, node: ESTree.Super): ECR<Val> {
  *    [[ReferencedName]]: propertyKey, [[Strict]]: strict,
  *    [[ThisValue]]: actualThis }.
  */
-
+function MakeSuperPropertyReference(
+  $: VM,
+  actualThis: Val,
+  propertyKey: PropertyKey,
+  strict: boolean,
+): CR<ReferenceRecord> {
+  const env = GetThisEnvironment($);
+  Assert(env.HasSuperBinding());
+  Assert(env instanceof FunctionEnvironmentRecord);
+  const baseValue = env.GetSuperBase($);
+  if (IsAbrupt(baseValue)) return baseValue;
+  return new ReferenceRecord(baseValue, propertyKey, strict, actualThis);
+}
 
 /**
  * 15.7.4 Static Semantics: IsStatic

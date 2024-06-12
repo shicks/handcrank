@@ -2134,14 +2134,13 @@ export function* EvaluateCall(
  * 4. Assert: restSub is a possibly empty List.
  * 5. Return the list-concatenation of « firstSub » and restSub.
  */
-function* ArgumentListEvaluation(
+export function* ArgumentListEvaluation(
   $: VM,
   argList: Array<ESTree.Expression|ESTree.SpreadElement>,
 ): EvalGen<CR<Val[]>> {
   const list: Val[] = [];
   for (const arg of argList) {
     if (arg.type === 'SpreadElement') {
-      // TODO - we haven't implemented iterators yet
       const spreadObj = yield* $.evaluateValue(arg.argument);
       if (IsAbrupt(spreadObj)) return spreadObj;
       const iteratorRecord = yield* GetIterator($, spreadObj, SYNC);

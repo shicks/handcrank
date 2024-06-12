@@ -1,4 +1,4 @@
-import { Plugin, just } from './vm';
+import { ECR, Plugin, VM, just, when } from './vm';
 import { EMPTY, NOT_APPLICABLE } from './enums';
 import { Val } from './val';
 import { Abrupt, CR, CompletionType, IsAbrupt } from './completion_record';
@@ -12,6 +12,7 @@ import { Evaluation_ArrayExpression } from './exotic_array';
 import { Evaluation_ConditionalExpression, Evaluation_SequenceExpression } from './control_flow';
 import { BindingInitialization_ArrayPattern, BindingInitialization_Identifier, BindingInitialization_MemberExpression, BindingInitialization_ObjectPattern } from './binding';
 import { IsStrictMode } from './static/scope';
+import * as ESTree from 'estree';
 
 // TODO - split out basic from advanced syntax??
 
@@ -41,15 +42,7 @@ export const syntax: Plugin = {
       //on('Literal', when(n.value instanceof RegExp) (n) => {throw'13.2.7.3'});
       on('TemplateLiteral', () => {throw 'Not Implemented: 13.2.8.6'});
       /** 13.3.2.1 MemberExpression */
-      on('MemberExpression', function*($, n) {
-        const baseValue = yield* $.evaluateValue(n.object);
-        if (IsAbrupt(baseValue)) return baseValue;
-        const strict = IsStrictMode(n);
-        // TODO - handle super, imports, and calls?  (CallExpression productions)
-        const propertyKey = yield* EvaluatePropertyKey($, n);
-        if (IsAbrupt(propertyKey)) return propertyKey;
-        return new ReferenceRecord(baseValue, propertyKey, strict, EMPTY);
-      });
+      on('MemberExpression', when(n => n.object.type !== 'Super', Evaluation_MemberExpression));
       on(['BlockStatement', 'Program'], Evaluation_BlockLike);
       on('VariableDeclaration', ($, n) => {
         if (n.kind !== 'var') {
@@ -69,7 +62,7 @@ export const syntax: Plugin = {
         if (IsAbrupt(exprValue)) return exprValue;
         return new Abrupt(CompletionType.Throw, exprValue, EMPTY);
       });
-      on('CallExpression', Evaluation_CallExpression);
+      on('CallExpression', when(n => n.callee.type !== 'Super', Evaluation_CallExpression));
       on('NewExpression', Evaluation_NewExpression);
       on('SequenceExpression', Evaluation_SequenceExpression);
       on('ConditionalExpression', Evaluation_ConditionalExpression);
@@ -85,3 +78,13 @@ export const syntax: Plugin = {
     },
   },
 };
+
+function* Evaluation_MemberExpression($: VM, n: ESTree.MemberExpression): ECR<ReferenceRecord> {
+  const baseValue = yield* $.evaluateValue(n.object);
+  if (IsAbrupt(baseValue)) return baseValue;
+  const strict = IsStrictMode(n);
+  // TODO - handle super, imports, and calls?  (CallExpression productions)
+  const propertyKey = yield* EvaluatePropertyKey($, n);
+  if (IsAbrupt(propertyKey)) return propertyKey;
+  return new ReferenceRecord(baseValue, propertyKey, strict, EMPTY);
+}
