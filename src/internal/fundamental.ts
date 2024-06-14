@@ -1192,7 +1192,6 @@ export const booleanObject: Plugin = {
          * 1. Return ? thisBooleanValue(this value).
          */
         'valueOf': method(function*($, thisValue) {
-          debugger;
           return thisBooleanValue($, thisValue);
         }),
       });

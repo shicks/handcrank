@@ -257,7 +257,6 @@ export function* Evaluation_VariableStatement($: VM, n: VariableDeclaration): Ev
             value = yield* $.evaluateValue(binding.init);
           }
           if (IsAbrupt(value)) return value;
-          debugger;
           CastNotAbrupt(yield* PutValue($, lhs, value));
         }
         break;

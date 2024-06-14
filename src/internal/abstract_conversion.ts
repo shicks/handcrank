@@ -19,6 +19,7 @@ import { Call, Get, GetMethod } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { NUMBER, STRING } from './enums';
+import { StringCreate } from './exotic_string';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { PropertyKey, Val } from './val';
 import { ECR, VM } from './vm';
@@ -536,7 +537,7 @@ export function ToObject($: VM, argument: Val): CR<Obj> {
   switch (typeof argument) {
     case 'boolean': return makeWrapper($, '%Boolean.prototype%', {BooleanData: argument});
     case 'number': return makeWrapper($, '%Number.prototype%', {NumberData: argument});
-    case 'string': return makeWrapper($, '%String.prototype%', {StringData: argument});
+    case 'string': return StringCreate(argument, $.getIntrinsic('%String.prototype%'));
     case 'symbol': return makeWrapper($, '%Symbol.prototype%', {SymbolData: argument});
     case 'bigint': return makeWrapper($, '%BigInt.prototype%', {BigIntData: argument});
   }

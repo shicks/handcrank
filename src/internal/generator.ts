@@ -115,7 +115,6 @@ export function* EvaluateGeneratorBody(
   _thisArg: Val,
   argumentsList: Val[],
 ): ECR<Obj /*never*/> {
-  //debugger;
   const functionObject = this;
   const instantiation =
     yield* FunctionDeclarationInstantiation($, functionObject, argumentsList);
@@ -177,7 +176,6 @@ export function InstantiateGeneratorFunctionObject(
   env: EnvironmentRecord,
   privateEnv: PrivateEnvironmentRecord|null,
 ): Func {
-  //debugger;
   const name = node.id?.name || 'default';
   const sourceText = GetSourceText(node);
   const F = OrdinaryFunctionCreate(
@@ -618,8 +616,7 @@ export function GeneratorValidate(
   // TODO - RequireInternalSlot ???
   if (generator.GeneratorBrand !== generatorBrand) return $.throw('TypeError', 'bad brand');
   const state = generator.GeneratorState;
-  if (state === GeneratorState.executing) //return $.throw('TypeError', 'already executing');
-    {debugger;throw new Error(`${generator.InternalName} already executing`);}
+  if (state === GeneratorState.executing) return $.throw('TypeError', 'already executing');
   Assert(state);
   return state;
 }
@@ -676,7 +673,6 @@ export function* GeneratorResume(
   const iter = genContext.CodeEvaluationState;
   Assert(iter);
   // yield; // ???
-  debugger;
   let iterResult = iter.next(value);
   while (!iterResult.done && !iterResult.value) {
     yield;

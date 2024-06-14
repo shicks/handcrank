@@ -12,7 +12,7 @@ import { defineProperties } from './realm_record';
 import { GetValue, IsPrivateReference, IsPropertyReference, IsUnresolvableReference, PutValue, ReferenceRecord } from './reference_record';
 import { PropertyKey, Val } from './val';
 import { DebugString, ECR, EvalGen, Plugin, VM, when } from './vm';
-import { BinaryExpression, Expression, UnaryExpression, UpdateExpression } from 'estree';
+import { BinaryExpression, Expression, LogicalExpression, UnaryExpression, UpdateExpression } from 'estree';
 
 declare const ResolvePrivateIdentifier: any;
 declare const PrivateElementFind: any;
@@ -28,7 +28,7 @@ export const arithmetic: Plugin = {
       on('UpdateExpression',
          when(n => n.operator === '++' || n.operator === '--',
               Evaluate_UpdateExpression));
-      on('BinaryExpression', Evaluate_BinaryExpression);
+      on(['BinaryExpression', 'LogicalExpression'], Evaluate_BinaryExpression);
     },
   },
 
@@ -119,7 +119,10 @@ export function Evaluate_UnaryExpression($: VM, n: UnaryExpression): ECR<Val> {
   }
 }
 
-export function Evaluate_BinaryExpression($: VM, n: BinaryExpression): ECR<Val> {
+export function Evaluate_BinaryExpression(
+  $: VM,
+  n: BinaryExpression|LogicalExpression,
+): ECR<Val> {
   if (STRNUM_OPS.has(n.operator)) {
     return EvaluateStringOrNumericBinaryExpression($, n.left, n.operator, n.right);
   } else if (REL_OPS.has(n.operator)) {

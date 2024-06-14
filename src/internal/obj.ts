@@ -10,7 +10,7 @@ import { Slots, hasAnyFields, memoize } from './slots';
 import { GetSourceText, IsAnonymousFunctionDefinition } from './static/functions';
 import { PropertyLike } from './tree';
 import { PropertyKey, Val } from './val';
-import { ECR, VM } from './vm';
+import { DebugString, ECR, VM } from './vm';
 import * as ESTree from 'estree';
 
 declare global {

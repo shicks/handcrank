@@ -127,7 +127,6 @@ export function* BindingInitialization_ObjectPattern(
   value: Val,
   environment: EnvironmentRecord|undefined,
 ): ECR<UNUSED> {
-  debugger;
   const coercible = RequireObjectCoercible($, value);
   if (IsAbrupt(coercible)) return coercible;
   // excluded names is for rest pattern

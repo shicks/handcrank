@@ -2,7 +2,7 @@ import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { Val } from './val';
 import { EMPTY, INITIALIZED, LEXICAL, UNINITIALIZED, UNRESOLVABLE, UNUSED } from './enums';
-import { ECR, VM, run } from './vm';
+import { DebugString, ECR, VM, run } from './vm';
 import { ReferenceRecord } from './reference_record';
 import { ModuleRecord } from './module_record';
 import { IsDataDescriptor } from './property_descriptor';
@@ -305,6 +305,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * true. It performs the following steps when called:
    */
   override *SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
+    //$.log(`Binding: Set ${N} <- ${DebugString(V)}`);
     if (!this.bindings.has(N)) {
       if (S) return $.throw('ReferenceError', `${N} is not defined`);
       Assert(!IsAbrupt(this.CreateMutableBinding($, N, true)));
@@ -344,6 +345,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
     if (!binding.Initialized) {
       return $.throw('ReferenceError', `Cannot access '${N}' before initialization`);
     }
+    //$.log(`Binding: Get ${N} -> ${DebugString(binding.Value)}`);
     return binding.Value;
   }
 

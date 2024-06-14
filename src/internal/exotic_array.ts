@@ -265,7 +265,6 @@ function ArraySetLength($: VM, A: ArrayExoticObject, Desc: PropertyDescriptor): 
   if (!HasValueField(Desc)) return OrdinaryDefineOwnProperty($, A, 'length', Desc);
 
   // TODO - DefinePropertyDescriptor -> generator???
-  debugger;
 
   const newLen = run(ToUint32($, Desc.Value));
   if (IsAbrupt(newLen)) return newLen;

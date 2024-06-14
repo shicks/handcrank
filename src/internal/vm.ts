@@ -16,6 +16,7 @@ import { ArrayExoticObject } from './exotic_array';
 import { PrivateEnvironmentRecord } from './private_environment_record';
 import { IsConstructor } from './abstract_compare';
 import { IsStrictMode } from './static/scope';
+import { GetSourceText } from './static/functions';
 
 export type Yield = {yield: Val};
 export type EvalGen<T> = Generator<Yield|undefined, T, CR<Val>|undefined>;
@@ -52,6 +53,50 @@ export function runImmediate<T>(gen: EvalGen<T>) {
   const result = gen.next();
   Assert(result.done);
   return result.value;
+}
+
+interface RunAsyncOptions {
+  maxSteps?: number;
+  timeStepMillis?: number;
+  timeoutMillis?: number;
+}
+export function runAsync<T>(
+  iter: Generator<any, T, any>,
+  {
+    maxSteps = Infinity,
+    timeStepMillis = 10,
+    timeoutMillis = Infinity,
+  }: RunAsyncOptions = {}): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let globalSteps = 0;
+    const globalStart = Date.now();
+    const pump = () => {
+      const start = Date.now();
+      let poll = 0;
+      let result;
+      while ((result = iter.next()), !result.done) {
+        // TODO - throw if we get a top-level yield???
+        if ((++poll & 0x1f) === 0) {
+          const now = Date.now();
+          if (now - start >= timeStepMillis) break;
+          if (now - globalStart >= timeoutMillis) {
+            reject(new Error(`Timeout after ${globalSteps} steps`));
+            return;
+          }
+        }
+        if (++globalSteps > maxSteps) {
+          reject(new Error(`Exceeded ${maxSteps} steps`));
+          return;
+        }
+      }
+      if (result.done) {
+        resolve(result.value);
+      } else {
+        setTimeout(pump);
+      }
+    };
+    pump();
+  });
 }
 
 export class VM {
@@ -195,6 +240,7 @@ export class VM {
     if (IsAbrupt(result)) return result;
     if (EMPTY.is(result)) return undefined;
     if (result instanceof ReferenceRecord) return yield* GetValue(this, result);
+    //this.log(`=> ${DebugString(result as any)}`);
     return result;
   }
 
@@ -253,9 +299,22 @@ export class VM {
       yield* GetValue(this, result);
   }
 
-  Evaluation(n: Node): ECR<Val|ReferenceRecord|EMPTY> {
+  log(msg: string) {
+    console.log(`${this._indent}${msg.replace(/\n/g, `\n${this._indent}  `)}`);
+  }
+  _indent = '';
+  indent() { this._indent += '  '; }
+  dedent() { this._indent = this._indent.substring(2); }
+
+  * Evaluation(n: Node): ECR<Val|ReferenceRecord|EMPTY> {
+    yield; // TODO - figure out what to do with this performance-wise.
     this.isStrict = IsStrictMode(n);
-    return this.operate('Evaluation', n, []);
+    //this.log(`Evaluating ${n.type}: ${GetSourceText(n)}`);
+    //this.indent();
+    const result = yield*  this.operate('Evaluation', n, []);
+    //this.dedent();
+    //this.log(`=> ${IsAbrupt(result) ? result.Type : DebugString(result as any)}`);
+    return result;
   }
   NamedEvaluation(n: Node, name: string): ECR<Val> {
     return this.operate('NamedEvaluation', n, [name]);
@@ -408,6 +467,9 @@ export function DebugString(
     const intrinsicName = getIntrinsicName(v);
     if (intrinsicName != null) return intrinsicName;
 
+    if (v.StringData != null) return `String(${JSON.stringify(v.StringData)})`;
+    if (v.NumberData != null) return `Number(${JSON.stringify(v.NumberData)})`;
+    if (v.BooleanData != null) return `Boolean(${JSON.stringify(v.BooleanData)})`;
     if (v.ErrorData != null) return v.ErrorData || 'Error';
     if (IsFunc(v)) {
       const name = v.OwnProps.get('name')?.Value;

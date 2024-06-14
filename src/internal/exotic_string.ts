@@ -10,7 +10,7 @@ import { PropertyDescriptor, PropertyRecord, prop0, propE, propWC } from './prop
 import { defineProperties } from './realm_record';
 import { memoize } from './slots';
 import { PropertyKey, Val } from './val';
-import { ECR, EvalGen, Plugin, VM } from './vm';
+import { DebugString, ECR, EvalGen, Plugin, VM } from './vm';
 
 function IsRegExp(..._args: unknown[]) { return false; }
 declare const RegExpCreate: any;
