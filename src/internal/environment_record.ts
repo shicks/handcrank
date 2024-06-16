@@ -13,6 +13,8 @@ import { ToBoolean } from './abstract_conversion';
 import { IsExtensible } from './abstract_compare';
 import { trimInternal } from './util';
 
+const {} = {DebugString};
+
 /**
  * 6.2.7 The Environment Record Specification Type
  *

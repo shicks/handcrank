@@ -13,6 +13,8 @@ import { PropertyKey, Val } from './val';
 import { DebugString, ECR, VM } from './vm';
 import * as ESTree from 'estree';
 
+const {} = {DebugString};
+
 declare global {
   /**
    * Global interface for defining slots on Obj.  Should be

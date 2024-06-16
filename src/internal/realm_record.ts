@@ -7,6 +7,7 @@ import { RootExecutionContext } from './execution_context';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { PropertyDescriptor, methodName } from './property_descriptor';
 import { VM } from './vm';
+import * as ESTree from 'estree';
 
 /**
  * 9.3 Realms
@@ -43,7 +44,7 @@ export class RealmRecord {
   // NOTE 1: Once a Parse Node becomes unreachable, the corresponding
   // [[Array]] is also unreachable, and it would be unobservable if an
   // implementation removed the pair from the [[TemplateMap]] list.
-  // TemplateMap: TemplateRecord[] = [];
+  TemplateMap = new WeakMap<ESTree.TemplateLiteral, Obj>();
   
   // a List of Records with fields [[Specifier]] (a String) and
   // [[Module]] (a Module Record).  A map from the specifier strings

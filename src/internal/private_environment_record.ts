@@ -18,7 +18,7 @@ declare const PRIVATE_NAME_BRAND: unique symbol;
 export class PrivateName {
   declare [PRIVATE_NAME_BRAND]: never;
   constructor(readonly Description: string) {}
-  override toString(): string {
+  toString(): string {
     return `#${this.Description}`;
   }
 }

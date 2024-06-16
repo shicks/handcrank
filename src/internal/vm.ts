@@ -25,6 +25,7 @@ interface SyntaxOp {
   Evaluation(): ECR<Val|ReferenceRecord|EMPTY>;
   NamedEvaluation(name: string): ECR<Val>;
   LabelledEvaluation(labelSet: string[]): ECR<Val|EMPTY>;
+  ArgumentListEvaluation(): ECR<Val[]>;
   InstantiateFunctionObject(
     env: EnvironmentRecord,
     privateEnv: PrivateEnvironmentRecord|null,
@@ -112,6 +113,7 @@ export class VM {
     Evaluation: {},
     NamedEvaluation: {},
     LabelledEvaluation: {},
+    ArgumentListEvaluation: {},
     InstantiateFunctionObject: {},
     BindingInitialization: {},
   };
@@ -332,6 +334,9 @@ export class VM {
   LabelledEvaluation(n: Node, labelSet: string[]): ECR<Val|EMPTY> {
     return this.operate('LabelledEvaluation', n, [labelSet],
                         () => this.evaluateValue(n));
+  }
+  ArgumentListEvaluation(n: Node): ECR<Val[]> {
+    return this.operate('ArgumentListEvaluation', n, []);
   }
   InstantiateFunctionObject(
     n: Node,

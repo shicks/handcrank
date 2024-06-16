@@ -73,6 +73,9 @@ export const functions: Plugin = {
         return new Abrupt(CompletionType.Return, exprValue, EMPTY);
       });
     },
+    ArgumentListEvaluation(on) {
+      on(['CallExpression', 'NewExpression'], ArgumentListEvaluation_CallExpression);
+    },
   },
 };
 
@@ -1861,7 +1864,7 @@ export function* Evaluation_NewExpression(
   Assert(!EMPTY.is(ref));
   const constructor = yield* GetValue($, ref);
   if (IsAbrupt(constructor)) return constructor;
-  const argList = yield* ArgumentListEvaluation($, node.arguments);
+  const argList = yield* $.ArgumentListEvaluation(node);
   if (IsAbrupt(argList)) return argList;
   if (!IsConstructor(constructor)) {
     return $.throw('TypeError', `${DebugString(ref)} is not a constructor`);
@@ -1922,7 +1925,7 @@ export function* Evaluation_CallExpression(
   //   && ref.ReferencedName === 'eval') {
   // const thisCall = n;
   const tailCall = false; // IsInTailPosition(thisCall);
-  return yield* EvaluateCall($, func, ref, node.arguments, tailCall);
+  return yield* EvaluateCall($, func, ref, node, tailCall);
 }
 
 /**
@@ -1955,7 +1958,7 @@ export function* EvaluateCall(
   func: Val,
   ref: Val|ReferenceRecord,
   // NOTE: "arguments" is not allowed for param names in strict mode
-  args: Array<ESTree.Expression|ESTree.SpreadElement>,
+  callNode: Node,
   tailPosition: boolean,
 ): ECR<Val> {
   let thisValue: Val;
@@ -1970,7 +1973,7 @@ export function* EvaluateCall(
   } else {
     thisValue = undefined;
   }
-  const argList = yield* ArgumentListEvaluation($, args);
+  const argList = yield* $.ArgumentListEvaluation(callNode);
   if (IsAbrupt(argList)) return argList;
   if (typeof func !== 'object') return $.throw('TypeError', `${DebugString(ref)} is not an object`);
   if (!IsCallable(func)) return $.throw('TypeError', `${DebugString(ref)} is not callable`);
@@ -2020,33 +2023,13 @@ export function* EvaluateCall(
  *     b. If next is false, return precedingArgs.
  *     c. Let nextArg be ? IteratorValue(next).
  *     d. Append nextArg to precedingArgs.
- *
- * TODO - template literal is not handled here
- *
- * TemplateLiteral : NoSubstitutionTemplate
- * 1. Let templateLiteral be this TemplateLiteral.
- * 2. Let siteObj be GetTemplateObject(templateLiteral).
- * 3. Return « siteObj ».
- *
- * TemplateLiteral : SubstitutionTemplate
- * 1. Let templateLiteral be this TemplateLiteral.
- * 2. Let siteObj be GetTemplateObject(templateLiteral).
- * 3. Let remaining be ? ArgumentListEvaluation of SubstitutionTemplate.
- * 4. Return the list-concatenation of « siteObj » and remaining.
- *
- * SubstitutionTemplate : TemplateHead Expression TemplateSpans
- * 1. Let firstSubRef be ? Evaluation of Expression.
- * 2. Let firstSub be ? GetValue(firstSubRef).
- * 3. Let restSub be ? SubstitutionEvaluation of TemplateSpans.
- * 4. Assert: restSub is a possibly empty List.
- * 5. Return the list-concatenation of « firstSub » and restSub.
  */
-export function* ArgumentListEvaluation(
+export function* ArgumentListEvaluation_CallExpression(
   $: VM,
-  argList: Array<ESTree.Expression|ESTree.SpreadElement>,
+  node: ESTree.CallExpression,
 ): EvalGen<CR<Val[]>> {
   const list: Val[] = [];
-  for (const arg of argList) {
+  for (const arg of node.arguments) {
     if (arg.type === 'SpreadElement') {
       const spreadObj = yield* $.evaluateValue(arg.argument);
       if (IsAbrupt(spreadObj)) return spreadObj;

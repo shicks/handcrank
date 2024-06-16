@@ -121,6 +121,7 @@ export const test262: Plugin = {
        *     semantics conform to Monotonic Clock.
        */
       def($262, 'start', function*($, ...args): ECR<Val> {
+        throw 'not implemented';
       });
       /**
        * broadcast - a function that takes a SharedArrayBuffer and an
@@ -130,18 +131,21 @@ export const test262: Plugin = {
        * that were started are still running.
        */
       def($262, 'broadcast', function*($, ...args): ECR<Val> {
+        throw 'not implemented';
       });
       /**
        * getReport - a function that reads an incoming string from any
        * agent, and returns it if it exists, or returns null otherwise.
        */
       def($262, 'getReport', function*($, ...args): ECR<Val> {
+        throw 'not implemented';
       });
       /**
        * sleep - a function that takes a millisecond argument and
        * sleeps the execution for approximately that duration.
        */
       def($262, 'sleep', function*($, ...args): ECR<Val> {
+        throw 'not implemented';
       });
       /**
        * monotonicNow - a function that returns a value that conforms
@@ -149,6 +153,7 @@ export const test262: Plugin = {
        * semantics conform to Monotonic Clock.
        */
       def($262, 'monotonicNow', function*($, ...args): ECR<Val> {
+        throw 'not implemented';
       });
     },
   },

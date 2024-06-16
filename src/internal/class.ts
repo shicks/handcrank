@@ -1,7 +1,6 @@
 /** @fileoverview 15.7 Class Definitions */
 
 import { IsConstructor } from './abstract_compare';
-import { ToPropertyKey } from './abstract_conversion';
 import { Call, Construct, DefineField, Get, InitializeInstanceElements, PrivateMethodOrAccessorAdd } from './abstract_object';
 import { Assert } from './assert';
 import { InitializeBoundName } from './binding';
@@ -9,7 +8,7 @@ import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { ACCESSOR, BASE, DERIVED, EMPTY, METHOD, NON_LEXICAL_THIS, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, FunctionEnvironmentRecord } from './environment_record';
 import { GetNewTarget, GetThisEnvironment } from './execution_context';
-import { ArgumentListEvaluation, CreateBuiltinFunction, DefineMethod, Func, FunctionDeclarationInstantiation, IsFunc, MakeClassConstructor, MakeConstructor, MakeMethod, MethodDefinitionEvaluation, OrdinaryFunctionCreate, SetFunctionName } from './func';
+import { CreateBuiltinFunction, DefineMethod, Func, FunctionDeclarationInstantiation, IsFunc, MakeClassConstructor, MakeConstructor, MakeMethod, MethodDefinitionEvaluation, OrdinaryFunctionCreate, SetFunctionName } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
 import { EvaluatePropertyKey, Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
 import { IsPrivateElement, IsPrivateElementAccessor, PrivateElement, PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
@@ -144,7 +143,7 @@ function* Evaluation_SuperCall(
   const newTarget = GetNewTarget($);
   Assert(IsFunc(newTarget));
   const func = GetSuperConstructor($);
-  const argList = yield* ArgumentListEvaluation($, node.arguments);
+  const argList = yield* $.ArgumentListEvaluation(node);
   if (IsAbrupt(argList)) return argList;
   if (!IsConstructor(func)) return $.throw('TypeError', 'super is not a constructor');
   const result = yield* Construct($, func, argList, newTarget);

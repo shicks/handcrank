@@ -12,6 +12,8 @@ import { memoize } from './slots';
 import { PropertyKey, Val } from './val';
 import { DebugString, ECR, EvalGen, Plugin, VM } from './vm';
 
+const {} = {DebugString};
+
 function IsRegExp(..._args: unknown[]) { return false; }
 declare const RegExpCreate: any;
 

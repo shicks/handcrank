@@ -1,7 +1,6 @@
 import { EMPTY } from './enums';
 import { Assert } from './assert';
 import { Val } from './val';
-import { Obj } from './obj';
 
 /**
  * 6.2.4 The Completion Record Specification Type

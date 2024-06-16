@@ -219,7 +219,7 @@ export function* PutValue($: VM, V: ReferenceRecord|Val, W: Val): ECR<UNUSED> {
     return $.throw('ReferenceError', 'Invalid left-hand side in assignment');
   }
   if (IsUnresolvableReference(V)) {
-    if (V.Strict) return $.throw('ReferenceError', `${V.ReferencedName} is not defined`);
+    if (V.Strict) return $.throw('ReferenceError', `${String(V.ReferencedName)} is not defined`);
     Assert(typeof V.ReferencedName !== 'object'); // class bodies are strict.
     const globalObj = GetGlobalObject($);
     const result = yield* Set($, globalObj, V.ReferencedName, W, false);

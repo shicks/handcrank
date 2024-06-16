@@ -7,12 +7,14 @@ import { ReferenceRecord } from './reference_record';
 import { Evaluation_BlockLike, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from './statements';
 import { Evaluation_AssignmentExpression } from './assignment';
 import { Evaluation_CallExpression, Evaluation_NewExpression } from './func';
-import { EvaluatePropertyKey, Evaluation_ObjectExpression, Obj, OrdinaryObjectCreate } from './obj';
+import { EvaluatePropertyKey, Evaluation_ObjectExpression, Obj } from './obj';
 import { Evaluation_ArrayExpression } from './exotic_array';
 import { Evaluation_ConditionalExpression, Evaluation_SequenceExpression } from './control_flow';
 import { BindingInitialization_ArrayPattern, BindingInitialization_Identifier, BindingInitialization_MemberExpression, BindingInitialization_ObjectPattern } from './binding';
 import { IsStrictMode } from './static/scope';
 import * as ESTree from 'estree';
+
+const {} = {DebugString};
 
 // TODO - split out basic from advanced syntax??
 
@@ -40,7 +42,6 @@ export const syntax: Plugin = {
       on('ObjectExpression', Evaluation_ObjectExpression);
       on('ArrayExpression', Evaluation_ArrayExpression);
       //on('Literal', when(n.value instanceof RegExp) (n) => {throw'13.2.7.3'});
-      on('TemplateLiteral', () => {throw 'Not Implemented: 13.2.8.6'});
       /** 13.3.2.1 MemberExpression */
       on('MemberExpression', when(n => n.object.type !== 'Super', Evaluation_MemberExpression));
       on(['BlockStatement', 'Program'], Evaluation_BlockLike);

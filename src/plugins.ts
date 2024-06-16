@@ -10,6 +10,7 @@ import { generators } from './internal/generator';
 import { functions } from './internal/func';
 import { controlFlow } from './internal/control_flow';
 import { classes } from './internal/class';
+import { taggedTemplateLiterals, templateLiterals } from './internal/template';
 import { Plugin } from './internal/vm';
 
 export const full: Plugin = {
@@ -27,6 +28,8 @@ export const full: Plugin = {
     functions,
     controlFlow,
     classes,
+    templateLiterals,
+    taggedTemplateLiterals,
   ],
 };
 
@@ -43,4 +46,6 @@ export {
   functions,
   controlFlow,
   classes,
+  templateLiterals,
+  taggedTemplateLiterals,
 };

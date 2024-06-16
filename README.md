@@ -63,7 +63,7 @@ browser or on the server.
     - [ ] async arrows
     - [x] function calls
     - [x] constructor calls
-- [ ] Syntax
+- [x] Syntax
     - [x] object literals
     - [x] array literals
     - [x] destructuring
@@ -71,7 +71,7 @@ browser or on the server.
     - [x] binary operators
     - [x] unary operators
     - [x] ++ and -- operators
-    - [ ] template literals
+    - [x] template literals
     - [x] control structures
         - [x] for
         - [x] if
@@ -89,4 +89,4 @@ browser or on the server.
 - [ ] Modules
 - [ ] Debugger statement
 - [ ] SPI for host integration
-- [ ] Test-262 integration
+- [x] Test-262 integration
