@@ -1383,22 +1383,30 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
     //          functions that don't have a rest parameter, any parameter
     //          default value initializers, or any destructured parameters.
     //       ii. Let ao be CreateMappedArgumentsObject(func, formals, argumentsList, env).
-    Assert(env instanceof DeclarativeEnvironmentRecord);
-    const ao = strict || !simpleParameterList ?
-      CreateUnmappedArgumentsObject($, argumentsList) :
-      CreateMappedArgumentsObject($, func, formals, argumentsList, env);
     //   c. If strict is true, then
     //       i. Perform ! env.CreateImmutableBinding("arguments", false).
     //       ii. NOTE: In strict mode code early errors prevent attempting to
     //           assign to this binding, so its mutability is not observable.
-    if (strict) CastNotAbrupt(env.CreateImmutableBinding($, 'arguments', false));
     //   d. Else,
     //       i. Perform ! env.CreateMutableBinding("arguments", false).
-    else CastNotAbrupt(env.CreateMutableBinding($, 'arguments', false));
     //   e. Perform ! env.InitializeBinding("arguments", ao).
-    CastNotAbrupt(yield* env.InitializeBinding($, 'arguments', ao));
-    //   f. Let parameterBindings be the list-concatenation of
-    //      parameterNames and « "arguments" ».
+    Assert(env instanceof DeclarativeEnvironmentRecord);
+
+    const ao = () => strict || !simpleParameterList ?
+      CreateUnmappedArgumentsObject($, argumentsList) :
+      CreateMappedArgumentsObject($, func, formals, argumentsList, env);
+
+    // NOTE: The following evaluates arguments eagerly, which is probably a performance hit.
+    // if (strict) CastNotAbrupt(env.CreateImmutableBinding($, 'arguments', false));
+    // else CastNotAbrupt(env.CreateMutableBinding($, 'arguments', false));
+    // CastNotAbrupt(yield* env.InitializeBinding($, 'arguments', ao));
+
+    if (strict) {
+      env.CreateImmutableLazyBinding('arguments', ao, false);
+    } else {
+      env.CreateMutableLazyBinding('arguments', ao, false);
+    }
+
     parameterBindings = [...parameterNames, 'arguments'];
   }
   // 24. Let iteratorRecord be CreateListIteratorRecord(argumentsList).
