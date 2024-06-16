@@ -23,6 +23,7 @@ import { memoize } from './slots';
 import { GetIterator, IteratorStep, IteratorValue } from './abstract_iterator';
 import { functionConstructor } from './fundamental';
 import type { ClassFieldDefinitionRecord } from './class';
+import { CreateMappedArgumentsObject, CreateUnmappedArgumentsObject } from './exotic_arguments';
 
 type Node = ESTree.Node;
 
@@ -198,9 +199,6 @@ declare global {
 
     InitialName?: string;
   }
-
-  // // Slot for exotic mapped arguments object
-  // ParameterMap: slot<Obj|undefined>,
 }
 
 // New interface with various required properties
@@ -1196,7 +1194,7 @@ export function SetFunctionName(
     if (description == null) {
       name = '';
     } else {
-      name = `[%{description}]`;
+      name = `[${description}]`;
     }
   } else if (name instanceof PrivateName) {
     name = name.Description;
@@ -1382,6 +1380,7 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
     //          functions that don't have a rest parameter, any parameter
     //          default value initializers, or any destructured parameters.
     //       ii. Let ao be CreateMappedArgumentsObject(func, formals, argumentsList, env).
+    Assert(env instanceof DeclarativeEnvironmentRecord);
     const ao = strict || !simpleParameterList ?
       CreateUnmappedArgumentsObject($, argumentsList) :
       CreateMappedArgumentsObject($, func, formals, argumentsList, env);
@@ -1812,111 +1811,19 @@ export function CreateBuiltinFunction(
     });
 }
 
-declare global {
-  interface ObjectSlots {
-    // Slots for exotic arguments objects
-    ParameterMap?: Obj|undefined;
-  }
-}
-
 /**
- * 10.4.4.6 CreateUnmappedArgumentsObject ( argumentsList )
- *
- * The abstract operation CreateUnmappedArgumentsObject takes argument
- * argumentsList (a List of ECMAScript language values) and returns an
- * ordinary object. It performs the following steps when called:
- *
- * 1. Let len be the number of elements in argumentsList.
- * 2. Let obj be OrdinaryObjectCreate(%Object.prototype%, « [[ParameterMap]] »).
- * 3. Set obj.[[ParameterMap]] to undefined.
- * 4. Perform ! DefinePropertyOrThrow(obj, "length",
- *      PropertyDescriptor { [[Value]]: 𝔽(len), [[Writable]]: true,
- *                           [[Enumerable]]: false, [[Configurable]]: true }).
- * 5. Let index be 0.
- * 6. Repeat, while index < len,
- *     a. Let val be argumentsList[index].
- *     b. Perform ! CreateDataPropertyOrThrow(obj, ! ToString(𝔽(index)), val).
- *     c. Set index to index + 1.
- * 7. Perform ! DefinePropertyOrThrow(obj, @@iterator,
- *      PropertyDescriptor { [[Value]]: %Array.prototype.values%, [[Writable]]: true,
- *                           [[Enumerable]]: false, [[Configurable]]: true }).
- * 8. Perform ! DefinePropertyOrThrow(obj, "callee",
- *      PropertyDescriptor { [[Get]]: %ThrowTypeError%, [[Set]]: %ThrowTypeError%,
- *                           [[Enumerable]]: false, [[Configurable]]: false }).
- * 9. Return obj.
+ * Returns an internal Func object that should not be exposed to users.
+ * The returned object does _not_ have all the required slots for a
+ * function.
  */
-export function CreateUnmappedArgumentsObject($: VM, argumentsList: Val[]): Obj {
-  const len = argumentsList.length;
-  const props: PropertyRecord = {
-    length: propWC(len),
-    [Symbol.iterator]: propWC($.getIntrinsic('%Array.prototype.values%')),
-    callee: {
-      Get: $.getIntrinsic('%ThrowTypeError%'),
-      Set: $.getIntrinsic('%ThrowTypeError%'),
-      Enumerable: false, Configurable: false,
-    },
-  };
-  for (let index = 0; index < len; index++) {
-    props[String(index)] = propWC(argumentsList[index]);
-  }
-  return OrdinaryObjectCreate({
-    Prototype: $.getIntrinsic('%Object.prototype%'),
-    ParameterMap: undefined,
-  }, props);
+export function MakeInternalClosure(fn: ($: VM, ...args: Val[]) => ECR<Val>): Func {
+  return new (BuiltinFunction())({
+    CallBehavior($: VM, _: Val, args: Val[]) {
+      return fn($, ...args);
+    }
+  } as any, {});
+  
 }
-
-/**
- * 10.4.4.7 CreateMappedArgumentsObject ( func, formals, argumentsList, env )
- *
- * The abstract operation CreateMappedArgumentsObject takes arguments
- * func (an Object), formals (a Parse Node), argumentsList (a List of
- * ECMAScript language values), and env (an Environment Record) and
- * returns an arguments exotic object. It performs the following steps
- * when called:
- */
-export function CreateMappedArgumentsObject($: VM, func: Func, formals: Node[],
-                                            argumentsList: Val[],
-                                            env: EnvironmentRecord): Obj {
-  // 1. Assert: formals does not contain a rest parameter, any binding patterns, or any initializers. It may contain duplicate identifiers.
-  // 2. Let len be the number of elements in argumentsList.
-  // 3. Let obj be MakeBasicObject(« [[Prototype]], [[Extensible]], [[ParameterMap]] »).
-  // 4. Set obj.[[GetOwnProperty]] as specified in 10.4.4.1.
-  // 5. Set obj.[[DefineOwnProperty]] as specified in 10.4.4.2.
-  // 6. Set obj.[[Get]] as specified in 10.4.4.3.
-  // 7. Set obj.[[Set]] as specified in 10.4.4.4.
-  // 8. Set obj.[[Delete]] as specified in 10.4.4.5.
-  // 9. Set obj.[[Prototype]] to %Object.prototype%.
-  // 10. Let map be OrdinaryObjectCreate(null).
-  // 11. Set obj.[[ParameterMap]] to map.
-  // 12. Let parameterNames be the BoundNames of formals.
-  // 13. Let numberOfParameters be the number of elements in parameterNames.
-  // 14. Let index be 0.
-  // 15. Repeat, while index < len,
-  // a. Let val be argumentsList[index].
-  // b. Perform ! CreateDataPropertyOrThrow(obj, ! ToString(𝔽(index)), val).
-  // c. Set index to index + 1.
-  // 16. Perform ! DefinePropertyOrThrow(obj, "length", PropertyDescriptor { [[Value]]: 𝔽(len), [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
-  // 17. Let mappedNames be a new empty List.
-  // 18. Set index to numberOfParameters - 1.
-  // 19. Repeat, while index ≥ 0,
-  // a. Let name be parameterNames[index].
-  // b. If mappedNames does not contain name, then
-  // i. Append name to mappedNames.
-  // ii. If index < len, then
-  // 1. Let g be MakeArgGetter(name, env).
-  // 2. Let p be MakeArgSetter(name, env).
-  // 3. Perform ! map.[[DefineOwnProperty]](! ToString(𝔽(index)), PropertyDescriptor { [[Set]]: p, [[Get]]: g, [[Enumerable]]: false, [[Configurable]]: true }).
-  // c. Set index to index - 1.
-  // 20. Perform ! DefinePropertyOrThrow(obj, @@iterator, PropertyDescriptor { [[Value]]: %Array.prototype.values%, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
-  // 21. Perform ! DefinePropertyOrThrow(obj, "callee", PropertyDescriptor { [[Value]]: func, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
-  // 22. Return obj.
-
-  return OrdinaryObjectCreate({Prototype: $.getIntrinsic('%Object.prototype%')});
-
-  //throw new Error('NOT IMPLEMENTED');
-} 
-
-
 
 /**
  * 13.3.5 The new Operator

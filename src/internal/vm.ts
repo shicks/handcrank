@@ -16,7 +16,6 @@ import { ArrayExoticObject } from './exotic_array';
 import { PrivateEnvironmentRecord } from './private_environment_record';
 import { IsConstructor } from './abstract_compare';
 import { IsStrictMode } from './static/scope';
-import { GetSourceText } from './static/functions';
 
 export type Yield = {yield: Val};
 export type EvalGen<T> = Generator<Yield|undefined, T, CR<Val>|undefined>;
@@ -74,25 +73,29 @@ export function runAsync<T>(
       const start = Date.now();
       let poll = 0;
       let result;
-      while ((result = iter.next()), !result.done) {
-        // TODO - throw if we get a top-level yield???
-        if ((++poll & 0x1f) === 0) {
-          const now = Date.now();
-          if (now - start >= timeStepMillis) break;
-          if (now - globalStart >= timeoutMillis) {
-            reject(new Error(`Timeout after ${globalSteps} steps`));
+      try {
+        while ((result = iter.next()), !result.done) {
+          // TODO - throw if we get a top-level yield???
+          if ((++poll & 0x1f) === 0) {
+            const now = Date.now();
+            if (now - start >= timeStepMillis) break;
+            if (now - globalStart >= timeoutMillis) {
+              reject(new Error(`Timeout after ${globalSteps} steps`));
+              return;
+            }
+          }
+          if (++globalSteps > maxSteps) {
+            reject(new Error(`Exceeded ${maxSteps} steps`));
             return;
           }
         }
-        if (++globalSteps > maxSteps) {
-          reject(new Error(`Exceeded ${maxSteps} steps`));
-          return;
+        if (result.done) {
+          resolve(result.value);
+        } else {
+          setTimeout(pump);
         }
-      }
-      if (result.done) {
-        resolve(result.value);
-      } else {
-        setTimeout(pump);
+      } catch (e) {
+        reject(e);
       }
     };
     pump();
@@ -162,13 +165,14 @@ export class VM {
     return intrinsic;
   }
 
-  throw(name: string, message?: string): CR<never> {
+  throw(name: string, message?: string, saveStack = false): CR<never> {
 
     // NOTE: This can help with debugging; use Assert to compile it out in prod.
+    let lastThrowMessage: string|undefined;
     try {
       Assert(1 > 2);
     } catch (e) {
-      (this as any).lastThrow = new Error(message ? `${name}: ${message}` : name);
+      lastThrowMessage = message ? `${name}: ${message}` : name;
     }
 
     const prototype = this.getIntrinsic(`%${name}.prototype%`);
@@ -180,6 +184,12 @@ export class VM {
       message: propWC(message),
     });
     this.captureStackTrace(error);
+    if (lastThrowMessage) {
+      if (saveStack) {
+        lastThrowMessage = error.ErrorData;
+      }
+      (this as any).lastThrow = new Error(lastThrowMessage + '\nThrown');
+    }
     return ThrowCompletion(error);
   }
 

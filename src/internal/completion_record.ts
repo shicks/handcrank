@@ -1,6 +1,7 @@
 import { EMPTY } from './enums';
 import { Assert } from './assert';
 import { Val } from './val';
+import { Obj } from './obj';
 
 /**
  * 6.2.4 The Completion Record Specification Type
@@ -76,6 +77,7 @@ export function CastNotAbrupt<T>(x: CR<T>, ..._: NotGen<T>): T {
   try {
     Assert(!IsAbrupt(x as any));
   } catch (e) {
+    console.log(e);
     console.dir(x); // NOTE: This is a debugging aid.
     throw e;
   }

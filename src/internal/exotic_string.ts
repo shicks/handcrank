@@ -202,7 +202,8 @@ export function StringCreate(value: string, prototype: Obj): StringExoticObject 
  * 8. Let len be the length of str.
  * 9. If ℝ(index) < 0 or len ≤ ℝ(index), return undefined.
  * 10. Let resultStr be the substring of str from ℝ(index) to ℝ(index) + 1.
- * 11. Return the PropertyDescriptor { [[Value]]: resultStr, [[Writable]]: false, [[Enumerable]]: true, [[Configurable]]: false }.
+ * 11. Return the PropertyDescriptor { [[Value]]: resultStr,
+ *     [[Writable]]: false, [[Enumerable]]: true, [[Configurable]]: false }.
  */
 function StringGetOwnProperty(S: Obj, P: PropertyKey): PropertyDescriptor | undefined {
   if (typeof P !== 'string') return undefined;

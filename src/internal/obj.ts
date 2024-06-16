@@ -1022,7 +1022,7 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
           $.NamedEvaluation(prop.value, key as string) :
           $.evaluateValue(prop.value));
       if (IsAbrupt(propValue)) return propValue;
-      if (prop.method) {
+      if (prop.method || prop.kind === 'get' || prop.kind === 'set') {
         Assert(IsFunc(propValue));
         propValue.SourceText = GetSourceText(prop); // fix source text
         if (prop.kind === 'get') {

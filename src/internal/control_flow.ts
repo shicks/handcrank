@@ -1176,7 +1176,8 @@ export function* Evaluation_WithStatement(
 ): ECR<Val|EMPTY> {
   const val = yield* $.evaluateValue(n.object);
   if (IsAbrupt(val)) return val;
-  const obj = CastNotAbrupt(ToObject($, val));
+  const obj = ToObject($, val);
+  if (IsAbrupt(obj)) return obj;
   const oldEnv = $.getRunningContext().LexicalEnvironment;
   const newEnv = new ObjectEnvironmentRecord(obj, true, oldEnv ?? null);
   $.getRunningContext().LexicalEnvironment = newEnv;

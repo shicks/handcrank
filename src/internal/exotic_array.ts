@@ -1,7 +1,7 @@
 import { ArrayExpression } from 'estree';
 import { IsArray, IsArrayIndex, IsCallable, IsConstructor, IsIntegralNumber, SameValue, SameValueZero } from './abstract_compare';
-import { ToIntegerOrInfinity, ToNumber, ToObject, ToUint32 } from './abstract_conversion';
-import { Call, Construct, CreateArrayFromList, CreateDataPropertyOrThrow, Get, GetMethod, LengthOfArrayLike, Set } from './abstract_object';
+import { ToBoolean, ToIntegerOrInfinity, ToNumber, ToObject, ToString, ToUint32 } from './abstract_conversion';
+import { Call, Construct, CreateArrayFromList, CreateDataPropertyOrThrow, Get, GetMethod, HasProperty, LengthOfArrayLike, Set } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, callOrConstruct, method, methodO } from './func';
@@ -19,6 +19,7 @@ import { SYNC } from './enums';
 
 declare const GetIteratorFromMethod: any;
 declare const IsDetachedBuffer: any;
+
 declare global {
   interface ObjectSlots {
     TypedArrayName?: never;
@@ -675,6 +676,370 @@ export const arrayObject: Plugin = {
         }),
 
         /**
+         * 23.1.3.2 Array.prototype.concat ( ...items )
+         * 
+         * This method returns an array containing the array elements
+         * of the object followed by the array elements of each
+         * argument.
+         * 
+         * It performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let A be ? ArraySpeciesCreate(O, 0).
+         * 3. Let n be 0.
+         * 4. Prepend O to items.
+         * 5. For each element E of items, do
+         *     a. Let spreadable be ? IsConcatSpreadable(E).
+         *     b. If spreadable is true, then
+         *         i. Let len be ? LengthOfArrayLike(E).
+         *         ii. If n + len > 253 - 1, throw a TypeError exception.
+         *         iii. Let k be 0.
+         *         iv. Repeat, while k < len,
+         *             1. Let P be ! ToString(𝔽(k)).
+         *             2. Let exists be ? HasProperty(E, P).
+         *             3. If exists is true, then
+         *                 a. Let subElement be ? Get(E, P).
+         *                 b. Perform ? CreateDataPropertyOrThrow(A, ! ToString(𝔽(n)), subElement).
+         *             4. Set n to n + 1.
+         *             5. Set k to k + 1.
+         *     c. Else,
+         *         i. NOTE: E is added as a single item rather than spread.
+         *         ii. If n ≥ 253 - 1, throw a TypeError exception.
+         *         iii. Perform ? CreateDataPropertyOrThrow(A, ! ToString(𝔽(n)), E).
+         *         iv. Set n to n + 1.
+         * 6. Perform ? Set(A, "length", 𝔽(n), true).
+         * 7. Return A.
+         * 
+         * The "length" property of this method is 1𝔽.
+         * 
+         * NOTE 1: The explicit setting of the "length" property in step 6
+         * is necessary to ensure that its value is correct in situations
+         * where the trailing elements of the result Array are not present.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'concat': method(function*($, thisValue, ...items) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const A = yield* ArraySpeciesCreate($, O, 0);
+          if (IsAbrupt(A)) return A;
+          let n = 0;
+          items.unshift(O);
+          for (const E of items) {
+            const spreadable = yield* IsConcatSpreadable($, E);
+            if (spreadable) {
+              Assert(E instanceof Obj);
+              const len = yield* LengthOfArrayLike($, E);
+              if (IsAbrupt(len)) return len;
+              if (n + len > Number.MAX_SAFE_INTEGER) {
+                return $.throw('TypeError', 'Too many items');
+              }
+              for (let k = 0; k < len; k++) {
+                yield;
+                const P = String(k);
+                const exists = HasProperty($, E, P);
+                if (IsAbrupt(exists)) return exists;
+                if (exists) {
+                  const subElement = yield* Get($, E, P);
+                  if (IsAbrupt(subElement)) return subElement;
+                  const createStatus = CreateDataPropertyOrThrow($, A, String(n), subElement);
+                  if (IsAbrupt(createStatus)) return createStatus;
+                }
+                n++;
+              }
+            } else {
+              if (n >= Number.MAX_SAFE_INTEGER) {
+                return $.throw('TypeError', 'Too many items');
+              }
+              const createStatus = CreateDataPropertyOrThrow($, A, String(n), E);
+              if (IsAbrupt(createStatus)) return createStatus;
+              n++;
+            }
+          }
+          const setStatus = yield* Set($, A, 'length', n, true);
+          return IsAbrupt(setStatus) ? setStatus : A;
+        }, 1),
+
+        /**
+         * 23.1.3.4 Array.prototype.copyWithin ( target, start [ , end ] )
+         * 
+         * NOTE 1: The end argument is optional. If it is not
+         * provided, the length of the this value is used.
+         * 
+         * NOTE 2: If target is negative, it is treated as length +
+         * target where length is the length of the array. If start is
+         * negative, it is treated as length + start. If end is
+         * negative, it is treated as length + end.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let relativeTarget be ? ToIntegerOrInfinity(target).
+         * 4. If relativeTarget = -∞, let to be 0.
+         * 5. Else if relativeTarget < 0, let to be max(len + relativeTarget, 0).
+         * 6. Else, let to be min(relativeTarget, len).
+         * 7. Let relativeStart be ? ToIntegerOrInfinity(start).
+         * 8. If relativeStart = -∞, let from be 0.
+         * 9. Else if relativeStart < 0, let from be max(len + relativeStart, 0).
+         * 10. Else, let from be min(relativeStart, len).
+         * 11. If end is undefined, let relativeEnd be len; else let
+         *     relativeEnd be ? ToIntegerOrInfinity(end).
+         * 12. If relativeEnd = -∞, let final be 0.
+         * 13. Else if relativeEnd < 0, let final be max(len + relativeEnd, 0).
+         * 14. Else, let final be min(relativeEnd, len).
+         * 15. Let count be min(final - from, len - to).
+         * 16. If from < to and to < from + count, then
+         *     a. Let direction be -1.
+         *     b. Set from to from + count - 1.
+         *     c. Set to to to + count - 1.
+         * 17. Else,
+         *     a. Let direction be 1.
+         * 18. Repeat, while count > 0,
+         *     a. Let fromKey be ! ToString(𝔽(from)).
+         *     b. Let toKey be ! ToString(𝔽(to)).
+         *     c. Let fromPresent be ? HasProperty(O, fromKey).
+         *     d. If fromPresent is true, then
+         *         i. Let fromVal be ? Get(O, fromKey).
+         *         ii. Perform ? Set(O, toKey, fromVal, true).
+         *     e. Else,
+         *         i. Assert: fromPresent is false.
+         *         ii. Perform ? DeletePropertyOrThrow(O, toKey).
+         *     f. Set from to from + direction.
+         *     g. Set to to to + direction.
+         *     h. Set count to count - 1.
+         * 19. Return O.
+         * 
+         * NOTE 3: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+
+        /**
+         * 23.1.3.5 Array.prototype.entries ( )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Return CreateArrayIterator(O, key+value).
+         */
+
+        /**
+         * 23.1.3.6 Array.prototype.every ( callbackfn [ , thisArg ] )
+         * 
+         * NOTE 1: callbackfn should be a function that accepts three
+         * arguments and returns a value that is coercible to a
+         * Boolean value. every calls callbackfn once for each element
+         * present in the array, in ascending order, until it finds
+         * one where callbackfn returns false. If such an element is
+         * found, every immediately returns false. Otherwise, if
+         * callbackfn returned true for all elements, every will
+         * return true. callbackfn is called only for elements of the
+         * array which actually exist; it is not called for missing
+         * elements of the array.
+         * 
+         * If a thisArg parameter is provided, it will be used as the
+         * this value for each invocation of callbackfn. If it is not
+         * provided, undefined is used instead.
+         * 
+         * callbackfn is called with three arguments: the value of the
+         * element, the index of the element, and the object being
+         * traversed.
+         * 
+         * every does not directly mutate the object on which it is
+         * called but the object may be mutated by the calls to
+         * callbackfn.
+         * 
+         * The range of elements processed by every is set before the
+         * first call to callbackfn. Elements which are appended to
+         * the array after the call to every begins will not be
+         * visited by callbackfn. If existing elements of the array
+         * are changed, their value as passed to callbackfn will be
+         * the value at the time every visits them; elements that are
+         * deleted after the call to every begins and before being
+         * visited are not visited. every acts like the "for all"
+         * quantifier in mathematics. In particular, for an empty
+         * array, it returns true.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If IsCallable(callbackfn) is false, throw a TypeError exception.
+         * 4. Let k be 0.
+         * 5. Repeat, while k < len,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. Let kPresent be ? HasProperty(O, Pk).
+         *     c. If kPresent is true, then
+         *         i. Let kValue be ? Get(O, Pk).
+         *         ii. Let testResult be ToBoolean(? Call(callbackfn,
+         *             thisArg, « kValue, 𝔽(k), O »)).
+         *         iii. If testResult is false, return false.
+         *     d. Set k to k + 1.
+         * 6. Return true.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+
+        /**
+         * 23.1.3.7 Array.prototype.fill ( value [ , start [ , end ] ] )
+         * 
+         * NOTE 1: The start argument is optional. If it is not
+         * provided, +0𝔽 is used.
+         * 
+         * The end argument is optional. If it is not provided, the
+         * length of the this value is used.
+         * 
+         * NOTE 2: If start is negative, it is treated as length +
+         * start where length is the length of the array. If end is
+         * negative, it is treated as length + end.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let relativeStart be ? ToIntegerOrInfinity(start).
+         * 4. If relativeStart = -∞, let k be 0.
+         * 5. Else if relativeStart < 0, let k be max(len + relativeStart, 0).
+         * 6. Else, let k be min(relativeStart, len).
+         * 7. If end is undefined, let relativeEnd be len; else let
+         *    relativeEnd be ? ToIntegerOrInfinity(end).
+         * 8. If relativeEnd = -∞, let final be 0.
+         * 9. Else if relativeEnd < 0, let final be max(len + relativeEnd, 0).
+         * 10. Else, let final be min(relativeEnd, len).
+         * 11. Repeat, while k < final,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. Perform ? Set(O, Pk, value, true).
+         *     c. Set k to k + 1.
+         * 12. Return O.
+         * 
+         * NOTE 3: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+
+        /**
+         * 23.1.3.8 Array.prototype.filter ( callbackfn [ , thisArg ] )
+         * 
+         * NOTE 1: callbackfn should be a function that accepts three
+         * arguments and returns a value that is coercible to a
+         * Boolean value. filter calls callbackfn once for each
+         * element in the array, in ascending order, and constructs a
+         * new array of all the values for which callbackfn returns
+         * true. callbackfn is called only for elements of the array
+         * which actually exist; it is not called for missing elements
+         * of the array.
+         * 
+         * If a thisArg parameter is provided, it will be used as the
+         * this value for each invocation of callbackfn. If it is not
+         * provided, undefined is used instead.
+         * 
+         * callbackfn is called with three arguments: the value of the
+         * element, the index of the element, and the object being
+         * traversed.
+         * 
+         * filter does not directly mutate the object on which it is
+         * called but the object may be mutated by the calls to
+         * callbackfn.
+         * 
+         * The range of elements processed by filter is set before the
+         * first call to callbackfn. Elements which are appended to
+         * the array after the call to filter begins will not be
+         * visited by callbackfn. If existing elements of the array
+         * are changed their value as passed to callbackfn will be the
+         * value at the time filter visits them; elements that are
+         * deleted after the call to filter begins and before being
+         * visited are not visited.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If IsCallable(callbackfn) is false, throw a TypeError exception.
+         * 4. Let A be ? ArraySpeciesCreate(O, 0).
+         * 5. Let k be 0.
+         * 6. Let to be 0.
+         * 7. Repeat, while k < len,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. Let kPresent be ? HasProperty(O, Pk).
+         *     c. If kPresent is true, then
+         *         i. Let kValue be ? Get(O, Pk).
+         *         ii. Let selected be ToBoolean(? Call(callbackfn,
+         *             thisArg, « kValue, 𝔽(k), O »)).
+         *         iii. If selected is true, then
+         *             1. Perform ? CreateDataPropertyOrThrow(A,
+         *                ! ToString(𝔽(to)), kValue).
+         *             2. Set to to to + 1.
+         *     d. Set k to k + 1.
+         * 8. Return A.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+
+
+
+        /**
+         * 23.1.3.18 Array.prototype.join ( separator )
+         * 
+         * This method converts the elements of the array to Strings,
+         * and then concatenates these Strings, separated by
+         * occurrences of the separator. If no separator is provided,
+         * a single comma is used as the separator.
+         * 
+         * It performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If separator is undefined, let sep be ",".
+         * 4. Else, let sep be ? ToString(separator).
+         * 5. Let R be the empty String.
+         * 6. Let k be 0.
+         * 7. Repeat, while k < len,
+         *     a. If k > 0, set R to the string-concatenation of R and sep.
+         *     b. Let element be ? Get(O, ! ToString(𝔽(k))).
+         *     c. If element is either undefined or null, let next be
+         *        the empty String; otherwise, let next be
+         *        ? ToString(element).
+         *     d. Set R to the string-concatenation of R and next.
+         *     e. Set k to k + 1.
+         * 8. Return R.
+         * 
+         * NOTE: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore, it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'join': method(function*($, thisValue, separator) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          const sep = separator === undefined ? ',' : yield* ToString($, separator);
+          if (IsAbrupt(sep)) return sep;
+          let R = '';
+          for (let k = 0; k < len; k++) {
+            if (k > 0) R += sep;
+            const element = yield* Get($, O, String(k));
+            if (IsAbrupt(element)) return element;
+            const next = element == null ? '' : yield* ToString($, element);
+            if (IsAbrupt(next)) return next;
+            R += next;
+          }
+          return R;
+        }),
+
+        /**
          * 23.1.3.23 Array.prototype.push ( ...items )
          * 
          * NOTE 1: This method appends the arguments to the end of the
@@ -763,6 +1128,27 @@ export const arrayObject: Plugin = {
     },
   },
 };
+
+/**
+ * 23.1.3.2.1 IsConcatSpreadable ( O )
+ * 
+ * The abstract operation IsConcatSpreadable takes argument O (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing a Boolean or a throw completion. It performs the
+ * following steps when called:
+ * 
+ * 1. If O is not an Object, return false.
+ * 2. Let spreadable be ? Get(O, @@isConcatSpreadable).
+ * 3. If spreadable is not undefined, return ToBoolean(spreadable).
+ * 4. Return ? IsArray(O).
+ */
+function* IsConcatSpreadable($: VM, O: Val): ECR<boolean> {
+  if (!(O instanceof Obj)) return false;
+  const spreadable = yield* Get($, O, Symbol.isConcatSpreadable);
+  if (IsAbrupt(spreadable)) return spreadable;
+  if (spreadable !== undefined) return ToBoolean(spreadable);
+  return IsArray($, O);
+}
 
 /**
  * 23.1.5.1 CreateArrayIterator ( array, kind )

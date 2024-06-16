@@ -151,11 +151,12 @@ function* Evaluation_SuperCall(
   if (IsAbrupt(result)) return result;
   const thisER = GetThisEnvironment($);
   Assert(thisER instanceof FunctionEnvironmentRecord);
-  CastNotAbrupt(thisER.BindThisValue($, result));
+  const bindThisStatus = thisER.BindThisValue($, result);
+  if (IsAbrupt(bindThisStatus)) return bindThisStatus;
   const F = thisER.FunctionObject;
   Assert(IsFunc(F));
-  const status = yield* InitializeInstanceElements($, result, F);
-  if (IsAbrupt(status)) return status;
+  const initStatus = yield* InitializeInstanceElements($, result, F);
+  if (IsAbrupt(initStatus)) return initStatus;
   return result;
 }
 

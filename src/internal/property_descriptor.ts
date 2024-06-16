@@ -129,12 +129,12 @@ export function FromPropertyDescriptor(
 ): Obj|undefined {
   if (Desc == null) return Desc;
   const props: PropertyRecord = {};
-  if (PropertyDescriptorSlots.Value in Desc) props.Value = propWEC(Desc.Value);
-  if (Desc.Writable != null) props.Writable = propWEC(Desc.Writable);
-  if (Desc.Get != null) props.Get = propWEC(Desc.Get);
-  if (Desc.Set != null) props.Set = propWEC(Desc.Set);
-  if (Desc.Enumerable != null) props.Enumerable = propWEC(Desc.Enumerable);
-  if (Desc.Configurable != null) props.Configurable = propWEC(Desc.Configurable);
+  if (PropertyDescriptorSlots.Value in Desc) props['value'] = propWEC(Desc.Value);
+  if (Desc.Writable != null) props['writable'] = propWEC(Desc.Writable);
+  if (Desc.Get != null) props['get'] = propWEC(Desc.Get);
+  if (Desc.Set != null) props['set'] = propWEC(Desc.Set);
+  if (Desc.Enumerable != null) props['enumerable'] = propWEC(Desc.Enumerable);
+  if (Desc.Configurable != null) props['configurable'] = propWEC(Desc.Configurable);
   return OrdinaryObjectCreate({Prototype: $.getIntrinsic('%Object.prototype%')}, props);
 }
 

@@ -210,7 +210,7 @@ export const objectAndFunctionPrototype: Plugin = {
           if (IsAbrupt(isArray)) return isArray;
           const builtinTag =
             isArray ? 'Array' :
-            O.ParameterMap != null ? 'Arguments' :
+            O.ParameterMap !== undefined ? 'Arguments' :
             O.Call != null ? 'Function' : 
             O.ErrorData != null ? 'Error' :
             O.BooleanData != null ? 'Boolean' :

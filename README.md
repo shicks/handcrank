@@ -14,8 +14,9 @@ browser or on the server.
 
 ## TODO
 
-- classes
 - array/function instance methods
+- consider exposing bindings a little more, lazy-initialized binding
+  for arguments objects, etc
 
 ## Features
 

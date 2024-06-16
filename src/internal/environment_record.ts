@@ -196,6 +196,38 @@ class IndirectBinding extends Binding {
 (IndirectBinding.prototype as any).Deletable = false;
 (IndirectBinding.prototype as any).Strict = true;
 
+/** A special case for e.g. Arguments objects. */
+class LazyBinding extends Binding {
+  override readonly Initialized = true;
+  private value: Val|undefined;
+  private init = false;
+  private constructor(
+    private factory: () => Val,
+    private mutable: boolean,
+    readonly Deletable: boolean,
+    readonly Strict: boolean,
+  ) { super(); }
+  get Value(): Val {
+    if (!this.init) {
+      this.value = this.factory();
+      this.init = true;
+    }
+    return this.value;
+  }
+  set Value(value: Val) {
+    if (this.mutable) {
+      this.value = value;
+      this.init = true;
+    }
+  }
+  static mutable(factory: () => Val, deletable: boolean): Binding {
+    return new LazyBinding(factory, true, deletable, false);
+  }
+  static immutable(factory: () => Val, strict: boolean): Binding {
+    return new LazyBinding(factory, false, false, strict);
+  }
+}
+
 /**
  * 9.1.1.1 Declarative Environment Records
  *
@@ -231,6 +263,18 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    */
   override HasBinding(_$: VM, N: string): boolean {
     return this.bindings.has(N);
+  }
+
+  /** Creates a lazy binding. Not in spec. */
+  CreateMutableLazyBinding(N: string, factory: () => Val, deletable: boolean): void {
+    Assert(!this.bindings.has(N));
+    this.bindings.set(N, LazyBinding.mutable(factory, deletable));
+  }
+
+  /** Creates a lazy binding. Not in spec. */
+  CreateImmutableLazyBinding(N: string, factory: () => Val, strict: boolean): void {
+    Assert(!this.bindings.has(N));
+    this.bindings.set(N, LazyBinding.immutable(factory, strict));
   }
 
   /**
@@ -281,7 +325,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * V. An uninitialized binding for N must already exist. It performs
    * the following steps when called:
    */
-  override *InitializeBinding(_$: VM, N: string, V: Val): ECR<UNUSED> {
+  override * InitializeBinding(_$: VM, N: string, V: Val): ECR<UNUSED> {
     Assert(this.bindings.has(N));
     const binding = this.bindings.get(N)!;
     Assert(!binding.Initialized);
@@ -304,7 +348,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * binding is an immutable binding, a TypeError is thrown if S is
    * true. It performs the following steps when called:
    */
-  override *SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
+  override * SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
     //$.log(`Binding: Set ${N} <- ${DebugString(V)}`);
     if (!this.bindings.has(N)) {
       if (S) return $.throw('ReferenceError', `${N} is not defined`);
@@ -339,7 +383,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
    * uninitialized a ReferenceError is thrown, regardless of the value
    * of S. It performs the following steps when called:
    */
-  override *GetBindingValue($: VM, N: string, _S: boolean): ECR<Val> {
+  override * GetBindingValue($: VM, N: string, _S: boolean): ECR<Val> {
     Assert(this.bindings.has(N));
     const binding = this.bindings.get(N)!;
     if (!binding.Initialized) {
@@ -520,7 +564,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    * of the current binding of the identifier whose name is N to the
    * value V. It performs the following steps when called:
    */
-  override *InitializeBinding($: VM, N: string, V: Val): ECR<UNUSED> {
+  override * InitializeBinding($: VM, N: string, V: Val): ECR<UNUSED> {
     // NOTE: In this specification, all uses of CreateMutableBinding
     // for Object Environment Records are immediately followed by a
     // call to InitializeBinding for the same name. Hence, this
@@ -544,7 +588,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    * currently writable, error handling is determined by S. It
    * performs the following steps when called:
    */
-  override *SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
+  override * SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
     const bindingObject = this.BindingObject;
     const stillExists = HasProperty($, bindingObject, N);
     if (IsAbrupt(stillExists)) return stillExists;
@@ -567,7 +611,7 @@ export class ObjectEnvironmentRecord extends EnvironmentRecord {
    * property should already exist but if it does not the result
    * depends upon S. It performs the following steps when called:
    */
-  override *GetBindingValue($: VM, N: string, S: boolean): ECR<Val> {
+  override * GetBindingValue($: VM, N: string, S: boolean): ECR<Val> {
     const bindingObject = this.BindingObject;
     const value = HasProperty($, bindingObject, N);
     if (IsAbrupt(value)) return value;
@@ -922,7 +966,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * value V. An uninitialized binding for N must already exist. It
    * performs the following steps when called:
    */
-  override *InitializeBinding($: VM, N: string, V: Val): ECR<UNUSED> {
+  override * InitializeBinding($: VM, N: string, V: Val): ECR<UNUSED> {
     const DclRec = this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
       return CastNotAbrupt(yield* DclRec.InitializeBinding($, N, V));
@@ -946,7 +990,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * error handling is determined by S. It performs the following
    * steps when called:
    */
-  override *SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
+  override * SetMutableBinding($: VM, N: string, V: Val, S: boolean): ECR<UNUSED> {
     const DclRec = this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
       return yield* DclRec.SetMutableBinding($, N, V, S);
@@ -968,7 +1012,7 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
    * not currently writable, error handling is determined by S. It
    * performs the following steps when called:
    */
-  override *GetBindingValue($: VM, N: string, S: boolean): ECR<Val> {
+  override * GetBindingValue($: VM, N: string, S: boolean): ECR<Val> {
     const DclRec =this.DeclarativeRecord;
     if (CastNotAbrupt(DclRec.HasBinding($, N))) {
       return yield* DclRec.GetBindingValue($, N, S);
@@ -1285,7 +1329,7 @@ export class ModuleEnvironmentRecord extends DeclarativeEnvironmentRecord {
    * the binding exists but is uninitialized a ReferenceError is
    * thrown. It performs the following steps when called:
    */
-  override *GetBindingValue($: VM, N: string, S: boolean): ECR<Val> {
+  override * GetBindingValue($: VM, N: string, S: boolean): ECR<Val> {
     // NOTE: S will always be true because a Module is always strict mode code.
     Assert(S === true);
     const binding = this.bindings.get(N);

@@ -2,12 +2,13 @@
 
 import * as esprima from 'esprima-next';
 import { parse } from 'yaml';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { test262 } from './262';
-import { DebugString, VM, run, runAsync } from '../src/internal/vm';
+import { DebugString, VM, runAsync } from '../src/internal/vm';
 import { full } from '../src/plugins';
 import { IsThrowCompletion } from '../src/internal/completion_record';
 import { Obj } from '../src/internal/obj';
+//import { readdirRecursive } from '../src/internal/fsutil';
 
 class File {
   constructor(
@@ -17,10 +18,15 @@ class File {
   ) {}
 
   static async load(path: string) {
-    const content = String(await readFile(path, 'utf8'));
-    const match = /\/\*---(.*?)---\*\//s.exec(content);
-    const metadata = match ? parse(match[1]) : {};
-    return new File(path, content, metadata);
+    try {
+      const content = String(await readFile(path, 'utf8'));
+      const match = /\/\*---(.*?)---\*\//s.exec(content);
+      const metadata = match ? parse(match[1].replace(/\x0d\x0a|\x0a?\x0d/g, '\x0a')) : {};
+      return new File(path, content, metadata);
+    } catch (err: unknown) {
+      console.error(`Error loading ${path}: ${err}`);
+      throw err;
+    }
   }
 }
 
@@ -45,28 +51,52 @@ interface Metadata {
   description?: string;
 }
 
-function includes(f: File, h: Harness, m = new Map<string, File>()): Map<string, File> {
-  function include(i: string) {
-    if (m.has(i)) return;
-    const included = h.files.get(i);
-    if (!included) throw new Error(`Missing harness file: ${i} included by ${f.path}`);
-    m.set(i, included);
-    includes(included, h, m);
-  }
-  (f.metadata.includes || []).forEach(include);
+function allIncludes(f: File, h: Harness): string[] {
+  const out = new Set<string>(f.metadata.includes || []);
+  const defines = new Set<string>(f.metadata.defines || []);
   for (const ident of f.content.matchAll(/\b[$_a-z][$_a-z0-9]*\b/ig)) {
+    if (defines.has(ident[0])) continue;
     const provide = h.provides.get(ident[0]);
-    if (provide && f.path !== provide) {
-      include(provide);
-    }
+    if (provide) out.add(provide);
   }
-  return m;
+  return [...out];
 }
+
+function transitiveIncludes(f: File, h: Harness, out = new Set<string>): Set<string> {
+  for (const i of allIncludes(f, h)) {
+    if (out.has(i)) continue;
+    out.add(i);
+    transitiveIncludes(h.files.get(i)!, h, out);
+    out.delete(i);
+    out.add(i);
+  }
+  return out;
+}
+
+// function includes(f: File, h: Harness, m = new Map<string, File>()): Map<string, File> {
+//   function include(i: string) {
+//     if (m.has(i)) return;
+//     const included = h.files.get(i);
+//     if (!included) throw new Error(`Missing harness file: ${i} included by ${f.path}`);
+//     m.set(i, included);
+//     includes(included, h, m);
+//   }
+//   (f.metadata.includes || []).forEach(include);
+//   for (const ident of f.content.matchAll(/\b[$_a-z][$_a-z0-9]*\b/ig)) {
+//     const provide = h.provides.get(ident[0]);
+//     if (provide && f.path !== provide) {
+//       if (f.path.match(/compareArray/)) console.log(`include: ${ident} => ${provide}`);
+//       include(provide);
+//     }
+//   }
+//   if (f.path.match(/compareArray/)) console.log(m);
+//   return m;
+// }
 
 class TestCase {
   readonly includes: File[];
   constructor(readonly file: File, readonly harness: Harness) {
-    this.includes = [...includes(file, harness).values()];
+    this.includes = [...transitiveIncludes(file, harness)].map(i => harness.files.get(i)!);
   }
 
   name() {
@@ -92,7 +122,11 @@ class TestCase {
     for (const f of this.includes) {
       const result = yield* vm.evaluateScript(f.content, f.path);
       if (IsThrowCompletion(result)) {
-        throw new Error(`Unexpected rejection: ${DebugString(result.Value)}`);
+        let msg = `Unexpected rejection: ${DebugString(result.Value)}`;
+        if ((vm as any).lastThrow) {
+          msg += `\n${(vm as any).lastThrow.stack}`;
+        }
+        throw new Error(msg);
       }
     }
     const result = yield* vm.evaluateScript(this.file.content, this.file.path);
@@ -116,108 +150,37 @@ class TestCase {
           throw new Error(`Expected ${expectedType} but got ${DebugString(err)}`);
         }
       } else {
-        throw new Error(`Unexpected failure: ${DebugString(err)}`);
+        let msg = `Unexpected failure: ${DebugString(err, 2)}`;
+        if ((vm as any).lastThrow) {
+          msg += `\n${(vm as any).lastThrow.stack}`;
+        }
+        throw new Error(msg);
       }
     } else if (this.file.metadata.negative) {
       throw new Error(`Expected test to fail with ${this.file.metadata.negative.type}`);
     }
-    console.log(`${this.name()}: PASS`);
   }
-}
-
-function makePool(free = 16): <T>(task: () => Promise<T>) => Promise<T> {
-  const waiting: Array<() => void> = [];
-  const reclaim = () => {
-    if (waiting.length) {
-      waiting.shift()!();
-    } else {
-      ++free;
-    }
-  }
-  return (task) => {
-    if (free > 0) {
-      --free;
-      return task().finally(reclaim);
-    } else {
-      return new Promise(resolve => {
-        waiting.push(() => {
-          resolve(task().finally(reclaim));
-        });
-      });
-    }
-  };
-}
-
-function makeAsyncIterator<T>(): {
-  iterator: AsyncIterableIterator<T>,
-  emit: (arg: T) => void,
-  fail: (err: unknown) => void,
-  done: () => void,
-} {
-  const resolvers: Array<(arg: Promise<IteratorResult<T>>) => void> = [];
-  const values: T[] = [];
-  let terminus: Promise<IteratorResult<T>>|undefined;
-  const iterator = {
-    [Symbol.asyncIterator]() { return this; },
-    next(): Promise<IteratorResult<T>> {
-      if (values.length) return Promise.resolve({value: values.shift()!, done: false});
-      if (terminus) return Promise.resolve(terminus);
-      return new Promise(resolve => {
-        resolvers.push(resolve);
-      });
-    },
-  };
-  const emit = (value: T) => {
-    if (terminus) return;
-    if (resolvers.length) resolvers.shift()!(Promise.resolve({value, done: false}));
-    values.push(value);
-  };
-  const fail = (err: unknown) => {
-    if (terminus) return;
-    terminus = Promise.reject(err);
-    while (resolvers.length) resolvers.shift()!(terminus);
-  };
-  const done = () => {
-    if (terminus) return;
-    terminus = Promise.resolve({value: undefined, done: true});
-    while (resolvers.length) resolvers.shift()!(terminus);
-  };
-  return {iterator, emit, fail, done};
 }
 
 class Harness {
-  //pool = x => x(); // makePool();
   constructor(
     readonly testRoot: string,
     readonly files: Map<string, File>,
     readonly provides: Map<string, string>,
   ) {}
 
-  testCases(): AsyncIterableIterator<TestCase> {
-    const {iterator, emit, fail, done} = makeAsyncIterator<TestCase>();
-    let count = 0;
-    const decrement = () => {
-      if (--count <= 0) done();
-    };
-    const recurse = async (dir: string) => {
-      ++count;
-      for (const f of await readdir(dir)) {
-        const path = `${dir}/${f}`;
-        if (f.endsWith('.js')) {
-          ++count;
-          File.load(path)
-              .then(file => emit(new TestCase(file, this)), fail)
-              .finally(decrement);
-        }
-        ++count;
-        stat(`${dir}/${f}`).then(stats => {
-          if (stats.isDirectory()) recurse(path);
-        }, fail).finally(decrement);
+  testFiles(): AsyncIterableIterator<string> {
+    return readdirRecursive(`${this.testRoot}/test`);
+  }
+
+  async * testCases(
+    filter: (fn: string) => boolean = () => true,
+  ): AsyncIterable<TestCase> {
+    for await (const f of this.testFiles()) {
+      if (f.endsWith('.js') && filter(f)) {
+        yield File.load(f).then(file => new TestCase(file, this));
       }
-      decrement();
     }
-    recurse(`${this.testRoot}/test`).catch(fail);
-    return iterator;
   }
 
   static async load(testRoot: string) {
@@ -240,24 +203,86 @@ class Harness {
   }
 }
 
-Harness.load('test262').then(async harness => {
+Harness.load('test/test262').then(async harness => {
   let passed = 0;
   let failed = 0;
-  //const promises: Promise<void>[] = [];
-  for await (const t of harness.testCases()) {
-console.log(`TEST: ${t.file.path}`);
-    // promises.push(
-    //   harness.pool(() =>
-    if (!t.file.path.match(/decimalToHexString/)) continue;
-    console.log(t.name());
+  let dir = '';
+  // TODO - flags for outputting files, verbose print failures inline, etc.
+  let filter: ((test: string) => boolean)|undefined;
+  const filterRegexps: RegExp[] = [];
+  let verbose = false;
+  for (let i = 2; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg === '-v') {
+      verbose = true;
+      continue;
+    } else {
+      filterRegexps.push(new RegExp(arg));
+    }
+  }
+  if (filterRegexps.length) filter = (f) => filterRegexps.some(r => r.test(f));
+  for await (const t of harness.testCases(filter)) {
+    //console.log(`TEST: ${t.file.path}`);
+    //console.log(t.name());
+    const name = t.name().replace('test/test262/test/', '').replace(/\.js$/, '');
+    const thisDir = name.replace(/\/[^/]+$/, '');
+    if (thisDir !== dir) {
+      if (dir && !verbose) process.stdout.write('\n');
+      dir = thisDir;
+      if (!verbose) process.stdout.write(dir + '   ');
+    }
     try {
-      run(t.runSync());
+      await Promise.race([
+        runAsync(t.runSync()),
+        new Promise((_, reject) => setTimeout(
+          () => reject(new Error('timeout')), 10_000)),
+      ]);
+      if (!verbose) process.stdout.write('.');
+
       ++passed;
     } catch (err) {
       ++failed;
-      console.error(`${t.name()}: FAIL`); // ${err}`);
+      if (!verbose) process.stdout.write('F');
+      await mkdir(`dist/test/${thisDir}`, {recursive: true});
+      writeFile(`dist/test/${name}.err`, err.message);
+      if (verbose) {
+        console.error(`${t.name()}: FAIL`);
+        console.error(err);
+      }
     }
-    //   )
-    // );
   }
+  console.log(`\n\nTests complete: ${passed} passed / ${failed} failed (${
+               (passed / (passed + failed) * 100).toFixed(2)}%)`);
+  process.exit(failed ? 1 : 0);
 });
+
+async function* asyncFlatMap<T, U>(iter: AsyncIterable<T>, fn: (t: T) => AsyncIterable<U>): AsyncIterableIterator<U> {
+  const iters = [];
+  for await (const t of iter) {
+    iters.push(fn(t));
+  }
+  for (const iter of iters) {
+    yield* iter;
+  }
+}
+
+type Stats = typeof stat extends (...args: any[]) => Promise<infer U> ? U : never;
+async function* asyncReaddir(path: string): AsyncIterable<[string, Stats]> {
+  const promises = new Map<string, Promise<Stats>>();
+  for (const f of await readdir(path)) {
+    promises.set(f, stat(`${path}/${f}`));
+  }
+  for (const k of [...promises.keys()].sort()) {
+    yield [k, await promises.get(k)!];
+  }
+}
+
+export function readdirRecursive(path: string): AsyncIterableIterator<string> {
+  return asyncFlatMap(asyncReaddir(path), async function*([f, s]) {
+    if (s.isDirectory()) {
+      yield* readdirRecursive(`${path}/${f}`);
+    } else {
+      yield `${path}/${f}`;
+    }
+  });
+}

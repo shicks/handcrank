@@ -1,4 +1,4 @@
-import { ECR, Plugin, VM, just, when } from './vm';
+import { DebugString, ECR, Plugin, VM, just, when } from './vm';
 import { EMPTY, NOT_APPLICABLE } from './enums';
 import { Val } from './val';
 import { Abrupt, CR, CompletionType, IsAbrupt } from './completion_record';
@@ -7,7 +7,7 @@ import { ReferenceRecord } from './reference_record';
 import { Evaluation_BlockLike, Evaluation_LexicalDeclaration, Evaluation_VariableStatement } from './statements';
 import { Evaluation_AssignmentExpression } from './assignment';
 import { Evaluation_CallExpression, Evaluation_NewExpression } from './func';
-import { EvaluatePropertyKey, Evaluation_ObjectExpression } from './obj';
+import { EvaluatePropertyKey, Evaluation_ObjectExpression, Obj, OrdinaryObjectCreate } from './obj';
 import { Evaluation_ArrayExpression } from './exotic_array';
 import { Evaluation_ConditionalExpression, Evaluation_SequenceExpression } from './control_flow';
 import { BindingInitialization_ArrayPattern, BindingInitialization_Identifier, BindingInitialization_MemberExpression, BindingInitialization_ObjectPattern } from './binding';
@@ -60,7 +60,12 @@ export const syntax: Plugin = {
         // 3. Return ThrowCompletion(exprValue).
         const exprValue = yield* $.evaluateValue(n.argument);
         if (IsAbrupt(exprValue)) return exprValue;
-        return new Abrupt(CompletionType.Throw, exprValue, EMPTY);
+        const abrupt = new Abrupt(CompletionType.Throw, exprValue, EMPTY);
+        if (!(exprValue instanceof Obj) || !exprValue.ErrorData) {
+          // TODO - make this optional?
+          $.throw('Error', `Threw non-error`, true);
+        }
+        return abrupt;
       });
       on('CallExpression', when(n => n.callee.type !== 'Super', Evaluation_CallExpression));
       on('NewExpression', Evaluation_NewExpression);
