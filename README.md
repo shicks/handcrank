@@ -45,10 +45,10 @@ browser or on the server.
         - [x] stack traces
     - [x] Array
         - [ ] instance methods
-    - [ ] Date
+    - [x] Arguments
     - [x] Iterators
     - [ ] RegExp
-    - [ ] Arguments
+    - [ ] Date
     - [ ] Map
     - [ ] Set
     - [ ] WeakMap / WeakSet

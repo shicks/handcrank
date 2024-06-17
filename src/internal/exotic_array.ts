@@ -1,7 +1,7 @@
 import { ArrayExpression } from 'estree';
-import { IsArray, IsArrayIndex, IsCallable, IsConstructor, IsIntegralNumber, SameValue, SameValueZero } from './abstract_compare';
+import { IsArray, IsArrayIndex, IsCallable, IsConstructor, IsIntegralNumber, IsStrictlyEqual, SameValue, SameValueZero } from './abstract_compare';
 import { ToBoolean, ToIntegerOrInfinity, ToNumber, ToObject, ToString, ToUint32 } from './abstract_conversion';
-import { Call, Construct, CreateArrayFromList, CreateDataPropertyOrThrow, Get, GetMethod, HasProperty, LengthOfArrayLike, Set } from './abstract_object';
+import { Call, Construct, CreateArrayFromList, CreateDataPropertyOrThrow, DeletePropertyOrThrow, Get, GetMethod, HasProperty, LengthOfArrayLike, Set } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, callOrConstruct, method, methodO } from './func';
@@ -818,6 +818,44 @@ export const arrayObject: Plugin = {
          * be transferred to other kinds of objects for use as a
          * method.
          */
+        'copyWithin': method(function*($, thisValue, target, start, end = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          let to = LengthRelative(yield* ToIntegerOrInfinity($, target), len);
+          if (IsAbrupt(to)) return to;
+          let from = LengthRelative(yield* ToIntegerOrInfinity($, start), len);
+          if (IsAbrupt(from)) return from;
+          let final = LengthRelative(
+            end === undefined ? len : yield* ToIntegerOrInfinity($, end), len);
+          if (IsAbrupt(final)) return final;
+          let count = Math.min(final - from, len - to);
+          let direction: -1 | 1 = 1;
+          if (from < to && to < from + count) {
+            direction = -1;
+            from += count - 1;
+            to += count - 1;
+          }
+          while (count-- > 0) {
+            const fromKey = String(from);
+            const toKey = String(to);
+            const fromPresent = HasProperty($, O, fromKey);
+            if (IsAbrupt(fromPresent)) return fromPresent;
+            if (fromPresent) {
+              const fromVal = yield* Get($, O, fromKey);
+              if (IsAbrupt(fromVal)) return fromVal
+              const setStatus = yield* Set($, O, toKey, fromVal, true);
+              if (IsAbrupt(setStatus)) return setStatus;
+            } else {
+              const deleteStatus = DeletePropertyOrThrow($, O, toKey);
+              if (IsAbrupt(deleteStatus)) return deleteStatus;
+            }
+            from += direction;
+            to += direction;
+          }
+          return O;
+        }),
 
         /**
          * 23.1.3.5 Array.prototype.entries ( )
@@ -827,6 +865,11 @@ export const arrayObject: Plugin = {
          * 1. Let O be ? ToObject(this value).
          * 2. Return CreateArrayIterator(O, key+value).
          */
+        'entries': method(function*($, thisValue) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          return CreateArrayIterator($, O, 'key+value');
+        }),
 
         /**
          * 23.1.3.6 Array.prototype.every ( callbackfn [ , thisArg ] )
@@ -887,6 +930,28 @@ export const arrayObject: Plugin = {
          * be transferred to other kinds of objects for use as a
          * method.
          */
+        'every': method(function*($, thisValue, callbackfn, thisArg = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!IsCallable(callbackfn)) {
+            return $.throw('TypeError', `${DebugString(callbackfn)} is not a function`);
+          }
+          for (let k = 0; k < len; k++) {
+            const Pk = String(k);
+            const kPresent = HasProperty($, O, Pk);
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (kPresent) {
+              const kValue = yield* Get($, O, Pk);
+              if (IsAbrupt(kValue)) return kValue;
+              const callResult = yield* Call($, callbackfn, thisArg, [kValue, k, O]);
+              if (IsAbrupt(callResult)) return callResult;
+              if (!ToBoolean(callResult)) return false;
+            }
+          }
+          return true;
+        }),
 
         /**
          * 23.1.3.7 Array.prototype.fill ( value [ , start [ , end ] ] )
@@ -925,6 +990,24 @@ export const arrayObject: Plugin = {
          * be transferred to other kinds of objects for use as a
          * method.
          */
+        'fill': method(function*($, thisValue, value, start = 0, end = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          let k = LengthRelative(yield* ToIntegerOrInfinity($, start), len);
+          if (IsAbrupt(k)) return k;
+          let final = LengthRelative(
+            end === undefined ? len : yield* ToIntegerOrInfinity($, end), len);
+          if (IsAbrupt(final)) return final;
+          while (k < final) {
+            const Pk = String(k);
+            const setStatus = yield* Set($, O, Pk, value, true);
+            if (IsAbrupt(setStatus)) return setStatus;
+            k++;
+          }
+          return O;
+        }),
 
         /**
          * 23.1.3.8 Array.prototype.filter ( callbackfn [ , thisArg ] )
@@ -986,8 +1069,405 @@ export const arrayObject: Plugin = {
          * be transferred to other kinds of objects for use as a
          * method.
          */
+        'filter': method(function*($, thisValue, callbackfn, thisArg = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!IsCallable(callbackfn)) {
+            return $.throw('TypeError', `${DebugString(callbackfn)} is not a function`);
+          }
+          const A = yield* ArraySpeciesCreate($, O, 0);
+          if (IsAbrupt(A)) return A;
+          for (let k = 0, to = 0; k < len; k++) {
+            const Pk = String(k);
+            const kPresent = HasProperty($, O, Pk);
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (kPresent) {
+              const kValue = yield* Get($, O, Pk);
+              if (IsAbrupt(kValue)) return kValue;
+              const callResult = yield* Call($, callbackfn, thisArg, [kValue, k, O]);
+              if (IsAbrupt(callResult)) return callResult;
+              if (ToBoolean(callResult)) {
+                const createStatus = CreateDataPropertyOrThrow($, A, String(to++), kValue);
+                if (IsAbrupt(createStatus)) return createStatus;
+              }
+            }
+          }
+          return A;
+        }),
 
+        /**
+         * 23.1.3.9 Array.prototype.find ( predicate [ , thisArg ] )
+         * 
+         * NOTE 1: This method calls predicate once for each element
+         * of the array, in ascending index order, until it finds one
+         * where predicate returns a value that coerces to true. If
+         * such an element is found, find immediately returns that
+         * element value. Otherwise, find returns undefined.
+         * 
+         * See FindViaPredicate for additional information.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let findRec be ? FindViaPredicate(O, len, ascending, predicate, thisArg).
+         * 4. Return findRec.[[Value]].
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'find': method(function($, thisValue, predicate, thisArg = undefined) {
+          return FindViaPredicate_Array($, thisValue, false, predicate, thisArg, false);
+        }),
 
+        /**
+         * 23.1.3.10 Array.prototype.findIndex ( predicate [ , thisArg ] )
+         * 
+         * NOTE 1: This method calls predicate once for each element
+         * of the array, in ascending index order, until it finds one
+         * where predicate returns a value that coerces to true. If
+         * such an element is found, findIndex immediately returns the
+         * index of that element value. Otherwise, findIndex returns
+         * -1.
+         * 
+         * See FindViaPredicate for additional information.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let findRec be ? FindViaPredicate(O, len, ascending, predicate, thisArg).
+         * 4. Return findRec.[[Index]].
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'findIndex': method(function($, thisValue, predicate, thisArg = undefined) {
+          return FindViaPredicate_Array($, thisValue, false, predicate, thisArg, true);
+        }),
+
+        /**
+         * 23.1.3.11 Array.prototype.findLast ( predicate [ , thisArg ] )
+         * 
+         * NOTE 1: This method calls predicate once for each element
+         * of the array, in descending index order, until it finds one
+         * where predicate returns a value that coerces to true. If
+         * such an element is found, findLast immediately returns that
+         * element value. Otherwise, findLast returns undefined.
+         * 
+         * See FindViaPredicate for additional information.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let findRec be ? FindViaPredicate(O, len, descending, predicate, thisArg).
+         * 4. Return findRec.[[Value]].
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array object. Therefore
+         * it can be transferred to other kinds of objects for use as
+         * a method.
+         */
+        'findLast': method(function($, thisValue, predicate, thisArg = undefined) {
+          return FindViaPredicate_Array($, thisValue, true, predicate, thisArg, false);
+        }),
+
+        /**
+         * 23.1.3.12 Array.prototype.findLastIndex ( predicate [ , thisArg ] )
+         * 
+         * NOTE 1: This method calls predicate once for each element
+         * of the array, in descending index order, until it finds one
+         * where predicate returns a value that coerces to true. If
+         * such an element is found, findLastIndex immediately returns
+         * the index of that element value. Otherwise, findLastIndex
+         * returns -1.
+         * 
+         * See FindViaPredicate for additional information.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let findRec be ? FindViaPredicate(O, len, descending, predicate, thisArg).
+         * 4. Return findRec.[[Index]].
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array object. Therefore
+         * it can be transferred to other kinds of objects for use as
+         * a method.
+         */
+        'findLastIndex': method(function($, thisValue, predicate, thisArg = undefined) {
+          return FindViaPredicate_Array($, thisValue, true, predicate, thisArg, true);
+        }),
+
+        /**
+         * 23.1.3.13 Array.prototype.flat ( [ depth ] )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let sourceLen be ? LengthOfArrayLike(O).
+         * 3. Let depthNum be 1.
+         * 4. If depth is not undefined, then
+         *     a. Set depthNum to ? ToIntegerOrInfinity(depth).
+         *     b. If depthNum < 0, set depthNum to 0.
+         * 5. Let A be ? ArraySpeciesCreate(O, 0).
+         * 6. Perform ? FlattenIntoArray(A, O, sourceLen, 0, depthNum).
+         * 7. Return A.
+         */
+        'flat': method(function*($, thisValue, depth = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const sourceLen = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(sourceLen)) return sourceLen;
+          let depthNum: CR<number> = 1;
+          if (depth !== undefined) {
+            depthNum = yield* ToIntegerOrInfinity($, depth);
+            if (IsAbrupt(depthNum)) return depthNum;
+            if (depthNum < 0) depthNum = 0;
+          }
+          const A = yield* ArraySpeciesCreate($, O, 0);
+          if (IsAbrupt(A)) return A;
+          const flattenStatus = yield* FlattenIntoArray($, A, O, sourceLen, 0, depthNum);
+          if (IsAbrupt(flattenStatus)) return flattenStatus;
+          return A;
+        }),
+
+        /**
+         * 23.1.3.14 Array.prototype.flatMap ( mapperFunction [ , thisArg ] )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let sourceLen be ? LengthOfArrayLike(O).
+         * 3. If IsCallable(mapperFunction) is false, throw a TypeError exception.
+         * 4. Let A be ? ArraySpeciesCreate(O, 0).
+         * 5. Perform ? FlattenIntoArray(A, O, sourceLen, 0, 1, mapperFunction, thisArg).
+         * 6. Return A.
+         */
+        'flatMap': method(function*($, thisValue, mapperFunction, thisArg = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const sourceLen = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(sourceLen)) return sourceLen;
+          if (!IsCallable(mapperFunction)) {
+            return $.throw('TypeError', `${DebugString(mapperFunction)} is not a function`);
+          }
+          const A = yield* ArraySpeciesCreate($, O, 0);
+          if (IsAbrupt(A)) return A;
+          const flattenStatus = yield* FlattenIntoArray(
+            $, A, O, sourceLen, 0, 1, mapperFunction, thisArg);
+          if (IsAbrupt(flattenStatus)) return flattenStatus;
+          return A;
+        }),
+
+        /**
+         * 23.1.3.15 Array.prototype.forEach ( callbackfn [ , thisArg ] )
+         * 
+         * NOTE 1: callbackfn should be a function that accepts three
+         * arguments. forEach calls callbackfn once for each element
+         * present in the array, in ascending order. callbackfn is
+         * called only for elements of the array which actually exist;
+         * it is not called for missing elements of the array.
+         * 
+         * If a thisArg parameter is provided, it will be used as the
+         * this value for each invocation of callbackfn. If it is not
+         * provided, undefined is used instead.
+         * 
+         * callbackfn is called with three arguments: the value of the
+         * element, the index of the element, and the object being
+         * traversed.
+         * 
+         * forEach does not directly mutate the object on which it is
+         * called but the object may be mutated by the calls to
+         * callbackfn.
+         * 
+         * The range of elements processed by forEach is set before
+         * the first call to callbackfn. Elements which are appended
+         * to the array after the call to forEach begins will not be
+         * visited by callbackfn. If existing elements of the array
+         * are changed, their value as passed to callbackfn will be
+         * the value at the time forEach visits them; elements that
+         * are deleted after the call to forEach begins and before
+         * being visited are not visited.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If IsCallable(callbackfn) is false, throw a TypeError exception.
+         * 4. Let k be 0.
+         * 5. Repeat, while k < len,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. Let kPresent be ? HasProperty(O, Pk).
+         *     c. If kPresent is true, then
+         *         i. Let kValue be ? Get(O, Pk).
+         *         ii. Perform ? Call(callbackfn, thisArg, « kValue, 𝔽(k), O »).
+         *     d. Set k to k + 1.
+         * 6. Return undefined.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'forEach': method(function*($, thisValue, callbackfn, thisArg = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!IsCallable(callbackfn)) {
+            return $.throw('TypeError', `${DebugString(callbackfn)} is not a function`);
+          }
+          for (let k = 0; k < len; k++) {
+            const Pk = String(k);
+            const kPresent = HasProperty($, O, Pk);
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (kPresent) {
+              const kValue = yield* Get($, O, Pk);
+              if (IsAbrupt(kValue)) return kValue;
+              const callStatus = yield* Call($, callbackfn, thisArg, [kValue, k, O]);
+              if (IsAbrupt(callStatus)) return callStatus;
+            }
+          }
+          return undefined;
+        }),
+
+        /**
+         * 23.1.3.16 Array.prototype.includes ( searchElement [ , fromIndex ] )
+         * 
+         * NOTE 1: This method compares searchElement to the elements
+         * of the array, in ascending order, using the SameValueZero
+         * algorithm, and if found at any position, returns true;
+         * otherwise, it returns false.
+         * 
+         * The optional second argument fromIndex defaults to +0𝔽
+         * (i.e. the whole array is searched). If it is greater than
+         * or equal to the length of the array, false is returned,
+         * i.e. the array will not be searched. If it is less than
+         * -0𝔽, it is used as the offset from the end of the array to
+         * compute fromIndex. If the computed index is less than or
+         * equal to +0𝔽, the whole array will be searched.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If len = 0, return false.
+         * 4. Let n be ? ToIntegerOrInfinity(fromIndex).
+         * 5. Assert: If fromIndex is undefined, then n is 0.
+         * 6. If n = +∞, return false.
+         * 7. Else if n = -∞, set n to 0.
+         * 8. If n ≥ 0, then
+         *     a. Let k be n.
+         * 9. Else,
+         *     a. Let k be len + n.
+         *     b. If k < 0, set k to 0.
+         * 10. Repeat, while k < len,
+         *     a. Let elementK be ? Get(O, ! ToString(𝔽(k))).
+         *     b. If SameValueZero(searchElement, elementK) is true, return true.
+         *     c. Set k to k + 1.
+         * 11. Return false.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         * 
+         * NOTE 3: This method intentionally differs from the similar
+         * indexOf method in two ways. First, it uses the
+         * SameValueZero algorithm, instead of IsStrictlyEqual,
+         * allowing it to detect NaN array elements. Second, it does
+         * not skip missing array elements, instead treating them as
+         * undefined.
+         */
+        'includes': method(function*($, thisValue, searchElement, fromIndex = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!len) return false;
+          let n = yield* ToIntegerOrInfinity($, fromIndex);
+          if (IsAbrupt(n)) return n;
+          Assert(fromIndex !== undefined || n === 0);
+          for (let k = n >= 0 ? n : Math.max(len + n, 0); k < len; k++) {
+            const elementK = yield* Get($, O, String(k));
+            if (IsAbrupt(elementK)) return elementK;
+            if (SameValueZero(searchElement, elementK)) return true;
+          }
+          return false;
+        }),
+
+        /**
+         * 23.1.3.17 Array.prototype.indexOf ( searchElement [ , fromIndex ] )
+         * 
+         * This method compares searchElement to the elements of the
+         * array, in ascending order, using the IsStrictlyEqual
+         * algorithm, and if found at one or more indices, returns the
+         * smallest such index; otherwise, it returns -1𝔽.
+         * 
+         * NOTE 1: The optional second argument fromIndex defaults to
+         * +0𝔽 (i.e. the whole array is searched). If it is greater
+         * than or equal to the length of the array, -1𝔽 is returned,
+         * i.e. the array will not be searched. If it is less than -0𝔽,
+         * it is used as the offset from the end of the array to
+         * compute fromIndex. If the computed index is less than or
+         * equal to +0𝔽, the whole array will be searched.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If len = 0, return -1𝔽.
+         * 4. Let n be ? ToIntegerOrInfinity(fromIndex).
+         * 5. Assert: If fromIndex is undefined, then n is 0.
+         * 6. If n = +∞, return -1𝔽.
+         * 7. Else if n = -∞, set n to 0.
+         * 8. If n ≥ 0, then
+         *     a. Let k be n.
+         * 9. Else,
+         *     a. Let k be len + n.
+         *     b. If k < 0, set k to 0.
+         * 10. Repeat, while k < len,
+         *     a. Let kPresent be ? HasProperty(O, ! ToString(𝔽(k))).
+         *     b. If kPresent is true, then
+         *         i. Let elementK be ? Get(O, ! ToString(𝔽(k))).
+         *         ii. If IsStrictlyEqual(searchElement, elementK) is true, return 𝔽(k).
+         *     c. Set k to k + 1.
+         * 11. Return -1𝔽.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'indexOf': method(function*($, thisValue, searchElement, fromIndex = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!len) return -1;
+          let n = yield* ToIntegerOrInfinity($, fromIndex);
+          if (IsAbrupt(n)) return n;
+          Assert(fromIndex !== undefined || n === 0);
+          for (let k = n >= 0 ? n : Math.max(len + n, 0); k < len; k++) {
+            const kPresent = HasProperty($, O, String(k));
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (kPresent) {
+              const elementK = yield* Get($, O, String(k));
+              if (IsAbrupt(elementK)) return elementK;
+              if (IsStrictlyEqual(searchElement, elementK)) return k;
+            }
+          }
+          return -1;
+        }),
 
         /**
          * 23.1.3.18 Array.prototype.join ( separator )
@@ -1040,6 +1520,209 @@ export const arrayObject: Plugin = {
         }),
 
         /**
+         * 23.1.3.19 Array.prototype.keys ( )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Return CreateArrayIterator(O, key).
+         */
+        'keys': method(function*($, thisValue) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          return CreateArrayIterator($, O, 'key');
+        }),
+
+        /**
+         * 23.1.3.20 Array.prototype.lastIndexOf ( searchElement [ , fromIndex ] )
+         * 
+         * NOTE 1: This method compares searchElement to the elements
+         * of the array in descending order using the IsStrictlyEqual
+         * algorithm, and if found at one or more indices, returns the
+         * largest such index; otherwise, it returns -1𝔽.
+         * 
+         * The optional second argument fromIndex defaults to the
+         * array\'s length minus one (i.e. the whole array is
+         * searched). If it is greater than or equal to the length of
+         * the array, the whole array will be searched. If it is less
+         * than -0𝔽, it is used as the offset from the end of the
+         * array to compute fromIndex. If the computed index is less
+         * than or equal to +0𝔽, -1𝔽 is returned.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If len = 0, return -1𝔽.
+         * 4. If fromIndex is present, let n be
+         *    ? ToIntegerOrInfinity(fromIndex); else let n be len - 1.
+         * 5. If n = -∞, return -1𝔽.
+         * 6. If n ≥ 0, then
+         *     a. Let k be min(n, len - 1).
+         * 7. Else,
+         *     a. Let k be len + n.
+         * 8. Repeat, while k ≥ 0,
+         *     a. Let kPresent be ? HasProperty(O, ! ToString(𝔽(k))).
+         *     b. If kPresent is true, then
+         *         i. Let elementK be ? Get(O, ! ToString(𝔽(k))).
+         *         ii. If IsStrictlyEqual(searchElement, elementK) is true, return 𝔽(k).
+         *     c. Set k to k - 1.
+         * 9. Return -1𝔽.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'lastIndexOf': method(function*($, thisValue, searchElement, fromIndex = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!len) return -1;
+          let n = fromIndex === undefined ? len - 1 :
+            yield* ToIntegerOrInfinity($, fromIndex);
+          if (IsAbrupt(n)) return n;
+          for (let k = n >= 0 ? Math.min(n, len - 1) : len + n; k >= 0; k--) {
+            const kPresent = HasProperty($, O, String(k));
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (kPresent) {
+              const elementK = yield* Get($, O, String(k));
+              if (IsAbrupt(elementK)) return elementK;
+              if (IsStrictlyEqual(searchElement, elementK)) return k;
+            }
+          }
+          return -1;
+        }),
+
+        /**
+         * 23.1.3.21 Array.prototype.map ( callbackfn [ , thisArg ] )
+         * 
+         * NOTE 1: callbackfn should be a function that accepts three
+         * arguments. map calls callbackfn once for each element in
+         * the array, in ascending order, and constructs a new Array
+         * from the results. callbackfn is called only for elements of
+         * the array which actually exist; it is not called for
+         * missing elements of the array.
+         * 
+         * If a thisArg parameter is provided, it will be used as the
+         * this value for each invocation of callbackfn. If it is not
+         * provided, undefined is used instead.
+         * 
+         * callbackfn is called with three arguments: the value of the
+         * element, the index of the element, and the object being
+         * traversed.
+         * 
+         * map does not directly mutate the object on which it is
+         * called but the object may be mutated by the calls to
+         * callbackfn.
+         * 
+         * The range of elements processed by map is set before the
+         * first call to callbackfn. Elements which are appended to
+         * the array after the call to map begins will not be visited
+         * by callbackfn. If existing elements of the array are
+         * changed, their value as passed to callbackfn will be the
+         * value at the time map visits them; elements that are
+         * deleted after the call to map begins and before being
+         * visited are not visited.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If IsCallable(callbackfn) is false, throw a TypeError exception.
+         * 4. Let A be ? ArraySpeciesCreate(O, len).
+         * 5. Let k be 0.
+         * 6. Repeat, while k < len,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. Let kPresent be ? HasProperty(O, Pk).
+         *     c. If kPresent is true, then
+         *         i. Let kValue be ? Get(O, Pk).
+         *         ii. Let mappedValue be ? Call(callbackfn, thisArg, « kValue, 𝔽(k), O »).
+         *         iii. Perform ? CreateDataPropertyOrThrow(A, Pk, mappedValue).
+         *     d. Set k to k + 1.
+         * 7. Return A.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'map': method(function*($, thisValue, callbackfn, thisArg = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!IsCallable(callbackfn)) {
+            return $.throw('TypeError', `${DebugString(callbackfn)} is not a function`);
+          }
+          const A = yield* ArraySpeciesCreate($, O, len);
+          if (IsAbrupt(A)) return A;
+          for (let k = 0; k < len; k++) {
+            const Pk = String(k);
+            const kPresent = HasProperty($, O, Pk);
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (kPresent) {
+              const kValue = yield* Get($, O, Pk);
+              if (IsAbrupt(kValue)) return kValue;
+              const mappedValue = yield* Call($, callbackfn, thisArg, [kValue, k, O]);
+              if (IsAbrupt(mappedValue)) return mappedValue;
+              const createStatus = CreateDataPropertyOrThrow($, A, Pk, mappedValue);
+              if (IsAbrupt(createStatus)) return createStatus;
+            }
+          }
+          return A;
+        }),
+
+        /**
+         * 23.1.3.22 Array.prototype.pop ( )
+         * 
+         * NOTE 1: This method removes the last element of the array
+         * and returns it.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If len = 0, then
+         *     a. Perform ? Set(O, "length", +0𝔽, true).
+         *     b. Return undefined.
+         * 4. Else,
+         *     a. Assert: len > 0.
+         *     b. Let newLen be 𝔽(len - 1).
+         *     c. Let index be ! ToString(newLen).
+         *     d. Let element be ? Get(O, index).
+         *     e. Perform ? DeletePropertyOrThrow(O, index).
+         *     f. Perform ? Set(O, "length", newLen, true).
+         *     g. Return element.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'pop': method(function*($, thisValue) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!len) {
+            const setStatus = yield* Set($, O, 'length', 0, true);
+            if (IsAbrupt(setStatus)) return setStatus;
+            return undefined;
+          }
+          const newLen = len - 1;
+          const index = String(newLen);
+          const element = yield* Get($, O, index);
+          if (IsAbrupt(element)) return element;
+          const deleteStatus = DeletePropertyOrThrow($, O, index);
+          if (IsAbrupt(deleteStatus)) return deleteStatus;
+          const setStatus = yield* Set($, O, 'length', newLen, true);
+          if (IsAbrupt(setStatus)) return setStatus;
+          return element;
+        }),
+
+        /**
          * 23.1.3.23 Array.prototype.push ( ...items )
          * 
          * NOTE 1: This method appends the arguments to the end of the
@@ -1082,6 +1765,556 @@ export const arrayObject: Plugin = {
           if (IsAbrupt(setStatus)) return setStatus;
           return len;
         }),
+
+        /**
+         * 23.1.3.24 Array.prototype.reduce ( callbackfn [ , initialValue ] )
+         * 
+         * NOTE 1: callbackfn should be a function that takes four
+         * arguments. reduce calls the callback, as a function, once
+         * for each element after the first element present in the
+         * array, in ascending order.
+         * 
+         * callbackfn is called with four arguments: the previousValue
+         * (value from the previous call to callbackfn), the
+         * currentValue (value of the current element), the
+         * currentIndex, and the object being traversed. The first
+         * time that callback is called, the previousValue and
+         * currentValue can be one of two values. If an initialValue
+         * was supplied in the call to reduce, then previousValue will
+         * be initialValue and currentValue will be the first value in
+         * the array. If no initialValue was supplied, then
+         * previousValue will be the first value in the array and
+         * currentValue will be the second. It is a TypeError if the
+         * array contains no elements and initialValue is not
+         * provided.
+         * 
+         * reduce does not directly mutate the object on which it is
+         * called but the object may be mutated by the calls to
+         * callbackfn.
+         * 
+         * The range of elements processed by reduce is set before the
+         * first call to callbackfn. Elements that are appended to the
+         * array after the call to reduce begins will not be visited
+         * by callbackfn. If existing elements of the array are
+         * changed, their value as passed to callbackfn will be the
+         * value at the time reduce visits them; elements that are
+         * deleted after the call to reduce begins and before being
+         * visited are not visited.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If IsCallable(callbackfn) is false, throw a TypeError exception.
+         * 4. If len = 0 and initialValue is not present, throw a TypeError exception.
+         * 5. Let k be 0.
+         * 6. Let accumulator be undefined.
+         * 7. If initialValue is present, then
+         *     a. Set accumulator to initialValue.
+         * 8. Else,
+         *     a. Let kPresent be false.
+         *     b. Repeat, while kPresent is false and k < len,
+         *         i. Let Pk be ! ToString(𝔽(k)).
+         *         ii. Set kPresent to ? HasProperty(O, Pk).
+         *         iii. If kPresent is true, then
+         *             1. Set accumulator to ? Get(O, Pk).
+         *         iv. Set k to k + 1.
+         *     c. If kPresent is false, throw a TypeError exception.
+         * 9. Repeat, while k < len,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. Let kPresent be ? HasProperty(O, Pk).
+         *     c. If kPresent is true, then
+         *         i. Let kValue be ? Get(O, Pk).
+         *         ii. Set accumulator to ? Call(callbackfn,
+         *             undefined, « accumulator, kValue, 𝔽(k), O »).
+         *     d. Set k to k + 1.
+         * 10. Return accumulator.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'reduce': method(function*($, thisValue, callbackfn, initialValue = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!IsCallable(callbackfn)) {
+            return $.throw('TypeError', `${DebugString(callbackfn)} is not a function`);
+          }
+          const initialValuePresent = arguments.length > 3;
+          if (!len && !initialValuePresent) {
+            return $.throw('TypeError', 'Reduce of empty array with no initial value');
+          }
+          let k = 0;
+          let accumulator: CR<Val> = initialValue;
+          if (!initialValuePresent) {
+            let kPresent: CR<boolean> = false;
+            for (; !kPresent && k < len; k++) {
+              const Pk = String(k);
+              kPresent = HasProperty($, O, Pk);
+              if (IsAbrupt(kPresent)) return kPresent;
+              if (!kPresent) continue;
+              accumulator = yield* Get($, O, Pk);
+              if (IsAbrupt(accumulator)) return accumulator;
+            }
+            if (!kPresent) {
+              return $.throw('TypeError', 'Reduce of empty array with no initial value');
+            }
+          }
+          for (; k < len; k++) {
+            const Pk = String(k);
+            const kPresent = HasProperty($, O, Pk);
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (!kPresent) continue;
+            const kValue = yield* Get($, O, Pk);
+            if (IsAbrupt(kValue)) return kValue;
+            accumulator = yield* Call($, callbackfn, undefined, [accumulator, kValue, k, O]);
+            if (IsAbrupt(accumulator)) return accumulator;
+          }
+          return accumulator;
+        }),
+
+        /**
+         * 23.1.3.25 Array.prototype.reduceRight ( callbackfn [ , initialValue ] )
+         * 
+         * NOTE 1: callbackfn should be a function that takes four
+         * arguments. reduceRight calls the callback, as a function,
+         * once for each element after the first element present in
+         * the array, in descending order.
+         * 
+         * callbackfn is called with four arguments: the previousValue
+         * (value from the previous call to callbackfn), the
+         * currentValue (value of the current element), the
+         * currentIndex, and the object being traversed. The first
+         * time the function is called, the previousValue and
+         * currentValue can be one of two values. If an initialValue
+         * was supplied in the call to reduceRight, then previousValue
+         * will be initialValue and currentValue will be the last
+         * value in the array. If no initialValue was supplied, then
+         * previousValue will be the last value in the array and
+         * currentValue will be the second-to-last value. It is a
+         * TypeError if the array contains no elements and
+         * initialValue is not provided.
+         * 
+         * reduceRight does not directly mutate the object on which it
+         * is called but the object may be mutated by the calls to
+         * callbackfn.
+         * 
+         * The range of elements processed by reduceRight is set
+         * before the first call to callbackfn. Elements that are
+         * appended to the array after the call to reduceRight begins
+         * will not be visited by callbackfn. If existing elements of
+         * the array are changed by callbackfn, their value as passed
+         * to callbackfn will be the value at the time reduceRight
+         * visits them; elements that are deleted after the call to
+         * reduceRight begins and before being visited are not
+         * visited.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If IsCallable(callbackfn) is false, throw a TypeError exception.
+         * 4. If len = 0 and initialValue is not present, throw a TypeError exception.
+         * 5. Let k be len - 1.
+         * 6. Let accumulator be undefined.
+         * 7. If initialValue is present, then
+         *     a. Set accumulator to initialValue.
+         * 8. Else,
+         *     a. Let kPresent be false.
+         *     b. Repeat, while kPresent is false and k ≥ 0,
+         *         i. Let Pk be ! ToString(𝔽(k)).
+         *         ii. Set kPresent to ? HasProperty(O, Pk).
+         *         iii. If kPresent is true, then
+         *             1. Set accumulator to ? Get(O, Pk).
+         *         iv. Set k to k - 1.
+         *     c. If kPresent is false, throw a TypeError exception.
+         * 9. Repeat, while k ≥ 0,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. Let kPresent be ? HasProperty(O, Pk).
+         *     c. If kPresent is true, then
+         *         i. Let kValue be ? Get(O, Pk).
+         *         ii. Set accumulator to ? Call(callbackfn,
+         *             undefined, « accumulator, kValue, 𝔽(k), O »).
+         *     d. Set k to k - 1.
+         * 10. Return accumulator.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'reduceRight': method(function*($, thisValue, callbackfn, initialValue = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!IsCallable(callbackfn)) {
+            return $.throw('TypeError', `${DebugString(callbackfn)} is not a function`);
+          }
+          const initialValuePresent = arguments.length > 3;
+          if (!len && !initialValuePresent) {
+            return $.throw('TypeError', 'Reduce of empty array with no initial value');
+          }
+          let k = len - 1;
+          let accumulator: CR<Val> = initialValue;
+          if (!initialValuePresent) {
+            let kPresent: CR<boolean> = false;
+            for (; !kPresent && k >= 0; k--) {
+              const Pk = String(k);
+              kPresent = HasProperty($, O, Pk);
+              if (IsAbrupt(kPresent)) return kPresent;
+              if (!kPresent) continue;
+              accumulator = yield* Get($, O, Pk);
+              if (IsAbrupt(accumulator)) return accumulator;
+            }
+            if (!kPresent) {
+              return $.throw('TypeError', 'Reduce of empty array with no initial value');
+            }
+          }
+          for (; k >= 0; k--) {
+            const Pk = String(k);
+            const kPresent = HasProperty($, O, Pk);
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (!kPresent) continue;
+            const kValue = yield* Get($, O, Pk);
+            if (IsAbrupt(kValue)) return kValue;
+            accumulator = yield* Call($, callbackfn, undefined, [accumulator, kValue, k, O]);
+            if (IsAbrupt(accumulator)) return accumulator;
+          }
+          return accumulator;
+        }),
+
+        /**
+         * 23.1.3.26 Array.prototype.reverse ( )
+         * 
+         * NOTE 1: This method rearranges the elements of the array so
+         * as to reverse their order. It returns the object as the
+         * result of the call.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let middle be floor(len / 2).
+         * 4. Let lower be 0.
+         * 5. Repeat, while lower ≠ middle,
+         *     a. Let upper be len - lower - 1.
+         *     b. Let upperP be ! ToString(𝔽(upper)).
+         *     c. Let lowerP be ! ToString(𝔽(lower)).
+         *     d. Let lowerExists be ? HasProperty(O, lowerP).
+         *     e. If lowerExists is true, then
+         *         i. Let lowerValue be ? Get(O, lowerP).
+         *     f. Let upperExists be ? HasProperty(O, upperP).
+         *     g. If upperExists is true, then
+         *         i. Let upperValue be ? Get(O, upperP).
+         *     h. If lowerExists is true and upperExists is true, then
+         *         i. Perform ? Set(O, lowerP, upperValue, true).
+         *         ii. Perform ? Set(O, upperP, lowerValue, true).
+         *         i. Else if lowerExists is false and upperExists is true, then
+         *         i. Perform ? Set(O, lowerP, upperValue, true).
+         *         ii. Perform ? DeletePropertyOrThrow(O, upperP).
+         *     j. Else if lowerExists is true and upperExists is false, then
+         *         i. Perform ? DeletePropertyOrThrow(O, lowerP).
+         *         ii. Perform ? Set(O, upperP, lowerValue, true).
+         *     k. Else,
+         *         i. Assert: lowerExists and upperExists are both false.
+         *         ii. NOTE: No action is required.
+         *     l. Set lower to lower + 1.
+         * 6. Return O.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore, it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'reverse': method(function*($, thisValue) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          const middle = Math.floor(len / 2);
+          let lower = 0;
+          while (lower !== middle) {
+            const upper = len - lower - 1;
+            const upperP = String(upper);
+            const lowerP = String(lower);
+            const lowerExists = HasProperty($, O, lowerP);
+            let lowerValue: Val;
+            let upperValue: Val;
+            if (IsAbrupt(lowerExists)) return lowerExists;
+            if (lowerExists) {
+              const v = yield* Get($, O, lowerP);
+              if (IsAbrupt(v)) return v;
+              lowerValue = v;
+            }
+            const upperExists = HasProperty($, O, upperP);
+            if (IsAbrupt(upperExists)) return upperExists;
+            if (upperExists) {
+              const v = yield* Get($, O, upperP);
+              if (IsAbrupt(v)) return v;
+              upperValue = v;
+            }
+            if (lowerExists && upperExists) {
+              let status = yield* Set($, O, lowerP, upperValue, true);
+              if (IsAbrupt(status)) return status;
+              status = yield* Set($, O, upperP, lowerValue, true);
+              if (IsAbrupt(status)) return status;
+            } else if (lowerExists && !upperExists) {
+              let status = yield* Set($, O, upperP, lowerValue, true);
+              if (IsAbrupt(status)) return status;
+              status = DeletePropertyOrThrow($, O, lowerP);
+              if (IsAbrupt(status)) return status;
+            } else if (!lowerExists && upperExists) {
+              let status = DeletePropertyOrThrow($, O, upperP);
+              if (IsAbrupt(status)) return status;
+              status = yield* Set($, O, lowerP, upperValue, true);
+              if (IsAbrupt(status)) return status;
+            }
+            lower++;
+          }
+          return O;
+        }),
+
+        /**
+         * 23.1.3.27 Array.prototype.shift ( )
+         * 
+         * This method removes the first element of the array and returns it.
+         * 
+         * It performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If len = 0, then
+         *     a. Perform ? Set(O, "length", +0𝔽, true).
+         *     b. Return undefined.
+         * 4. Let first be ? Get(O, "0").
+         * 5. Let k be 1.
+         * 6. Repeat, while k < len,
+         *     a. Let from be ! ToString(𝔽(k)).
+         *     b. Let to be ! ToString(𝔽(k - 1)).
+         *     c. Let fromPresent be ? HasProperty(O, from).
+         *     d. If fromPresent is true, then
+         *         i. Let fromVal be ? Get(O, from).
+         *         ii. Perform ? Set(O, to, fromVal, true).
+         *     e. Else,
+         *         i. Assert: fromPresent is false.
+         *         ii. Perform ? DeletePropertyOrThrow(O, to).
+         *     f. Set k to k + 1.
+         * 7. Perform ? DeletePropertyOrThrow(O, ! ToString(𝔽(len - 1))).
+         * 8. Perform ? Set(O, "length", 𝔽(len - 1), true).
+         * 9. Return first.
+         * 
+         * NOTE: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'shift': method(function*($, thisValue) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!len) {
+            const setStatus = yield* Set($, O, 'length', 0, true);
+            if (IsAbrupt(setStatus)) return setStatus;
+            return undefined;
+          }
+          const first = yield* Get($, O, '0');
+          if (IsAbrupt(first)) return first;
+          let k = 1;
+          while (k < len) {
+            const from = String(k);
+            const to = String(k - 1);
+            const fromPresent = HasProperty($, O, from);
+            if (IsAbrupt(fromPresent)) return fromPresent;
+            if (fromPresent) {
+              const fromVal = yield* Get($, O, from);
+              if (IsAbrupt(fromVal)) return fromVal;
+              const setStatus = yield* Set($, O, to, fromVal, true);
+              if (IsAbrupt(setStatus)) return setStatus;
+            } else {
+              const deleteStatus = DeletePropertyOrThrow($, O, to);
+              if (IsAbrupt(deleteStatus)) return deleteStatus;
+            }
+            k++;
+          }
+          const deleteStatus = DeletePropertyOrThrow($, O, String(len - 1));
+          if (IsAbrupt(deleteStatus)) return deleteStatus;
+          const setStatus = yield* Set($, O, 'length', len - 1, true);
+          if (IsAbrupt(setStatus)) return setStatus;
+          return first;
+        }),
+
+        /**
+         * 23.1.3.28 Array.prototype.slice ( start, end )
+         * 
+         * This method returns an array containing the elements of the
+         * array from element start up to, but not including, element
+         * end (or through the end of the array if end is
+         * undefined). If start is negative, it is treated as length +
+         * start where length is the length of the array. If end is
+         * negative, it is treated as length + end where length is the
+         * length of the array.
+         * 
+         * It performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let relativeStart be ? ToIntegerOrInfinity(start).
+         * 4. If relativeStart = -∞, let k be 0.
+         * 5. Else if relativeStart < 0, let k be max(len + relativeStart, 0).
+         * 6. Else, let k be min(relativeStart, len).
+         * 7. If end is undefined, let relativeEnd be len; else let
+         *    relativeEnd be ? ToIntegerOrInfinity(end).
+         * 8. If relativeEnd = -∞, let final be 0.
+         * 9. Else if relativeEnd < 0, let final be max(len + relativeEnd, 0).
+         * 10. Else, let final be min(relativeEnd, len).
+         * 11. Let count be max(final - k, 0).
+         * 12. Let A be ? ArraySpeciesCreate(O, count).
+         * 13. Let n be 0.
+         * 14. Repeat, while k < final,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. Let kPresent be ? HasProperty(O, Pk).
+         *     c. If kPresent is true, then
+         *         i. Let kValue be ? Get(O, Pk).
+         *         ii. Perform ? CreateDataPropertyOrThrow(A, ! ToString(𝔽(n)), kValue).
+         *     d. Set k to k + 1.
+         *     e. Set n to n + 1.
+         * 15. Perform ? Set(A, "length", 𝔽(n), true).
+         * 16. Return A.
+         * 
+         * NOTE 1: The explicit setting of the "length" property of
+         * the result Array in step 15 was necessary in previous editions
+         * of ECMAScript to ensure that its length was correct in
+         * situations where the trailing elements of the result Array
+         * were not present. Setting "length" became unnecessary
+         * starting in ES2015 when the result Array was initialized to
+         * its proper length rather than an empty Array but is carried
+         * forward to preserve backward compatibility.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'slice': method(function*($, thisValue, start, end) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          let k = LengthRelative(yield* ToIntegerOrInfinity($, start), len);
+          if (IsAbrupt(k)) return k;
+          let final = LengthRelative(
+            end === undefined ? len : yield* ToIntegerOrInfinity($, end), len);
+          if (IsAbrupt(final)) return final;
+          const count = Math.max(final - k, 0);
+          const A = yield* ArraySpeciesCreate($, O, count);
+          if (IsAbrupt(A)) return A;
+          let n = 0;
+          while (k < final) {
+            const Pk = String(k);
+            const kPresent = HasProperty($, O, Pk);
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (kPresent) {
+              const kValue = yield* Get($, O, Pk);
+              if (IsAbrupt(kValue)) return kValue;
+              const createStatus = CreateDataPropertyOrThrow($, A, String(n), kValue);
+              if (IsAbrupt(createStatus)) return createStatus;
+            }
+            k++;
+            n++;
+          }
+          const setStatus = yield* Set($, A, 'length', n, true);
+          if (IsAbrupt(setStatus)) return setStatus;
+          return A;
+        }),
+
+        /**
+         * 23.1.3.29 Array.prototype.some ( callbackfn [ , thisArg ] )
+         * 
+         * NOTE 1: callbackfn should be a function that accepts three
+         * arguments and returns a value that is coercible to a
+         * Boolean value. some calls callbackfn once for each element
+         * present in the array, in ascending order, until it finds
+         * one where callbackfn returns true. If such an element is
+         * found, some immediately returns true. Otherwise, some
+         * returns false. callbackfn is called only for elements of
+         * the array which actually exist; it is not called for
+         * missing elements of the array.
+         * 
+         * If a thisArg parameter is provided, it will be used as the
+         * this value for each invocation of callbackfn. If it is not
+         * provided, undefined is used instead.
+         * 
+         * callbackfn is called with three arguments: the value of the
+         * element, the index of the element, and the object being
+         * traversed.
+         * 
+         * some does not directly mutate the object on which it is
+         * called but the object may be mutated by the calls to
+         * callbackfn.
+         * 
+         * The range of elements processed by some is set before the
+         * first call to callbackfn. Elements that are appended to the
+         * array after the call to some begins will not be visited by
+         * callbackfn. If existing elements of the array are changed,
+         * their value as passed to callbackfn will be the value at
+         * the time that some visits them; elements that are deleted
+         * after the call to some begins and before being visited are
+         * not visited. some acts like the "exists" quantifier in
+         * mathematics. In particular, for an empty array, it returns
+         * false.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. If IsCallable(callbackfn) is false, throw a TypeError exception.
+         * 4. Let k be 0.
+         * 5. Repeat, while k < len,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. Let kPresent be ? HasProperty(O, Pk).
+         *     c. If kPresent is true, then
+         *         i. Let kValue be ? Get(O, Pk).
+         *         ii. Let testResult be ToBoolean(? Call(callbackfn,
+         *             thisArg, « kValue, 𝔽(k), O »)).
+         *         iii. If testResult is true, return true.
+         *     d. Set k to k + 1.
+         * 6. Return false.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'some': method(function*($, thisValue, callbackfn, thisArg = undefined) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          if (!IsCallable(callbackfn)) {
+            return $.throw('TypeError', `${DebugString(callbackfn)} is not a function`);
+          }
+          for (let k = 0; k < len; k++) {
+            const Pk = String(k);
+            const kPresent = HasProperty($, O, Pk);
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (kPresent) {
+              const kValue = yield* Get($, O, Pk);
+              if (IsAbrupt(kValue)) return kValue;
+              const callResult = yield* Call($, callbackfn, thisArg, [kValue, k, O]);
+              if (IsAbrupt(callResult)) return callResult;
+              if (ToBoolean(callResult)) return true;
+            }
+          }
+          return false;
+        }),
+
+        // TODO - sort will be a pain... :-( unshift shoudl be easy
+
       });
 
       // TODO - peel this off - arrays are only iterable if we _have_ an iterator.
@@ -1129,6 +2362,7 @@ export const arrayObject: Plugin = {
   },
 };
 
+
 /**
  * 23.1.3.2.1 IsConcatSpreadable ( O )
  * 
@@ -1148,6 +2382,202 @@ function* IsConcatSpreadable($: VM, O: Val): ECR<boolean> {
   if (IsAbrupt(spreadable)) return spreadable;
   if (spreadable !== undefined) return ToBoolean(spreadable);
   return IsArray($, O);
+}
+
+/**
+ * 23.1.3.12.1 FindViaPredicate ( O, len, direction, predicate, thisArg )
+ * 
+ * The abstract operation FindViaPredicate takes arguments O
+ * (an Object), len (a non-negative integer), direction
+ * (ascending or descending), predicate (an ECMAScript
+ * language value), and thisArg (an ECMAScript language value)
+ * and returns either a normal completion containing a Record
+ * with fields [[Index]] (an integral Number) and [[Value]]
+ * (an ECMAScript language value) or a throw completion.
+ * 
+ * O should be an array-like object or a TypedArray. This
+ * operation calls predicate once for each element of O, in
+ * either ascending index order or descending index order (as
+ * indicated by direction), until it finds one where predicate
+ * returns a value that coerces to true. At that point, this
+ * operation returns a Record that gives the index and value
+ * of the element found. If no such element is found, this
+ * operation returns a Record that specifies -1𝔽 for the index
+ * and undefined for the value.
+ * 
+ * predicate should be a function. When called for an element
+ * of the array, it is passed three arguments: the value of
+ * the element, the index of the element, and the object being
+ * traversed. Its return value will be coerced to a Boolean
+ * value.
+ * 
+ * thisArg will be used as the this value for each invocation
+ * of predicate.
+ * 
+ * This operation does not directly mutate the object on which
+ * it is called, but the object may be mutated by the calls to
+ * predicate.
+ * 
+ * The range of elements processed is set before the first
+ * call to predicate, just before the traversal
+ * begins. Elements that are appended to the array after this
+ * will not be visited by predicate. If existing elements of
+ * the array are changed, their value as passed to predicate
+ * will be the value at the time that this operation visits
+ * them. Elements that are deleted after traversal begins and
+ * before being visited are still visited and are either
+ * looked up from the prototype or are undefined.
+ *
+ * It performs the following steps when called:
+ * 
+ * 1. If IsCallable(predicate) is false, throw a TypeError exception.
+ * 2. If direction is ascending, then
+ *     a. Let indices be a List of the integers in the
+ *        interval from 0 (inclusive) to len (exclusive), in
+ *        ascending order.
+ * 3. Else,
+ *     a. Let indices be a List of the integers in the
+ *        interval from 0 (inclusive) to len (exclusive), in
+ *        descending order.
+ * 4. For each integer k of indices, do
+ *     a. Let Pk be ! ToString(𝔽(k)).
+ *     b. NOTE: If O is a TypedArray, the following invocation
+ *        of Get will return a normal completion.
+ *     c. Let kValue be ? Get(O, Pk).
+ *     d. Let testResult be ? Call(predicate, thisArg, « kValue, 𝔽(k), O »).
+ *     e. If ToBoolean(testResult) is true, return the Record
+ *        { [[Index]]: 𝔽(k), [[Value]]: kValue }.
+ * 5. Return the Record { [[Index]]: -1𝔽, [[Value]]: undefined }.
+ */
+export function* FindViaPredicate(
+  $: VM,
+  O: Obj,
+  len: number,
+  reverse: boolean,
+  predicate: Val,
+  thisArg: Val,
+  returnIndex: boolean,
+): ECR<Val> {
+  if (!IsCallable(predicate)) {
+    return $.throw('TypeError', `${DebugString(predicate)} is not a function`);
+  }
+  for (let i = 0; i < len; i++) {
+    const k = reverse ? len - i - 1 : i;
+    const Pk = String(k);
+    const kValue = yield* Get($, O, Pk);
+    if (IsAbrupt(kValue)) return kValue;
+    const testResult = yield* Call($, predicate, thisArg, [kValue, k, O]);
+    if (IsAbrupt(testResult)) return testResult;
+    if (ToBoolean(testResult)) return returnIndex ? k : kValue;
+  }
+  return returnIndex ? -1 : undefined;
+}
+
+function* FindViaPredicate_Array(
+  $: VM,
+  thisValue: Val,
+  reverse: boolean,
+  predicate: Val,
+  thisArg: Val,
+  returnIndex: boolean,
+): ECR<Val> {
+  const O = ToObject($, thisValue);
+  if (IsAbrupt(O)) return O;
+  const len = yield* LengthOfArrayLike($, O);
+  if (IsAbrupt(len)) return len;
+  return yield* FindViaPredicate($, O, len, reverse, predicate, thisArg, returnIndex);
+}
+
+/**
+ * 23.1.3.13.1 FlattenIntoArray ( target, source, sourceLen,
+ *                                start, depth [ , mapperFunction [ , thisArg ] ] )
+ * 
+ * The abstract operation FlattenIntoArray takes arguments
+ * target (an Object), source (an Object), sourceLen (a
+ * non-negative integer), start (a non-negative integer), and
+ * depth (a non-negative integer or +∞) and optional arguments
+ * mapperFunction (a function object) and thisArg (an
+ * ECMAScript language value) and returns either a normal
+ * completion containing a non-negative integer or a throw
+ * completion. It performs the following steps when called:
+ * 
+ * 1. Assert: If mapperFunction is present, then
+ *    IsCallable(mapperFunction) is true, thisArg is present, and
+ *    depth is 1.
+ * 2. Let targetIndex be start.
+ * 3. Let sourceIndex be +0𝔽.
+ * 4. Repeat, while ℝ(sourceIndex) < sourceLen,
+ *     a. Let P be ! ToString(sourceIndex).
+ *     b. Let exists be ? HasProperty(source, P).
+ *     c. If exists is true, then
+ *         i. Let element be ? Get(source, P).
+ *         ii. If mapperFunction is present, then
+ *             1. Set element to ? Call(mapperFunction,
+ *                thisArg, « element, sourceIndex, source »).
+ *         iii. Let shouldFlatten be false.
+ *         iv. If depth > 0, then
+ *             1. Set shouldFlatten to ? IsArray(element).
+ *         v. If shouldFlatten is true, then
+ *             1. If depth = +∞, let newDepth be +∞.
+ *             2. Else, let newDepth be depth - 1.
+ *             3. Let elementLen be ? LengthOfArrayLike(element).
+ *             4. Set targetIndex to ? FlattenIntoArray(
+ *                target, element, elementLen, targetIndex, newDepth).
+ *         vi. Else,
+ *             1. If targetIndex ≥ 253 - 1, throw a TypeError exception.
+ *             2. Perform ? CreateDataPropertyOrThrow(target,
+ *                ! ToString(𝔽(targetIndex)), element).
+ *             3. Set targetIndex to targetIndex + 1.
+ *     d. Set sourceIndex to sourceIndex + 1𝔽.
+ * 5. Return targetIndex.
+ */
+function* FlattenIntoArray(
+  $: VM,
+  target: Obj,
+  source: Obj,
+  sourceLen: number,
+  start: number,
+  depth: number,
+  mapperFunction?: Val,
+  thisArg?: Val,
+): ECR<number> {
+  Assert(!mapperFunction || (IsCallable(mapperFunction) && depth === 1));
+  let targetIndex: CR<number> = start;
+  let sourceIndex = 0;
+  while (sourceIndex < sourceLen) {
+    const P = String(sourceIndex);
+    const exists = HasProperty($, source, P);
+    if (IsAbrupt(exists)) return exists;
+    if (exists) {
+      let element = yield* Get($, source, P);
+      if (IsAbrupt(element)) return element;
+      if (mapperFunction !== undefined) {
+        element = yield* Call($, mapperFunction, thisArg, [element, sourceIndex, source]);
+        if (IsAbrupt(element)) return element;
+      }
+      let shouldFlatten: CR<boolean> = false;
+      if (depth > 0) {
+        shouldFlatten = IsArray($, element);
+        if (IsAbrupt(shouldFlatten)) return shouldFlatten;
+      }
+      if (shouldFlatten) {
+        Assert(element instanceof Obj);
+        const newDepth = depth - 1;
+        const elementLen = yield* LengthOfArrayLike($, element);
+        if (IsAbrupt(elementLen)) return elementLen;
+        targetIndex = yield* FlattenIntoArray(
+          $, target, element, elementLen, targetIndex, newDepth);
+        if (IsAbrupt(targetIndex)) return targetIndex;
+      } else {
+        if (targetIndex >= Number.MAX_SAFE_INTEGER) {
+          return $.throw('TypeError', 'Array too large');
+        }
+        const setStatus = CreateDataPropertyOrThrow($, target, String(targetIndex), element);
+        if (IsAbrupt(setStatus)) return setStatus;
+      }
+    }
+  }
+  return targetIndex;
 }
 
 /**
@@ -1224,6 +2654,12 @@ export function CreateArrayIterator(
   };
   return CreateIteratorFromClosure(
     $, closure, '%ArrayIteratorPrototype%', $.getIntrinsic('%ArrayIteratorPrototype%')!);
+}
+
+function LengthRelative(signed: CR<number>, len: number): CR<number> {
+  if (IsAbrupt(signed)) return signed;
+  if (signed < 0) return Math.max(len + signed, 0);
+  return Math.min(signed, len);
 }
 
 /**
