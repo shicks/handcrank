@@ -2388,6 +2388,177 @@ export const arrayObject: Plugin = {
           return obj;
         }),
 
+        /**
+         * 23.1.3.31 Array.prototype.splice ( start, deleteCount, ...items )
+         * 
+         * NOTE 1: This method deletes the deleteCount elements of the
+         * array starting at integer index start and replaces them
+         * with the elements of items. It returns an Array containing
+         * the deleted elements (if any).
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let relativeStart be ? ToIntegerOrInfinity(start).
+         * 4. If relativeStart = -∞, let actualStart be 0.
+         * 5. Else if relativeStart < 0, let actualStart be max(len + relativeStart, 0).
+         * 6. Else, let actualStart be min(relativeStart, len).
+         * 7. Let itemCount be the number of elements in items.
+         * 8. If start is not present, then
+         *     a. Let actualDeleteCount be 0.
+         * 9. Else if deleteCount is not present, then
+         *     a. Let actualDeleteCount be len - actualStart.
+         * 10. Else,
+         *     a. Let dc be ? ToIntegerOrInfinity(deleteCount).
+         *     b. Let actualDeleteCount be the result of clamping dc
+         *        between 0 and len - actualStart.
+         * 11. If len + itemCount - actualDeleteCount > 253 - 1, throw
+         *     a TypeError exception.
+         * 12. Let A be ? ArraySpeciesCreate(O, actualDeleteCount).
+         * 13. Let k be 0.
+         * 14. Repeat, while k < actualDeleteCount,
+         *     a. Let from be ! ToString(𝔽(actualStart + k)).
+         *     b. If ? HasProperty(O, from) is true, then
+         *         i. Let fromValue be ? Get(O, from).
+         *         ii. Perform ? CreateDataPropertyOrThrow(A, ! ToString(𝔽(k)), fromValue).
+         *     c. Set k to k + 1.
+         * 15. Perform ? Set(A, "length", 𝔽(actualDeleteCount), true).
+         * 16. If itemCount < actualDeleteCount, then
+         *     a. Set k to actualStart.
+         *     b. Repeat, while k < (len - actualDeleteCount),
+         *         i. Let from be ! ToString(𝔽(k + actualDeleteCount)).
+         *         ii. Let to be ! ToString(𝔽(k + itemCount)).
+         *         iii. If ? HasProperty(O, from) is true, then
+         *             1. Let fromValue be ? Get(O, from).
+         *             2. Perform ? Set(O, to, fromValue, true).
+         *         iv. Else,
+         *             1. Perform ? DeletePropertyOrThrow(O, to).
+         *         v. Set k to k + 1.
+         *     c. Set k to len.
+         *     d. Repeat, while k > (len - actualDeleteCount + itemCount),
+         *         i. Perform ? DeletePropertyOrThrow(O, ! ToString(𝔽(k - 1))).
+         *         ii. Set k to k - 1.
+         * 17. Else if itemCount > actualDeleteCount, then
+         *     a. Set k to (len - actualDeleteCount).
+         *     b. Repeat, while k > actualStart,
+         *         i. Let from be ! ToString(𝔽(k + actualDeleteCount - 1)).
+         *         ii. Let to be ! ToString(𝔽(k + itemCount - 1)).
+         *         iii. If ? HasProperty(O, from) is true, then
+         *             1. Let fromValue be ? Get(O, from).
+         *             2. Perform ? Set(O, to, fromValue, true).
+         *         iv. Else,
+         *             1. Perform ? DeletePropertyOrThrow(O, to).
+         *         v. Set k to k - 1.
+         * 18. Set k to actualStart.
+         * 19. For each element E of items, do
+         *     a. Perform ? Set(O, ! ToString(𝔽(k)), E, true).
+         *     b. Set k to k + 1.
+         * 20. Perform ? Set(O, "length", 𝔽(len - actualDeleteCount + itemCount), true).
+         * 21. Return A.
+         * 
+         * NOTE 2; The explicit setting of the "length" property of
+         * the result Array in step 20 was necessary in previous
+         * editions of ECMAScript to ensure that its length was
+         * correct in situations where the trailing elements of the
+         * result Array were not present. Setting "length" became
+         * unnecessary starting in ES2015 when the result Array was
+         * initialized to its proper length rather than an empty Array
+         * but is carried forward to preserve backward compatibility.
+         * 
+         * NOTE 3: This method is intentionally generic; it does not
+         * require that its this value be a Array. Therefore it can
+         * be transferred to other kinds of objects for use as a method.
+         */
+        'splice': method(function*($, thisValue, start, deleteCount, ...items) {  
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          let actualStart = LengthRelative(yield* ToIntegerOrInfinity($, start), len);
+          if (IsAbrupt(actualStart)) return actualStart;
+          // 8.
+          let actualDeleteCount: number;
+          if (arguments.length < 3) {
+            actualDeleteCount = 0;
+          } else if (arguments.length < 4) {
+            actualDeleteCount = len - actualStart;
+          } else {
+            const dc = yield* ToIntegerOrInfinity($, deleteCount);
+            if (IsAbrupt(dc)) return dc;
+            actualDeleteCount = Math.min(Math.max(dc, 0), len - actualStart);
+          }
+          // 11.
+          if (len + items.length - actualDeleteCount > Number.MAX_SAFE_INTEGER) {
+            return $.throw('TypeError', 'Array length exceeds 2^53-1');
+          }
+          const A = yield* ArraySpeciesCreate($, O, actualDeleteCount);
+          if (IsAbrupt(A)) return A;
+          for (let k = 0; k < actualDeleteCount; k++) {
+            const from = String(actualStart + k);
+            const kPresent = HasProperty($, O, from);
+            if (IsAbrupt(kPresent)) return kPresent;
+            if (kPresent) {
+              const fromValue = yield* Get($, O, from);
+              if (IsAbrupt(fromValue)) return fromValue;
+              const createStatus = CreateDataPropertyOrThrow($, A, String(k), fromValue);
+              if (IsAbrupt(createStatus)) return createStatus;
+            }
+          }
+
+          // TODO - somethig went wrong, only copying the last element from
+          // calls argument.
+
+          // 15.
+          const setStatus = yield* Set($, A, 'length', actualDeleteCount, true);
+          if (IsAbrupt(setStatus)) return setStatus;
+          if (items.length < actualDeleteCount) {
+            for (let k = actualStart; k < len - actualDeleteCount; k++) {
+              const from = String(k + actualDeleteCount);
+              const to = String(k + items.length);
+              const kPresent = HasProperty($, O, from);
+              if (IsAbrupt(kPresent)) return kPresent;
+              if (kPresent) {
+                const fromValue = yield* Get($, O, from);
+                if (IsAbrupt(fromValue)) return fromValue;
+                const setStatus = yield* Set($, O, to, fromValue, true);
+                if (IsAbrupt(setStatus)) return setStatus;
+              } else {
+                const deleteStatus = DeletePropertyOrThrow($, O, to);
+                if (IsAbrupt(deleteStatus)) return deleteStatus;
+              }
+            }
+            for (let k = len; k > len - actualDeleteCount + items.length; k--) {
+              const deleteStatus = DeletePropertyOrThrow($, O, String(k - 1));
+              if (IsAbrupt(deleteStatus)) return deleteStatus;
+            }
+          } else if (items.length > actualDeleteCount) {
+            // 17.a
+            for (let k = len - actualDeleteCount; k > actualStart; k--) {
+              const from = String(k + actualDeleteCount - 1);
+              const to = String(k + items.length - 1);
+              const kPresent = HasProperty($, O, from);
+              if (IsAbrupt(kPresent)) return kPresent;
+              if (kPresent) {
+                const fromValue = yield* Get($, O, from);
+                if (IsAbrupt(fromValue)) return fromValue;
+                const setStatus = yield* Set($, O, to, fromValue, true);
+                if (IsAbrupt(setStatus)) return setStatus;
+              } else {
+                const deleteStatus = DeletePropertyOrThrow($, O, to);
+                if (IsAbrupt(deleteStatus)) return deleteStatus;
+              }
+            }
+          }
+          // 18.
+          let k = actualStart;
+          for (const E of items) {
+            const setStatus = yield* Set($, O, String(k++), E, true);
+            if (IsAbrupt(setStatus)) return setStatus;
+          }
+          Set($, O, 'length', len - actualDeleteCount + items.length, true);
+          return A;
+        }),
 
       });
 

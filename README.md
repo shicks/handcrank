@@ -17,6 +17,9 @@ browser or on the server.
 - array/function instance methods
 - consider exposing bindings a little more, lazy-initialized binding
   for arguments objects, etc
+- we should probably make a subtype of PropertyMap that stores array
+  indices separately in an array, which would allow delegating a lot
+  more to the underlying VM.
 
 ## Features
 
