@@ -1019,8 +1019,10 @@ export function* Evaluation_ObjectExpression($: VM, n: ESTree.ObjectExpression):
       Assert(!(key instanceof PrivateName));
       if (IsAbrupt(key)) return key;
       const isProtoSetter = !prop.computed && key === '__proto__' && !$.isJsonParse();
+      const namedEval =
+        !prop.computed && IsAnonymousFunctionDefinition(prop.value) && !isProtoSetter;
       const propValue = yield* (
-        (!prop.computed && IsAnonymousFunctionDefinition(prop.value) && !isProtoSetter) ?
+        namedEval ?
           $.NamedEvaluation(prop.value, key as string) :
           $.evaluateValue(prop.value));
       if (IsAbrupt(propValue)) return propValue;

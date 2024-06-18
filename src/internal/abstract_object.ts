@@ -526,10 +526,11 @@ export function TestIntegrityLevel($: VM, O: Obj, level: SEALED|FROZEN): CR<bool
  *     b. Set n to n + 1.
  * 4. Return array.
  */
-export function CreateArrayFromList($: VM, elements: Val[]): Obj {
+export function CreateArrayFromList($: VM, elements: Array<Val|EMPTY>): Obj {
   const array = CastNotAbrupt(ArrayCreate($, 0));
   for (let n = 0; n < elements.length; n++) {
-    array.OwnProps.set(String(n), propWEC(elements[n]));
+    const element = elements[n];
+    if (!EMPTY.is(element)) array.OwnProps.set(String(n), propWEC(element));
   }
   array.OwnProps.set('length', propW(elements.length));
   return array;

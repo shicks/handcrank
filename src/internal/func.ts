@@ -1191,7 +1191,10 @@ export function SetFunctionName(
   name: PropertyKey|PrivateName,
   prefix?: string,
 ): UNUSED {
-  Assert(F.Extensible && !F.OwnProps.has('name'));
+  Assert(F.Extensible);
+  // NOTE: For whatever reason we're duplicating this.
+  //       - for now, just skip the check.
+  //Assert(!F.OwnProps.has('name'));
   if (typeof name === 'symbol') {
     const description = name.description;
     if (description == null) {

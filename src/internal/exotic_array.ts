@@ -15,7 +15,7 @@ import { DebugString, ECR, Plugin, VM, run } from './vm';
 import { CreateIteratorFromClosure, GeneratorResume, GeneratorYield } from './generator';
 import { CreateIterResultObject, GetIterator, IteratorClose, IteratorStep, IteratorValue } from './abstract_iterator';
 import { iterators } from './iterators';
-import { SYNC } from './enums';
+import { EMPTY, SYNC } from './enums';
 
 declare const GetIteratorFromMethod: any;
 declare const IsDetachedBuffer: any;
@@ -2313,7 +2313,81 @@ export const arrayObject: Plugin = {
           return false;
         }),
 
-        // TODO - sort will be a pain... :-( unshift shoudl be easy
+        /**
+         * 23.1.3.30 Array.prototype.sort ( comparefn )
+         * 
+         * This method sorts the elements of this array. The sort must
+         * be stable (that is, elements that compare equal must remain
+         * in their original order). If comparefn is not undefined, it
+         * should be a function that accepts two arguments x and y and
+         * returns a negative Number if x < y, a positive Number if x
+         * > y, or a zero otherwise.
+         * 
+         * It performs the following steps when called:
+         * 
+         * 1. If comparefn is not undefined and IsCallable(comparefn)
+         *    is false, throw a TypeError exception.
+         * 2. Let obj be ? ToObject(this value).
+         * 3. Let len be ? LengthOfArrayLike(obj).
+         * 4. Let SortCompare be a new Abstract Closure with
+         *    parameters (x, y) that captures comparefn and performs the
+         *    following steps when called:
+         *     a. Return ? CompareArrayElements(x, y, comparefn).
+         * 5. Let sortedList be ? SortIndexedProperties(obj, len, SortCompare, skip-holes).
+         * 6. Let itemCount be the number of elements in sortedList.
+         * 7. Let j be 0.
+         * 8. Repeat, while j < itemCount,
+         *     a. Perform ? Set(obj, ! ToString(𝔽(j)), sortedList[j], true).
+         *     b. Set j to j + 1.
+         * 9. NOTE: The call to SortIndexedProperties in step 5 uses
+         *    skip-holes. The remaining indices are deleted to preserve
+         *    the number of holes that were detected and excluded from
+         *    the sort.
+         * 10. Repeat, while j < len,
+         *     a. Perform ? DeletePropertyOrThrow(obj, ! ToString(𝔽(j))).
+         *     b. Set j to j + 1.
+         * 11. Return obj.
+         * 
+         * NOTE 1: Because non-existent property values always compare
+         * greater than undefined property values, and undefined
+         * always compares greater than any other value (see
+         * CompareArrayElements), undefined property values always
+         * sort to the end of the result, followed by non-existent
+         * property values.
+         * 
+         * NOTE 2: Method calls performed by the ToString abstract
+         * operations in steps 5 and 6 have the potential to cause
+         * SortCompare to not behave as a consistent comparator.
+         * 
+         * NOTE 3: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore, it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'sort': method(function*($, thisValue, comparefn) {
+          if (comparefn !== undefined && !IsCallable(comparefn)) {
+            return $.throw('TypeError', `${DebugString(comparefn)} is not a function`);
+          }
+          const obj = ToObject($, thisValue);
+          if (IsAbrupt(obj)) return obj;
+          const len = yield* LengthOfArrayLike($, obj);
+          if (IsAbrupt(len)) return len;
+          const SortCompare = (x: Val, y: Val) => CompareArrayElements($, x, y, comparefn);
+          const sortedList = yield* SortIndexedProperties($, obj, len, SortCompare, true);
+          if (IsAbrupt(sortedList)) return sortedList;
+          const itemCount = sortedList.length;
+          let j = 0;
+          for (; j < itemCount; j++) {
+            const setStatus = yield* Set($, obj, String(j), sortedList[j], true);
+            if (IsAbrupt(setStatus)) return setStatus;
+          }
+          for (; j < len; j++) {
+            const deleteStatus = DeletePropertyOrThrow($, obj, String(j));
+            if (IsAbrupt(deleteStatus)) return deleteStatus;
+          }
+          return obj;
+        }),
+
 
       });
 
@@ -2543,8 +2617,7 @@ function* FlattenIntoArray(
 ): ECR<number> {
   Assert(!mapperFunction || (IsCallable(mapperFunction) && depth === 1));
   let targetIndex: CR<number> = start;
-  let sourceIndex = 0;
-  while (sourceIndex < sourceLen) {
+  for (let sourceIndex = 0; sourceIndex < sourceLen; sourceIndex++) {
     const P = String(sourceIndex);
     const exists = HasProperty($, source, P);
     if (IsAbrupt(exists)) return exists;
@@ -2578,6 +2651,148 @@ function* FlattenIntoArray(
     }
   }
   return targetIndex;
+}
+
+/**
+ * 23.1.3.30.1 SortIndexedProperties ( obj, len, SortCompare, holes )
+ * 
+ * The abstract operation SortIndexedProperties takes arguments obj
+ * (an Object), len (a non-negative integer), SortCompare (an Abstract
+ * Closure with two parameters), and holes (skip-holes or
+ * read-through-holes) and returns either a normal completion
+ * containing a List of ECMAScript language values or a throw
+ * completion. It performs the following steps when called:
+ * 
+ * 1. Let items be a new empty List.
+ * 2. Let k be 0.
+ * 3. Repeat, while k < len,
+ *     a. Let Pk be ! ToString(𝔽(k)).
+ *     b. If holes is skip-holes, then
+ *         i. Let kRead be ? HasProperty(obj, Pk).
+ *     c. Else,
+ *         i. Assert: holes is read-through-holes.
+ *         ii. Let kRead be true.
+ *     d. If kRead is true, then
+ *         i. Let kValue be ? Get(obj, Pk).
+ *         ii. Append kValue to items.
+ *     e. Set k to k + 1.
+ * 4. Sort items using an implementation-defined sequence of calls to
+ *    SortCompare. If any such call returns an abrupt completion, stop
+ *    before performing any further calls to SortCompare and return that
+ *    Completion Record.
+ * 5. Return items.
+ *
+ * (Eliding mathematical commentary about consistent sort requirements, etc)
+ */
+function* SortIndexedProperties (
+  $: VM,
+  obj: Obj,
+  len: number,
+  SortCompare: (a: Val, b: Val) => ECR<number>,
+  skipHoles: boolean,
+): ECR<Val[]> {
+  const items = [];
+  for (let k = 0; k < len; k++) {
+    const Pk = String(k);
+    if (skipHoles) {
+      const kRead = HasProperty($, obj, Pk);
+      if (IsAbrupt(kRead)) return kRead;
+      if (!kRead) continue;
+    }
+    const kValue = yield* Get($, obj, Pk);
+    if (IsAbrupt(kValue)) return kValue;
+    items.push(kValue);
+  }
+  return yield* MergeSort(items, SortCompare);
+}
+
+// NOTE: This algorithm from https://en.wikipedia.org/wiki/Merge_sort
+function* MergeSort(A: Val[], SortCompare: (a: Val, b: Val) => ECR<number>): ECR<Val[]> {
+  const n = A.length;
+  let B = new Array(n);
+  // Each 1-element run in A is already "sorted".
+  // Make successively longer sorted runs of length 2, 4, 8, 16... until the whole array is sorted.
+  for (let width = 1; width < n; width <<= 1) {
+    // Array A is full of runs of length width.
+    for (let i = 0; i < n; i = i + 2 * width) {
+      // Merge two runs: A[i:i+width-1] and A[i+width:i+2*width-1] to B[]
+      // or copy A[i:n-1] to B[] ( if (i+width >= n) )
+      yield* BottomUpMerge(i, Math.min(i + width, n), Math.min(i + (width << 1), n));
+    }
+    // Now work array B is full of runs of length 2*width.
+    // Copy array B to array A for the next iteration.
+    // A more efficient implementation would swap the roles of A and B.
+    [A, B] = [B, A];
+    // Now array A is full of runs of length 2*width.
+  }
+  return A;
+
+  //  Left run is A[iLeft :iRight-1].
+  // Right run is A[iRight:iEnd-1  ].
+  function* BottomUpMerge(iLeft: number, iRight: number, iEnd: number): ECR<void> {
+    let i = iLeft;
+    let j = iRight;
+    // While there are elements in the left or right runs...
+    for (let k = iLeft; k < iEnd; k++) {
+      // If left run head exists and is <= existing right run head.
+      let lessEqual = i < iRight;
+      if (lessEqual && (j < iEnd)) {
+        const cmp = yield* SortCompare(A[i], A[j]);
+        if (IsAbrupt(cmp)) return cmp;
+        lessEqual = cmp <= 0;
+      }
+      if (lessEqual) {
+        B[k] = A[i];
+        i = i + 1;
+      } else {
+        B[k] = A[j];
+        j = j + 1;    
+      }
+    } 
+  }
+}
+
+/**
+ * 23.1.3.30.2 CompareArrayElements ( x, y, comparefn )
+ * 
+ * The abstract operation CompareArrayElements takes arguments x (an
+ * ECMAScript language value), y (an ECMAScript language value), and
+ * comparefn (a function object or undefined) and returns either a
+ * normal completion containing a Number or an abrupt completion. It
+ * performs the following steps when called:
+ * 
+ * 1. If x and y are both undefined, return +0𝔽.
+ * 2. If x is undefined, return 1𝔽.
+ * 3. If y is undefined, return -1𝔽.
+ * 4. If comparefn is not undefined, then
+ *     a. Let v be ? ToNumber(? Call(comparefn, undefined, « x, y »)).
+ *     b. If v is NaN, return +0𝔽.
+ *     c. Return v.
+ * 5. Let xString be ? ToString(x).
+ * 6. Let yString be ? ToString(y).
+ * 7. Let xSmaller be ! IsLessThan(xString, yString, true).
+ * 8. If xSmaller is true, return -1𝔽.
+ * 9. Let ySmaller be ! IsLessThan(yString, xString, true).
+ * 10. If ySmaller is true, return 1𝔽.
+ * 11. Return +0𝔽.
+ */
+function* CompareArrayElements($: VM, x: Val, y: Val, comparefn?: Val): ECR<number> {
+  if (x === undefined && y === undefined) return 0;
+  if (x === undefined) return 1;
+  if (y === undefined) return -1;
+  if (comparefn !== undefined) {
+    const callResult = yield* Call($, comparefn, undefined, [x, y]);
+    if (IsAbrupt(callResult)) return callResult;
+    const v = yield* ToNumber($, callResult);
+    if (IsAbrupt(v)) return v;
+    if (isNaN(v)) return 0;
+    return v;
+  }
+  const xString = yield* ToString($, x);
+  if (IsAbrupt(xString)) return xString;
+  const yString = yield* ToString($, y);
+  if (IsAbrupt(yString)) return yString
+  return xString < yString ? -1 : yString < xString ? 1 : 0;
 }
 
 /**
@@ -2746,7 +2961,7 @@ function LengthRelative(signed: CR<number>, len: number): CR<number> {
  * 4. Return array.
  */
 export function* Evaluation_ArrayExpression($: VM, node: ArrayExpression): ECR<Obj> {
-  const elements: Val[] = [];
+  const elements: Array<Val|EMPTY> = [];
   for (const e of node.elements) {
     if (e?.type === 'SpreadElement') {
       const spreadObj = yield* $.evaluateValue(e.argument);
@@ -2763,7 +2978,7 @@ export function* Evaluation_ArrayExpression($: VM, node: ArrayExpression): ECR<O
       }
       continue;
     }
-    const v = e == null ? undefined : yield* $.evaluateValue(e);
+    const v = e == null ? EMPTY : yield* $.evaluateValue(e);
     if (IsAbrupt(v)) return v;
     elements.push(v);
   }

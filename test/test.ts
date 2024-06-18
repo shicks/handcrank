@@ -8,7 +8,6 @@ import { DebugString, VM, runAsync } from '../src/internal/vm';
 import { full } from '../src/plugins';
 import { IsThrowCompletion } from '../src/internal/completion_record';
 import { Obj } from '../src/internal/obj';
-//import { readdirRecursive } from '../src/internal/fsutil';
 
 class File {
   constructor(
