@@ -256,9 +256,10 @@ export class VM {
     return result;
   }
 
-  evaluateScript(script: ESTree.Program): ECR<Val>;
-  evaluateScript(script: string, filename?: string): ECR<Val>;
-  * evaluateScript(script: string|ESTree.Program, filename?: string): ECR<Val> {
+  * evaluateScript(
+    script: string|ESTree.Program,
+    {filename, strict}: EvaluateOptions = {},
+  ): ECR<Val> {
     this.initialize()
     if (typeof script === 'string') {
       const source = script;
@@ -268,7 +269,7 @@ export class VM {
       } catch (err) {
         return this.throw('SyntaxError', err.message);
       }
-      preprocess(script, {sourceFile: filename, sourceText: source});
+      preprocess(script, {sourceFile: filename, sourceText: source}, strict);
 
       // script = this.esprima.parseScript(source, {loc: true}, (n: Node, meta: Metadata) => {
       //   // TODO - we want the following:
@@ -551,3 +552,8 @@ type SyntaxResult<O extends keyof SyntaxOp> =
 type SyntaxHandlerMap<O extends keyof SyntaxOp> =
   {[N in NodeType]?: Array<SyntaxHandler<N, O>>};
 type SyntaxHandlers = {[O in keyof SyntaxOp]: SyntaxHandlerMap<O>};
+
+interface EvaluateOptions {
+  filename?: string;
+  strict?: boolean;
+}

@@ -147,35 +147,34 @@ export function preprocess(n: Node|null|undefined, source: Source, strict = fals
     }
     return false;
   }
-  traversePreorder<State>(n, {strict: false, nested: false}, (n, {strict, nested}) => {
+  traversePreorder<State>(n, {strict, nested: false}, (n, {strict, nested}) => {
     ((n.loc || ((n as any).loc = {})) as SourceLocation).source = source;
-    if (!strict) { // if we're already strict, we'll never go back to sloppy.
-      switch (n.type) {
-        case 'ClassDeclaration':
-        case 'ClassExpression':
-          strict = true;
-          break;
-        case 'StaticBlock':
-          nested = false;
-          break;          
-        case 'FunctionDeclaration':
-          (n as TopLevelNode).topLevel = !nested;
-        case 'FunctionExpression':
-          bodies.add(n.body);
-          nested = false;
-          // Strict if it has a "use strict"
-          if (isStrict(n.body.body)) strict = true;
-          break;
-        case 'Program':
-          nested = false;
-          if (isStrict(n.body)) strict = true;
-          break;
-        case 'BlockStatement':
-          nested = !bodies.has(n);
-          if (isStrict(n.body)) strict = true;
-          break;
-        // TODO - look for 'use strict' in other bodies
-      }
+    switch (n.type) {
+      case 'ClassDeclaration':
+      case 'ClassExpression':
+        strict = true;
+        break;
+      case 'StaticBlock':
+        nested = false;
+        break;          
+      case 'FunctionDeclaration':
+        (n as TopLevelNode).topLevel = !nested;
+      case 'FunctionExpression':
+        bodies.add(n.body);
+        nested = false;
+        // Strict if it has a "use strict"
+        if (isStrict(n.body.body)) strict = true;
+        break;
+      case 'Program':
+        nested = false;
+        if (isStrict(n.body)) strict = true;
+        break;
+      case 'BlockStatement':
+      case 'StaticBlock':
+        nested = !bodies.has(n);
+        if (isStrict(n.body)) strict = true;
+        break;
+      // TODO - look for 'use strict' in other bodies?
     }
     (n as StrictNode).strict = strict;
     return {strict, nested};

@@ -2,7 +2,7 @@
 
 import * as esprima from 'esprima-next';
 import { parse } from 'yaml';
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { test262 } from './262';
 import { DebugString, VM, runAsync } from '../src/internal/vm';
 import { full } from '../src/plugins';
@@ -102,11 +102,11 @@ class TestCase {
     return (/*this.file.metadata.description ||*/ this.file.path).trim();
   }
 
-  async runAsync() {
-    return await runAsync(this.runSync(), {maxSteps: 10000});
+  async runAsync(strict: boolean) {
+    return await runAsync(this.runSync(strict), {timeoutMillis: 10_000});
   }
 
-  * runSync() {
+  * runSync(strict: boolean) {
     const vm = new VM({
       parseScript(source) {
         return esprima.parseScript(source, {loc: true, range: true});
@@ -119,7 +119,7 @@ class TestCase {
     vm.install(test262);
     // Load the prerequisites and the test
     for (const f of this.includes) {
-      const result = yield* vm.evaluateScript(f.content, f.path);
+      const result = yield* vm.evaluateScript(f.content, {filename: f.path});
       if (IsThrowCompletion(result)) {
         let msg = `Unexpected rejection: ${DebugString(result.Value)}`;
         if ((vm as any).lastThrow) {
@@ -128,7 +128,8 @@ class TestCase {
         throw new Error(msg);
       }
     }
-    const result = yield* vm.evaluateScript(this.file.content, this.file.path);
+    const result =
+      yield* vm.evaluateScript(this.file.content, {filename: this.file.path, strict});
 
     // TODO - pass in a reporter?
 
@@ -209,44 +210,69 @@ Harness.load('test/test262').then(async harness => {
   // TODO - flags for outputting files, verbose print failures inline, etc.
   let filter: ((test: string) => boolean)|undefined;
   const filterRegexps: RegExp[] = [];
+  const excludeRegexps: RegExp[] = [];
   let verbose = false;
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
     if (arg === '-v') {
       verbose = true;
       continue;
+    } else if (arg === '-x') {
+      excludeRegexps.push(new RegExp(process.argv[++i]));
     } else {
       filterRegexps.push(new RegExp(arg));
     }
   }
-  if (filterRegexps.length) filter = (f) => filterRegexps.some(r => r.test(f));
+  function addFilter(fn: (test: string) => boolean) {
+    if (filter) {
+      const prev = filter;
+      filter = (test) => prev(test) && fn(test);
+    } else {
+      filter = fn;
+    }
+  }
+  if (filterRegexps.length) addFilter((f) => filterRegexps.some(r => r.test(f)));
+  if (excludeRegexps.length) addFilter((f) => !excludeRegexps.some(r => r.test(f)));
+
   for await (const t of harness.testCases(filter)) {
     //console.log(`TEST: ${t.file.path}`);
     //console.log(t.name());
-    const name = t.name().replace('test/test262/test/', '').replace(/\.js$/, '');
-    const thisDir = name.replace(/\/[^/]+$/, '');
-    if (thisDir !== dir) {
-      if (dir && !verbose) process.stdout.write('\n');
-      dir = thisDir;
-      if (!verbose) process.stdout.write(dir + '   ');
-    }
-    try {
-      await Promise.race([
-        runAsync(t.runSync()),
-        new Promise((_, reject) => setTimeout(
-          () => reject(new Error('timeout')), 10_000)),
-      ]);
-      if (!verbose) process.stdout.write('.');
 
-      ++passed;
-    } catch (err) {
-      ++failed;
-      if (!verbose) process.stdout.write('F');
-      await mkdir(`dist/test/${thisDir}`, {recursive: true});
-      writeFile(`dist/test/${name}.err`, err.message);
-      if (verbose) {
-        console.error(`${t.name()}: FAIL`);
-        console.error(err);
+    let strictnesses = [false, true];
+    if (t.file.metadata.flags?.includes('onlyStrict')) {
+      strictnesses = [true];
+    } else if (t.file.metadata.flags?.includes('noStrict')) {
+      strictnesses = [false];
+    }
+
+    for (const strict of strictnesses) {
+      const suffix = strictnesses.length > 1 ? `_${strict ? 'STRICT' : 'SLOPPY'}` : '';
+      const name = t.name().replace('test/test262/test/', '').replace(/\.js$/, '') + suffix;
+      const filename = `dist/test/${name}.err`;
+      const thisDir = filename.replace(/\/[^/]+$/, '');
+      if (thisDir !== dir) {
+        if (dir && !verbose) process.stdout.write('\n');
+        dir = thisDir;
+        if (!verbose) process.stdout.write(dir + '   ');
+      }
+      try {
+        await Promise.race([
+          t.runAsync(strict),
+          new Promise((_, reject) => setTimeout(
+            () => reject(new Error('timeout')), 10_000)),
+        ]);
+        if (!verbose) process.stdout.write('.');
+        ++passed;
+        unlink(filename).catch(() => {});
+      } catch (err) {
+        ++failed;
+        if (!verbose) process.stdout.write('F');
+        await mkdir(thisDir, {recursive: true});
+        writeFile(filename, err.message);
+        if (verbose) {
+          console.error(`${name}: FAIL`);
+          console.error(err);
+        }
       }
     }
   }

@@ -274,7 +274,7 @@ function visitLexicallyScopedDecls(node: Node, visitor: Visitor): void {
         return;
       case 'FunctionDeclaration':
         // NOTE: top-level functions are treatd as var.
-        if (!IsTopLevel(node)) visitor(node);
+        if (!IsTopLevel(node)) {console.log(`lex ${node.id.name}`);visitor(node);}
         return;
       case 'ClassDeclaration':
         visitor(node);

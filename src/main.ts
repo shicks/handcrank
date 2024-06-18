@@ -24,9 +24,10 @@ vm.install(full);
 // TODO - consider adding REPL directives like .report to dump the
 // most recent trace.
 let reportStackTraceOnThrow = true;
+let strict = false;
 
 function runScript(script: string, filename: string, printResult = false) {
-  const cr = run(vm.evaluateScript(script, filename));
+  const cr = run(vm.evaluateScript(script, {filename, strict}));
   if (IsAbrupt(cr)) {
     if (IsThrowCompletion(cr)) {
       console.error(`Uncaught ${DebugString(cr.Value)}`);
@@ -49,21 +50,28 @@ function runScript(script: string, filename: string, printResult = false) {
 //   main file.js  run file from disk
 //   main -e '...' run script from command line
 function main(args: string[], exit: (arg: number) => void) {
-  if (args.length === 0) {
-    repl();
-    return;
-  }
+  let run = false;
   let status = 0;
   while (args.length > 0) {
     const arg = args.shift()!;
     if (arg === '-e') {
       status = runScript(args.shift()!, 'input.js');
       if (status) exit(status);
+      run = true;
+    } else if (arg === '--strict') {
+      strict = true;
+    } else if (arg === '--sloppy') {
+      strict = false;
     } else {
       const script = String(fs.readFileSync(arg, 'utf8'));
       status = runScript(script, arg);
       if (status) exit(status);
+      run = true;
     }
+  }
+  if (!run) {
+    repl();
+    return;
   }
   exit(0);
 }
@@ -75,16 +83,23 @@ function repl() {
   });
   let replNum = 0;
   function loop(script: string) {
-    if (!script || script === 'exit') return;
-    try {
-      esprima.parseScript(script);
-    } catch (err) {
-      if (err.description === 'Unexpected end of input') {
-        rl.question('... ', (s) => loop(script + '\n' + s));
-        return;
+    if (script === ':strict') {
+      strict = true;
+    } else if (script === ':sloppy') {
+      strict = false;
+    } else if (!script || script === 'exit') {
+      return;
+    } else {
+      try {
+        esprima.parseScript(script);
+      } catch (err) {
+        if (err.description === 'Unexpected end of input') {
+          rl.question('... ', (s) => loop(script + '\n' + s));
+          return;
+        }
       }
+      runScript(script, `REPL${++replNum}`, true);
     }
-    runScript(script, `REPL${++replNum}`, true);
     rl.question('> ', loop);
   }
   rl.question('> ', loop);
