@@ -6,6 +6,7 @@
 
 import { IsArray, IsCallable, IsExtensible, RequireObjectCoercible, SameValue } from './abstract_compare';
 import { ToBoolean, ToInt32, ToIntegerOrInfinity, ToNumeric, ToObject, ToPropertyKey, ToString } from './abstract_conversion';
+import { AddEntriesFromIterable } from './abstract_iterator';
 import { Call, CreateArrayFromList, CreateListFromArrayLike, DefinePropertyOrThrow, EnumerableOwnProperties, Get, HasOwnProperty, Invoke, OrdinaryHasInstance, Set, SetIntegrityLevel, TestIntegrityLevel } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
@@ -236,6 +237,8 @@ export const objectAndFunctionPrototype: Plugin = {
           return ToObject($, thisValue);
         }),
       });
+      realm.Intrinsics.set('%Object.prototype.toString%',
+                           objectPrototype.OwnProps.get('toString')!.Value as Obj);
 
       defineProperties(realm, functionPrototype, {
         /**
@@ -674,18 +677,20 @@ export const objectConstructor: Plugin = {
          * accessible to ECMAScript code.
          */
         'fromEntries': method(function*($, _thisValue, iterable) {
-
-          throw new Error('NOT IMPLEMENTED - need iterators');
-
-          // const coercibleStatus = RequireObjectCoercible($, iterable);
-          // if (IsAbrupt(coercibleStatus)) return coercibleStatus;
-          // const obj = OrdinaryObjectCreate({Prototype: objectPrototype});
-          // const closure = new AbstractClosure((key, value) => {
-          //   const propertyKey = ToPropertyKey($, key);
-          //   CreateDataPropertyOrThrow($, obj, propertyKey, value);
-          // });
-          // const adder = CreateBuiltinFunction(closure, 2, '', realm);
-          // return yield* AddEntriesFromIterable($, obj, iterable, adder);
+          const coercibleStatus = RequireObjectCoercible($, iterable);
+          if (IsAbrupt(coercibleStatus)) return coercibleStatus;
+          
+          const obj = OrdinaryObjectCreate({Prototype: objectPrototype});
+          const status = yield* AddEntriesFromIterable(
+            $, iterable,
+            function*(key: Val, value: Val): ECR<undefined> {
+              const propertyKey = yield* ToPropertyKey($, key);
+              if (IsAbrupt(propertyKey)) return propertyKey;
+              obj.OwnProps.set(propertyKey, propWEC(value));
+              return undefined;
+            });
+          if (IsAbrupt(status)) return status;
+          return obj;
         }),
 
         /**

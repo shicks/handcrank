@@ -2,7 +2,7 @@ import { ToBoolean } from './abstract_conversion';
 import { Call, Get, GetMethod, GetV } from './abstract_object';
 import { Assert } from './assert';
 import { CR, IsAbrupt, IsThrowCompletion, NotGen } from './completion_record';
-import { ASYNC, EMPTY, SYNC } from './enums';
+import { ASYNC, EMPTY, SYNC, UNUSED } from './enums';
 import { CreateBuiltinFunction, Func, IsFunc } from './func';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { propWEC } from './property_descriptor';
@@ -417,3 +417,59 @@ export function* IteratorToList(
   return values;
 }
 
+/**
+ * 24.1.1.2 AddEntriesFromIterable ( target, iterable, adder )
+ * 
+ * The abstract operation AddEntriesFromIterable takes arguments
+ * target (an Object), iterable (an ECMAScript language value, but not
+ * undefined or null), and adder (a function object) and returns
+ * either a normal completion containing an ECMAScript language value
+ * or a throw completion. adder will be invoked, with target as the
+ * receiver. It performs the following steps when called:
+ * 
+ * 1. Let iteratorRecord be ? GetIterator(iterable, sync).
+ * 2. Repeat,
+ *     a. Let next be ? IteratorStep(iteratorRecord).
+ *     b. If next is false, return target.
+ *     c. Let nextItem be ? IteratorValue(next).
+ *     d. If nextItem is not an Object, then
+ *         i. Let error be ThrowCompletion(a newly created TypeError object).
+ *         ii. Return ? IteratorClose(iteratorRecord, error).
+ *     e. Let k be Completion(Get(nextItem, "0")).
+ *     f. IfAbruptCloseIterator(k, iteratorRecord).
+ *     g. Let v be Completion(Get(nextItem, "1")).
+ *     h. IfAbruptCloseIterator(v, iteratorRecord).
+ *         i. Let status be Completion(Call(adder, target, « k, v »)).
+ * j. j. IfAbruptCloseIterator(status, iteratorRecord).
+ * 
+ * NOTE: The parameter iterable is expected to be an object that
+ * implements an @@iterator method that returns an iterator object
+ * that produces a two element array-like object whose first element
+ * is a value that will be used as a Map key and whose second element
+ * is the value to associate with that key.
+ */
+export function* AddEntriesFromIterable(
+  $: VM,
+  iterable: Val,
+  adder: (k: Val, v: Val) => ECR<void>,
+): ECR<unknown> {
+  const iteratorRecord = yield* GetIterator($, iterable, SYNC);
+  if (IsAbrupt(iteratorRecord)) return iteratorRecord;
+  while (true) {
+    const next = yield* IteratorStep($, iteratorRecord);
+    if (IsAbrupt(next)) return next;
+    if (next === false) return UNUSED;
+    const nextItem = yield* IteratorValue($, next);
+    if (IsAbrupt(nextItem)) return nextItem;
+    if (!(nextItem instanceof Obj)) {
+      return yield* IteratorClose($, iteratorRecord,
+                                  $.throw('TypeError', 'not an object'));
+    }
+    let k = yield* Get($, nextItem, '0');
+    if (IsAbrupt(k)) return IteratorClose($, iteratorRecord, k);
+    let v = yield* Get($, nextItem, '1');
+    if (IsAbrupt(v)) return IteratorClose($, iteratorRecord, v);
+    const status = yield* adder(k, v);
+    if (IsAbrupt(status)) return IteratorClose($, iteratorRecord, status);
+  }
+}

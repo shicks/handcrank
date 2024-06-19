@@ -70,7 +70,7 @@ export const test262: Plugin = {
         const newContext = new RootExecutionContext(realm);
         $.enterContext(newContext);
 
-        let result = yield* $.evaluateScript(sourceText, 'script');
+        let result = yield* $.evaluateScript(sourceText, {filename: 'script'});
         if (IsThrowCompletion(result)) {
           const props = (result.Value as Obj).OwnProps || new Map();
           if (props.get('name')?.Value === 'SyntaxError') {
