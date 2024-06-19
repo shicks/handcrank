@@ -47,7 +47,6 @@ browser or on the server.
         - [x] throwable
         - [x] stack traces
     - [x] Array
-        - [ ] instance methods
     - [x] Arguments
     - [x] Iterators
     - [ ] RegExp

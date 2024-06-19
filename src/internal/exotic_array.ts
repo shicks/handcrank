@@ -1,7 +1,7 @@
 import { ArrayExpression } from 'estree';
 import { IsArray, IsArrayIndex, IsCallable, IsConstructor, IsIntegralNumber, IsStrictlyEqual, SameValue, SameValueZero } from './abstract_compare';
 import { ToBoolean, ToIntegerOrInfinity, ToNumber, ToObject, ToString, ToUint32 } from './abstract_conversion';
-import { Call, Construct, CreateArrayFromList, CreateDataPropertyOrThrow, DeletePropertyOrThrow, Get, GetMethod, HasProperty, LengthOfArrayLike, Set } from './abstract_object';
+import { Call, Construct, CreateArrayFromList, CreateDataPropertyOrThrow, DeletePropertyOrThrow, Get, GetMethod, HasProperty, Invoke, LengthOfArrayLike, Set } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, callOrConstruct, method, methodO } from './func';
@@ -2560,6 +2560,467 @@ export const arrayObject: Plugin = {
           return A;
         }),
 
+        /**
+         * 23.1.3.32 Array.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] )
+         * 
+         * An ECMAScript implementation that includes the ECMA-402
+         * Internationalization API must implement this method as
+         * specified in the ECMA-402 specification. If an ECMAScript
+         * implementation does not include the ECMA-402 API the
+         * following specification of this method is used.
+         * 
+         * NOTE 1: The first edition of ECMA-402 did not include a
+         * replacement specification for this method.
+         * 
+         * The meanings of the optional parameters to this method are
+         * defined in the ECMA-402 specification; implementations that
+         * do not include ECMA-402 support must not use those
+         * parameter positions for anything else.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let array be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(array).
+         * 3. Let separator be the implementation-defined
+         *    list-separator String value appropriate for the host
+         *    environment\'s current locale (such as ", ").
+         * 4. Let R be the empty String.
+         * 5. Let k be 0.
+         * 6. Repeat, while k < len,
+         *     a. If k > 0, then
+         *         i. Set R to the string-concatenation of R and separator.
+         *     b. Let nextElement be ? Get(array, ! ToString(𝔽(k))).
+         *     c. If nextElement is neither undefined nor null, then
+         *         i. Let S be ? ToString(? Invoke(nextElement, "toLocaleString")).
+         *         ii. Set R to the string-concatenation of R and S.
+         *     d. Set k to k + 1.
+         * 7. Return R.
+         * 
+         * NOTE 2: This method converts the elements of the array to
+         * Strings using their toLocaleString methods, and then
+         * concatenates these Strings, separated by occurrences of an
+         * implementation-defined locale-sensitive separator
+         * String. This method is analogous to toString except that it
+         * is intended to yield a locale-sensitive result
+         * corresponding with conventions of the host environment\'s
+         * current locale.
+         * 
+         * NOTE 3: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'toLocaleString': method(function*($, thisValue) {
+          const array = ToObject($, thisValue);
+          if (IsAbrupt(array)) return array;
+          const len = yield* LengthOfArrayLike($, array);
+          if (IsAbrupt(len)) return len;
+          const separator = ', ';
+          let R = '';
+          for (let k = 0; k < len; k++) {
+            if (k) R += separator;
+            const nextElement = yield* Get($, array, String(k));
+            if (IsAbrupt(nextElement)) return nextElement;
+            if (nextElement != null) {
+              const result = yield* Invoke($, nextElement, 'toLocaleString');
+              if (IsAbrupt(result)) return result;
+              const S = yield* ToString($, result);
+              if (IsAbrupt(S)) return S;
+              R += S;
+            }
+          }
+          return R;
+        }),
+
+        /**
+         * 23.1.3.33 Array.prototype.toReversed ( )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let A be ? ArrayCreate(len).
+         * 4. Let k be 0.
+         * 5. Repeat, while k < len,
+         *     a. Let from be ! ToString(𝔽(len - k - 1)).
+         *     b. Let Pk be ! ToString(𝔽(k)).
+         *     c. Let fromValue be ? Get(O, from).
+         *     d. Perform ! CreateDataPropertyOrThrow(A, Pk, fromValue).
+         *     e. Set k to k + 1.
+         * 6. Return A.
+         */
+        'toReversed': method(function*($, thisValue) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          const A = ArrayCreate($, len);
+          if (IsAbrupt(A)) return A;
+          for (let k = 0; k < len; k++) {
+            const from = String(len - k - 1);
+            const Pk = String(k);
+            const fromValue = yield* Get($, O, from);
+            if (IsAbrupt(fromValue)) return fromValue;
+            const createStatus = CreateDataPropertyOrThrow($, A, Pk, fromValue);
+            if (IsAbrupt(createStatus)) return createStatus;
+          }
+          return A;
+        }),
+
+        /**
+         * 23.1.3.34 Array.prototype.toSorted ( comparefn )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. If comparefn is not undefined and IsCallable(comparefn)
+         *    is false, throw a TypeError exception.
+         * 2. Let O be ? ToObject(this value).
+         * 3. Let len be ? LengthOfArrayLike(O).
+         * 4. Let A be ? ArrayCreate(len).
+         * 5. Let SortCompare be a new Abstract Closure with
+         *    parameters (x, y) that captures comparefn and performs the
+         *    following steps when called:
+         *     a. Return ? CompareArrayElements(x, y, comparefn).
+         * 6. Let sortedList be ? SortIndexedProperties(O, len,
+         *    SortCompare, read-through-holes).
+         * 7. Let j be 0.
+         * 8. Repeat, while j < len,
+         *     a. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(j)), sortedList[j]).
+         *     b. Set j to j + 1.
+         * 9. Return A.
+         */
+        'toSorted': method(function*($, thisValue, comparefn) {
+          if (comparefn !== undefined && !IsCallable(comparefn)) {
+            return $.throw('TypeError', `${DebugString(comparefn)} is not a function`);
+          }
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          const A = ArrayCreate($, len);
+          if (IsAbrupt(A)) return A;
+          const SortCompare = (x: Val, y: Val) => CompareArrayElements($, x, y, comparefn);
+          const sortedList = yield* SortIndexedProperties($, O, len, SortCompare, false);
+          if (IsAbrupt(sortedList)) return sortedList;
+          for (let j = 0; j < len; j++) {
+            const createStatus = CreateDataPropertyOrThrow($, A, String(j), sortedList[j]);
+            if (IsAbrupt(createStatus)) return createStatus;
+          }
+          return A;
+        }),
+
+        /**
+         * 23.1.3.35 Array.prototype.toSpliced ( start, skipCount, ...items )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let relativeStart be ? ToIntegerOrInfinity(start).
+         * 4. If relativeStart is -∞, let actualStart be 0.
+         * 5. Else if relativeStart < 0, let actualStart be max(len + relativeStart, 0).
+         * 6. Else, let actualStart be min(relativeStart, len).
+         * 7. Let insertCount be the number of elements in items.
+         * 8. If start is not present, then
+         *     a. Let actualSkipCount be 0.
+         * 9. Else if skipCount is not present, then
+         *     a. Let actualSkipCount be len - actualStart.
+         * 10. Else,
+         *     a. Let sc be ? ToIntegerOrInfinity(skipCount).
+         *     b. Let actualSkipCount be the result of clamping sc
+         *        between 0 and len - actualStart.
+         * 11. Let newLen be len + insertCount - actualSkipCount.
+         * 12. If newLen > 253 - 1, throw a TypeError exception.
+         * 13. Let A be ? ArrayCreate(newLen).
+         * 14. Let i be 0.
+         * 15. Let r be actualStart + actualSkipCount.
+         * 16. Repeat, while i < actualStart,
+         *     a. Let Pi be ! ToString(𝔽(i)).
+         *     b. Let iValue be ? Get(O, Pi).
+         *     c. Perform ! CreateDataPropertyOrThrow(A, Pi, iValue).
+         *     d. Set i to i + 1.
+         * 17. For each element E of items, do
+         *     a. Let Pi be ! ToString(𝔽(i)).
+         *     b. Perform ! CreateDataPropertyOrThrow(A, Pi, E).
+         *     c. Set i to i + 1.
+         * 18. Repeat, while i < newLen,
+         *     a. Let Pi be ! ToString(𝔽(i)).
+         *     b. Let from be ! ToString(𝔽(r)).
+         *     c. Let fromValue be ? Get(O, from).
+         *     d. Perform ! CreateDataPropertyOrThrow(A, Pi, fromValue).
+         *     e. Set i to i + 1.
+         *     f. Set r to r + 1.
+         * 19. Return A.
+         */
+        'toSpliced': method(function*($, thisValue, start, skipCount, ...items) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          let actualStart = LengthRelative(yield* ToIntegerOrInfinity($, start), len);
+          if (IsAbrupt(actualStart)) return actualStart;
+          let actualSkipCount: number;
+          if (arguments.length < 3) {
+            actualSkipCount = 0;
+          } else if (arguments.length < 4) {
+            actualSkipCount = len - actualStart;
+          } else {
+            const sc = yield* ToIntegerOrInfinity($, skipCount);
+            if (IsAbrupt(sc)) return sc;
+            actualSkipCount = Math.min(Math.max(sc, 0), len - actualStart);
+          }
+          const newLen = len + items.length - actualSkipCount;
+          if (newLen > Number.MAX_SAFE_INTEGER) {
+            return $.throw('TypeError', 'Array length exceeds 2^53-1');
+          }
+          const A = ArrayCreate($, newLen);
+          if (IsAbrupt(A)) return A;
+          let i = 0;
+          let r = actualStart + actualSkipCount;
+          for (; i < actualStart; i++) {
+            const Pi = String(i);
+            const iValue = yield* Get($, O, Pi);
+            if (IsAbrupt(iValue)) return iValue;
+            CastNotAbrupt(CreateDataPropertyOrThrow($, A, Pi, iValue));
+          }
+          for (const E of items) {
+            const Pi = String(i++);
+            CastNotAbrupt(CreateDataPropertyOrThrow($, A, Pi, E));
+          }
+          for (; i < newLen; i++) {
+            const Pi = String(i);
+            const from = String(r++);
+            const fromValue = yield* Get($, O, from);
+            if (IsAbrupt(fromValue)) return fromValue;
+            CastNotAbrupt(CreateDataPropertyOrThrow($, A, Pi, fromValue));
+          }
+          return A;
+        }),
+
+        /**
+         * 23.1.3.36 Array.prototype.toString ( )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let array be ? ToObject(this value).
+         * 2. Let func be ? Get(array, "join").
+         * 3. If IsCallable(func) is false, set func to the intrinsic
+         *    function %Object.prototype.toString%.
+         * 4. Return ? Call(func, array).
+         * 
+         * NOTE: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'toString': method(function*($, thisValue) {
+          const array = ToObject($, thisValue);
+          if (IsAbrupt(array)) return array;
+          let func = yield* Get($, array, 'join');
+          if (IsAbrupt(func)) return func;
+          if (!IsCallable(func)) {
+            func = $.getIntrinsic('%Object.prototype.toString%');
+          }
+          return yield* Call($, func, array);
+        }),
+
+        /**
+         * 23.1.3.37 Array.prototype.unshift ( ...items )
+         * 
+         * This method prepends the arguments to the start of the
+         * array, such that their order within the array is the same
+         * as the order in which they appear in the argument list.
+         * 
+         * It performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let argCount be the number of elements in items.
+         * 4. If argCount > 0, then
+         *     a. If len + argCount > 253 - 1, throw a TypeError exception.
+         *     b. Let k be len.
+         *     c. Repeat, while k > 0,
+         *         i. Let from be ! ToString(𝔽(k - 1)).
+         *         ii. Let to be ! ToString(𝔽(k + argCount - 1)).
+         *         iii. Let fromPresent be ? HasProperty(O, from).
+         *         iv. If fromPresent is true, then
+         *             1. Let fromValue be ? Get(O, from).
+         *             2. Perform ? Set(O, to, fromValue, true).
+         *         v. Else,
+         *             1. Assert: fromPresent is false.
+         *             2. Perform ? DeletePropertyOrThrow(O, to).
+         *         vi. Set k to k - 1.
+         *     d. Let j be +0𝔽.
+         *     e. For each element E of items, do
+         *         i. Perform ? Set(O, ! ToString(j), E, true).
+         *         ii. Set j to j + 1𝔽.
+         * 5. Perform ? Set(O, "length", 𝔽(len + argCount), true).
+         * 6. Return 𝔽(len + argCount).
+         * 
+         * The "length" property of this method is 1𝔽.
+         * 
+         * NOTE: This method is intentionally generic; it does not
+         * require that its this value be an Array. Therefore it can
+         * be transferred to other kinds of objects for use as a
+         * method.
+         */
+        'unshift': method(function*($, thisValue, ...items) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          const argCount = items.length;
+          if (argCount) {
+            if (len + argCount > Number.MAX_SAFE_INTEGER) {
+              return $.throw('TypeError', 'Array length exceeds 2^53-1');
+            }
+            for (let k = len; k > 0; k--) {
+              const from = String(k - 1);
+              const to = String(k + argCount - 1);
+              const fromPresent = HasProperty($, O, from);
+              if (IsAbrupt(fromPresent)) return fromPresent;
+              if (fromPresent) {
+                const fromValue = yield* Get($, O, from);
+                if (IsAbrupt(fromValue)) return fromValue;
+                const setStatus = yield* Set($, O, to, fromValue, true);
+                if (IsAbrupt(setStatus)) return setStatus;
+              } else {
+                const deleteStatus = DeletePropertyOrThrow($, O, to);
+                if (IsAbrupt(deleteStatus)) return deleteStatus;
+              }
+            }
+            let j = 0;
+            for (const E of items) {
+              const setStatus = yield* Set($, O, String(j), E, true);
+              if (IsAbrupt(setStatus)) return setStatus;
+              j++;
+            }
+          }
+          const setStatus = yield* Set($, O, 'length', len + argCount, true);
+          if (IsAbrupt(setStatus)) return setStatus;
+          return len + argCount;
+        }, 1),
+
+        /**
+         * 23.1.3.38 Array.prototype.values ( )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Return CreateArrayIterator(O, value).
+         */
+        'values': propWC(arrayPrototypeValues),
+
+        /**
+         * 23.1.3.39 Array.prototype.with ( index, value )
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let O be ? ToObject(this value).
+         * 2. Let len be ? LengthOfArrayLike(O).
+         * 3. Let relativeIndex be ? ToIntegerOrInfinity(index).
+         * 4. If relativeIndex ≥ 0, let actualIndex be relativeIndex.
+         * 5. Else, let actualIndex be len + relativeIndex.
+         * 6. If actualIndex ≥ len or actualIndex < 0, throw a RangeError exception.
+         * 7. Let A be ? ArrayCreate(len).
+         * 8. Let k be 0.
+         * 9. Repeat, while k < len,
+         *     a. Let Pk be ! ToString(𝔽(k)).
+         *     b. If k is actualIndex, let fromValue be value.
+         *     c. Else, let fromValue be ? Get(O, Pk).
+         *     d. Perform ! CreateDataPropertyOrThrow(A, Pk, fromValue).
+         *     e. Set k to k + 1.
+         * 10. Return A.
+         */
+        'with': method(function*($, thisValue, index, value) {
+          const O = ToObject($, thisValue);
+          if (IsAbrupt(O)) return O;
+          const len = yield* LengthOfArrayLike($, O);
+          if (IsAbrupt(len)) return len;
+          const relativeIndex = yield* ToIntegerOrInfinity($, index);
+          if (IsAbrupt(relativeIndex)) return relativeIndex;
+          const actualIndex = relativeIndex >= 0 ? relativeIndex : len + relativeIndex;
+          if (actualIndex >= len || actualIndex < 0) {
+            return $.throw('RangeError', 'Index out of bounds');
+          }
+          const A = ArrayCreate($, len);
+          if (IsAbrupt(A)) return A;
+          for (let k = 0; k < len; k++) {
+            const Pk = String(k);
+            const fromValue = k === actualIndex ? value : yield* Get($, O, Pk);
+            if (IsAbrupt(fromValue)) return fromValue;
+            CastNotAbrupt(CreateDataPropertyOrThrow($, A, Pk, fromValue));
+          }
+          return A;
+        }),
+
+        /**
+         * 23.1.3.40 Array.prototype [ @@iterator ] ( )
+         * 
+         * The initial value of the @@iterator property is
+         * %Array.prototype.values%, defined in 23.1.3.38.
+         */
+        [Symbol.iterator]: propWC(arrayPrototypeValues),
+
+        /**
+         * 23.1.3.41 Array.prototype [ @@unscopables ]
+         * 
+         * The initial value of the @@unscopables data property is an
+         * object created by the following steps:
+         * 
+         * 1. Let unscopableList be OrdinaryObjectCreate(null).
+         * 2. Perform ! CreateDataPropertyOrThrow(unscopableList, "at", true).
+         * 3. Perform ! CreateDataPropertyOrThrow(unscopableList, "copyWithin", true).
+         * 4. Perform ! CreateDataPropertyOrThrow(unscopableList, "entries", true).
+         * 5. Perform ! CreateDataPropertyOrThrow(unscopableList, "fill", true).
+         * 6. Perform ! CreateDataPropertyOrThrow(unscopableList, "find", true).
+         * 7. Perform ! CreateDataPropertyOrThrow(unscopableList, "findIndex", true).
+         * 8. Perform ! CreateDataPropertyOrThrow(unscopableList, "findLast", true).
+         * 9. Perform ! CreateDataPropertyOrThrow(unscopableList, "findLastIndex", true).
+         * 10. Perform ! CreateDataPropertyOrThrow(unscopableList, "flat", true).
+         * 11. Perform ! CreateDataPropertyOrThrow(unscopableList, "flatMap", true).
+         * 12. Perform ! CreateDataPropertyOrThrow(unscopableList, "includes", true).
+         * 13. Perform ! CreateDataPropertyOrThrow(unscopableList, "keys", true).
+         * 14. Perform ! CreateDataPropertyOrThrow(unscopableList, "toReversed", true).
+         * 15. Perform ! CreateDataPropertyOrThrow(unscopableList, "toSorted", true).
+         * 16. Perform ! CreateDataPropertyOrThrow(unscopableList, "toSpliced", true).
+         * 17. Perform ! CreateDataPropertyOrThrow(unscopableList, "values", true).
+         * 18. Return unscopableList.
+         * 
+         * This property has the attributes { [[Writable]]: false,
+         * [[Enumerable]]: false, [[Configurable]]: true }.
+         * 
+         * NOTE: The own property names of this object are property
+         * names that were not included as standard properties of
+         * Array.prototype prior to the ECMAScript 2015 specification.
+         * These names are ignored for with statement binding purposes
+         * in order to preserve the behaviour of existing code that might
+         * use one of these names as a binding in an outer scope that is
+         * shadowed by a with statement whose binding object is an Array.
+         * 
+         * The reason that "with" is not included in the unscopableList
+         * is because it is already a reserved word.
+         */
+        [Symbol.unscopables]: propC(OrdinaryObjectCreate({
+          Prototype: null,
+        }, {
+          'at': propWEC(true),
+          'copyWithin': propWEC(true),
+          'entries': propWEC(true),
+          'fill': propWEC(true),
+          'find': propWEC(true),
+          'findIndex': propWEC(true),
+          'findLast': propWEC(true),
+          'findLastIndex': propWEC(true),
+          'flat': propWEC(true),
+          'flatMap': propWEC(true),
+          'includes': propWEC(true),
+          'keys': propWEC(true),
+          'toReversed': propWEC(true),
+          'toSorted': propWEC(true),
+          'toSpliced': propWEC(true),
+          'values': propWEC(true),
+        })),
       });
 
       // TODO - peel this off - arrays are only iterable if we _have_ an iterator.
