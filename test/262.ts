@@ -91,7 +91,9 @@ export const test262: Plugin = {
         return realm.GlobalObject!;
       });
 
-      const agent = OrdinaryObjectCreate({Prototype: realm.Intrinsics.get('%Object.prototype%')!});
+      const agent = OrdinaryObjectCreate({
+        Prototype: realm.Intrinsics.get('%Object.prototype%')!,
+      });
       realm.GlobalObject!.OwnProps.set('agent', prop0(agent));
 
       /**

@@ -38,9 +38,6 @@ browser or on the server.
     - [ ] BigInt
 - [ ] Well-known Object types
     - [x] Object
-        - [x] static methods
-            - [ ] Object.fromEntries
-        - [x] instance methods
     - [x] Function
     - [x] Error
         - [x] all subtypes
