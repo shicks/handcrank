@@ -2556,7 +2556,8 @@ export const arrayObject: Plugin = {
             const setStatus = yield* Set($, O, String(k++), E, true);
             if (IsAbrupt(setStatus)) return setStatus;
           }
-          Set($, O, 'length', len - actualDeleteCount + items.length, true);
+          const status = yield* Set($, O, 'length', len - actualDeleteCount + items.length, true);
+          if (IsAbrupt(status)) return status;
           return A;
         }),
 
