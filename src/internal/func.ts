@@ -2120,14 +2120,14 @@ export function getter(
  * undefined.
  */
 export function callOrConstruct(
-  fn: ($: VM, argumentList: Val[], NewTarget?: Func) => ECR<Val>,
+  fn: ($: VM, NewTarget: Func|undefined, ...argumentList: Val[]) => ECR<Val>,
 ): BuiltinFunctionBehavior {
   return {
     Call($, _, argumentList) {
-      return fn($, argumentList, undefined);
+      return fn($, undefined, ...argumentList);
     },
     Construct($, argumentList, NewTarget) {
-      return fn($, argumentList, NewTarget as Func) as ECR<Obj>;
+      return fn($, NewTarget as Func, ...argumentList) as ECR<Obj>;
     },
   };
 }

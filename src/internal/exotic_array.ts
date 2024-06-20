@@ -384,7 +384,7 @@ export const arrayObject: Plugin = {
        *     f. Return array.
        */
       const arrayCtor = CreateBuiltinFunction(
-        callOrConstruct(function*($, values, NewTarget) {
+        callOrConstruct(function*($, NewTarget, ...values) {
           if (NewTarget == null) NewTarget = $.getActiveFunctionObject()!;
           const proto = yield* GetPrototypeFromConstructor($, NewTarget, '%Array.prototype%');
           if (IsAbrupt(proto)) return proto;

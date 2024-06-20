@@ -340,7 +340,7 @@ function CreateIntrinsics(realm: RealmRecord) {
    *   - has the following properties:
    */
   const generatorFunction = CreateBuiltinFunction(
-    callOrConstruct(($, args, NewTarget) => {
+    callOrConstruct(($, NewTarget, ...args) => {
       const bodyArg = args.pop() || '';
       const parameterArgs = args;
       const C = $.getActiveFunctionObject();

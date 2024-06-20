@@ -1,4 +1,5 @@
-import { StringToBigInt, ToNumeric, ToPrimitive } from './abstract_conversion';
+import { StringToBigInt, ToBoolean, ToNumeric, ToPrimitive } from './abstract_conversion';
+import { Get } from './abstract_object';
 import { CR, IsAbrupt } from './completion_record';
 import { BOOLEAN, NUMBER, OBJECT } from './enums';
 import { ArrayExoticObject } from './exotic_array';
@@ -166,6 +167,47 @@ export function IsArrayIndex(argument: Val): boolean {
   const n = Number(argument);
   return Number.isSafeInteger(n) && n >= 0 && String(n) === argument;
 }
+
+/**
+ * 7.2.8 IsRegExp ( argument )
+ * 
+ * The abstract operation IsRegExp takes argument argument (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing a Boolean or a throw completion. It performs the
+ * following steps when called:
+ * 
+ * 1. If argument is not an Object, return false.
+ * 2. Let matcher be ? Get(argument, @@match).
+ * 3. If matcher is not undefined, return ToBoolean(matcher).
+ * 4. If argument has a [[RegExpMatcher]] internal slot, return true.
+ * 5. Return false.
+ */
+export function* IsRegExp($: VM, argument: Val): ECR<boolean> {
+  if (!(argument instanceof Obj)) return false;
+  const matcher = yield* Get($, argument, Symbol.match);
+  if (IsAbrupt(matcher)) return matcher;
+  if (matcher !== undefined) return ToBoolean(matcher);
+  return Boolean(argument.RegExpMatcher);
+}
+
+/**
+ * 7.2.9 Static Semantics: IsStringWellFormedUnicode ( string )
+ * 
+ * The abstract operation IsStringWellFormedUnicode takes argument
+ * string (a String) and returns a Boolean. It interprets string as a
+ * sequence of UTF-16 encoded code points, as described in 6.1.4, and
+ * determines whether it is a well formed UTF-16 sequence. It performs
+ * the following steps when called:
+ * 
+ * 1. Let len be the length of string.
+ * 2. Let k be 0.
+ * 3. Repeat, while k < len,
+ *     a. Let cp be CodePointAt(string, k).
+ *     b. If cp.[[IsUnpairedSurrogate]] is true, return false.
+ *     c. Set k to k + cp.[[CodeUnitCount]].
+ * 4. Return true.
+ */
+
 
 /**
  * 7.2.10 SameValue ( x, y )

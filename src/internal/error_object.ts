@@ -88,7 +88,7 @@ export const errorObject: Plugin = {
        * 4. Perform ? InstallErrorCause(O, options).
        * 5. Return O.
        */
-      function* errorBehavior($: VM, [message, options]: Val[], NewTarget: Val) {
+      function* errorBehavior($: VM, NewTarget: Val, message: Val, options: Val) {
         const newTarget = NewTarget ?? $.getRunningContext().Function!;
         Assert(IsFunc(newTarget));
         const O = yield* OrdinaryCreateFromConstructor($, newTarget, '%Error.prototype', {

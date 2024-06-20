@@ -489,7 +489,7 @@ export const objectConstructor: Plugin = {
       const objectPrototype = realm.Intrinsics.get('%Object.prototype%')!;
       const functionPrototype = realm.Intrinsics.get('%Function.prototype%')!;
       const objectCtor = CreateBuiltinFunction(
-        callOrConstruct(function*($, [value], NewTarget) {
+        callOrConstruct(function*($, NewTarget, value) {
           if (NewTarget !== undefined && NewTarget !== $.getActiveFunctionObject()) {
             return yield* OrdinaryCreateFromConstructor($, NewTarget, '%Object.prototype%');
           }
@@ -1134,7 +1134,7 @@ export const booleanObject: Plugin = {
       const [booleanCtor, booleanPrototype] =
         makeWrapper(
           realm, 'Boolean', '%Object.prototype',
-          callOrConstruct(function*($, [value], NewTarget) {
+          callOrConstruct(function*($, NewTarget, value) {
             const b = ToBoolean(value);
             if (NewTarget == null) return b;
             return yield* OrdinaryCreateFromConstructor(
@@ -1256,7 +1256,7 @@ export const symbolObject: Plugin = {
       const [symbolCtor, symbolPrototype] =
         makeWrapper(
           realm, 'Symbol', '%Object.prototype',
-          callOrConstruct(function*($, [description], NewTarget) {
+          callOrConstruct(function*($, NewTarget, description) {
             if (NewTarget != null) {
               return $.throw('TypeError', 'Symbol is not a constructor');
             }
@@ -1637,7 +1637,7 @@ export const numberObject: Plugin = {
       const [numberCtor, numberPrototype] =
         makeWrapper(
           realm, 'Number', '%Object.prototype',
-          callOrConstruct(function*($, [value], NewTarget) {
+          callOrConstruct(function*($, NewTarget, value) {
             let n = 0;
             if (value != null) {
               const prim = yield* ToNumeric($, value);

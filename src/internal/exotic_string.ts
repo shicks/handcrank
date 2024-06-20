@@ -277,7 +277,7 @@ export const stringObject: Plugin = {
        *    ? GetPrototypeFromConstructor(NewTarget, "%String.prototype%")).
        */
       const stringCtor = CreateBuiltinFunction(
-        callOrConstruct(function*($, [value], NewTarget) {
+        callOrConstruct(function*($, NewTarget, value) {
           let s = '';
           if (value != null) {
             if (NewTarget == null && typeof value === 'symbol') {
