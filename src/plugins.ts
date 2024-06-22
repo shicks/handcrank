@@ -12,6 +12,7 @@ import { controlFlow } from './internal/control_flow';
 import { classes } from './internal/class';
 import { taggedTemplateLiterals, templateLiterals } from './internal/template';
 import { Plugin } from './internal/vm';
+import { regexp } from './internal/regexp';
 
 export const full: Plugin = {
   id: 'full',
@@ -30,6 +31,7 @@ export const full: Plugin = {
     classes,
     templateLiterals,
     taggedTemplateLiterals,
+    regexp,
   ],
 };
 
@@ -48,4 +50,5 @@ export {
   classes,
   templateLiterals,
   taggedTemplateLiterals,
+  regexp,
 };

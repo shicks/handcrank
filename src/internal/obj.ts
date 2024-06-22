@@ -3,6 +3,7 @@ import { ToPropertyKey } from './abstract_conversion';
 import { Call, CopyDataProperties, CreateDataProperty, Get, GetFunctionRealm } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
+import { UNUSED } from './enums';
 import { IsFunc, SetFunctionName, type Func } from './func';
 import { PrivateElement, PrivateName, ResolvePrivateIdentifier } from './private_environment_record';
 import { HasValueField, IsAccessorDescriptor, IsDataDescriptor, IsGenericDescriptor, PropertyDescriptor, methodName, propWEC } from './property_descriptor';
@@ -918,6 +919,32 @@ export function* GetPrototypeFromConstructor(
     return realm.Intrinsics.get(intrinsicDefaultProto)!;
   }
   return proto;
+}
+
+/**
+ * 10.1.15 RequireInternalSlot ( O, internalSlot )
+ * 
+ * The abstract operation RequireInternalSlot takes arguments O (an
+ * ECMAScript language value) and internalSlot (an internal slot name)
+ * and returns either a normal completion containing unused or a throw
+ * completion. It throws an exception unless O is an Object and has
+ * the given internal slot. It performs the following steps when
+ * called:
+ * 
+ * 1. If O is not an Object, throw a TypeError exception.
+ * 2. If O does not have an internalSlot internal slot, throw a TypeError exception.
+ * 3. Return unused.
+ */
+export function RequireInternalSlot(
+  $: VM,
+  O: Val,
+  slots: {[K in keyof ObjectSlots]: true},
+): CR<UNUSED> {
+  if (!(O instanceof Obj)) return $.throw('TypeError', 'not an object');
+  for (const s in slots) {
+    if (!(s in O)) return $.throw('TypeError', 'missing slot');
+  }
+  return UNUSED;
 }
 
 /**

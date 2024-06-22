@@ -125,7 +125,9 @@ export function* Set(
 ): ECR<UNUSED> {
   const success = yield* O.Set($, P, V, O);
   if (IsAbrupt(success)) return success;
-  if (!success && ShouldThrow) return $.throw('TypeError');
+  if (!success && ShouldThrow) {
+    return $.throw('TypeError', `could not set property ${String(P)}`);
+  }
   return UNUSED;
 }
 

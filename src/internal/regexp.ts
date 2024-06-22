@@ -1,16 +1,22 @@
+// NOTE: This is a pedantic implementation of RegExp.
+// We can save a _lot_ of bytes and improve efficiency
+// by cutting some corners, at the expense of correctness.
+
 import { IsCallable, IsRegExp, SameValue } from './abstract_compare';
 import { ToBoolean, ToIntegerOrInfinity, ToLength, ToObject, ToString } from './abstract_conversion';
 import { Call, Construct, CreateArrayFromList, DefinePropertyOrThrow, Get, LengthOfArrayLike, Set, SpeciesConstructor } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { ExecutionContext } from './execution_context';
 import { CreateBuiltinFunction, Func, callOrConstruct, getter, method } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
-import { PropertyDescriptor, prop0, propWC } from './property_descriptor';
+import { PropertyDescriptor, prop0, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
-import { ECR, Plugin, VM, just } from './vm';
+import { ECR, Plugin, VM, just, when } from './vm';
+
+declare const GetSubstitution: any;
+declare const CreateRegExpStringIterator: any;
 
 /**
  * 22.2.8 Properties of RegExp Instances
@@ -52,7 +58,7 @@ declare global {
  * 1. Let obj be ! RegExpAlloc(%RegExp%).
  * 2. Return ? RegExpInitialize(obj, P, F).
  */
-export function* RegExpCreate($: VM, P: Val, F: string): ECR<Obj> {
+export function* RegExpCreate($: VM, P: Val, F?: string): ECR<Obj> {
   const obj = CastNotAbrupt(yield* RegExpAlloc($, $.getIntrinsic('%RegExp%') as Func));
   return yield* RegExpInitialize($, obj, P, F);
 }
@@ -83,7 +89,7 @@ export function* RegExpAlloc($: VM, newTarget: Func): ECR<Obj> {
   if (IsAbrupt(obj)) return obj;
   // TODO - what if newtarget makes lastIndex non-writable?
   CastNotAbrupt(DefinePropertyOrThrow($, obj, 'lastIndex', {
-    Writable: false,
+    Writable: true,
     Enumerable: false,
     Configurable: false,
   }));
@@ -238,6 +244,14 @@ export function* RegExpConstructor(
 export const regexp: Plugin = {
   id: 'regexp',
   deps: () => [objectAndFunctionPrototype],
+  syntax: {
+    Evaluation(on) {
+      on('Literal', when(n => n.value instanceof RegExp, ($, n) => {
+        const r = n.value as RegExp;
+        return RegExpCreate($, r.source, r.flags);
+      }));
+    },
+  },
   realm: {
     CreateIntrinsics(realm: RealmRecord, stagedGlobals: Map<string, PropertyDescriptor>) {
 
@@ -330,8 +344,8 @@ export const regexp: Plugin = {
          * 4. Return ? RegExpBuiltinExec(R, S).
          */
         'exec': method(function*($, R, string): ECR<Val> {
-          const status = RequireInternalSlot($, R, 'RegExpMatcher');
-          if (IsAbrupt(status)) return status;
+          if (!(R instanceof Obj)) return $.throw('TypeError', 'not an object');
+          if (R.RegExpMatcher == null) return $.throw('TypeError', 'not a regular expression');
           const S = yield* ToString($, string);
           if (IsAbrupt(S)) return S;
           return yield* RegExpBuiltinExec($, R, S);
@@ -348,7 +362,7 @@ export const regexp: Plugin = {
          * 2. Let cu be the code unit 0x0073 (LATIN SMALL LETTER S).
          * 3. Return ? RegExpHasFlag(R, cu).
          */
-        'dotAll': getter((_$, R) => just(RegExpHasFlag($, R, 's'))),
+        'dotAll': getter(($, R) => just(RegExpHasFlag($, R, 's'))),
 
         /**
          * 22.2.6.4 get RegExp.prototype.flags
@@ -1000,7 +1014,7 @@ export function* RegExpPrototypeReplace(
           if (IsAbrupt(lastIndex)) return lastIndex;
           const thisIndex = yield* ToLength($, lastIndex);
           if (IsAbrupt(thisIndex)) return thisIndex;
-          const nextIndex = yield* AdvanceStringIndex(S, thisIndex, fullUnicode);
+          const nextIndex = AdvanceStringIndex(S, thisIndex, fullUnicode);
           const setStatus = yield* Set($, rx, 'lastIndex', nextIndex, true);
           if (IsAbrupt(setStatus)) return setStatus;
         }
@@ -1067,4 +1081,311 @@ export function* RegExpPrototypeReplace(
   // 16.
   if (nextSourcePosition >= lengthS) return accumulatedResult;
   return accumulatedResult + S.substring(nextSourcePosition);
+}
+
+// 22.2.7 Abstract Operations for RegExp Matching
+
+/**
+ * 22.2.7.1 RegExpExec ( R, S )
+ * 
+ * The abstract operation RegExpExec takes arguments R (an Object) and
+ * S (a String) and returns either a normal completion containing
+ * either an Object or null, or a throw completion. It performs the
+ * following steps when called:
+ * 
+ * 1. Let exec be ? Get(R, "exec").
+ * 2. If IsCallable(exec) is true, then
+ *     a. Let result be ? Call(exec, R, « S »).
+ *     b. If result is not an Object and result is not null, throw a TypeError exception.
+ *     c. Return result.
+ * 3. Perform ? RequireInternalSlot(R, [[RegExpMatcher]]).
+ * 4. Return ? RegExpBuiltinExec(R, S).
+ * 
+ * NOTE: If a callable "exec" property is not found this algorithm
+ * falls back to attempting to use the built-in RegExp matching
+ * algorithm. This provides compatible behaviour for code written for
+ * prior editions where most built-in algorithms that use regular
+ * expressions did not perform a dynamic property lookup of "exec".
+ */
+export function* RegExpExec($: VM, R: Obj, S: string): ECR<Obj|null> {
+  const exec = yield* Get($, R, 'exec');
+  if (IsAbrupt(exec)) return exec;
+  if (IsCallable(exec)) {
+    const result = yield* Call($, exec, R, [S]);
+    if (IsAbrupt(result)) return result;
+    if (!(result instanceof Obj) && result !== null) {
+      return $.throw('TypeError', 'not an object');
+    }
+    return result;
+  }
+  if (R.RegExpMatcher == null) return $.throw('TypeError', 'not a regular expression');
+  return yield* RegExpBuiltinExec($, R, S);
+}
+
+/**
+ * 22.2.7.2 RegExpBuiltinExec ( R, S )
+ * 
+ * The abstract operation RegExpBuiltinExec takes arguments R (an
+ * initialized RegExp instance) and S (a String) and returns either a
+ * normal completion containing either an Array exotic object or null,
+ * or a throw completion. It performs the following steps when called:
+ * 
+ * 1. Let length be the length of S.
+ * 2. Let lastIndex be ℝ(? ToLength(? Get(R, "lastIndex"))).
+ * 3. Let flags be R.[[OriginalFlags]].
+ * 4. If flags contains "g", let global be true; else let global be false.
+ * 5. If flags contains "y", let sticky be true; else let sticky be false.
+ * 6. If flags contains "d", let hasIndices be true; else let hasIndices be false.
+ * 7. If global is false and sticky is false, set lastIndex to 0.
+ * 8. Let matcher be R.[[RegExpMatcher]].
+ * 9. If flags contains "u", let fullUnicode be true; else let fullUnicode be false.
+ * 10. Let matchSucceeded be false.
+ * 11. If fullUnicode is true, let input be
+ *     StringToCodePoints(S). Otherwise, let input be a List whose
+ *     elements are the code units that are the elements of S.
+ * 12. NOTE: Each element of input is considered to be a character.
+ * 13. Repeat, while matchSucceeded is false,
+ *     a. If lastIndex > length, then
+ *         i. If global is true or sticky is true, then
+ *             1. Perform ? Set(R, "lastIndex", +0𝔽, true).
+ *         ii. Return null.
+ *     b. Let inputIndex be the index into input of the character that
+ *        was obtained from element lastIndex of S.
+ *     c. Let r be matcher(input, inputIndex).
+ *     d. If r is failure, then
+ *         i. If sticky is true, then
+ *             1. Perform ? Set(R, "lastIndex", +0𝔽, true).
+ *             2. Return null.
+ *         ii. Set lastIndex to AdvanceStringIndex(S, lastIndex, fullUnicode).
+ *     e. Else,
+ *         i. Assert: r is a MatchState.
+ *         ii. Set matchSucceeded to true.
+ * 14. Let e be r's endIndex value.
+ * 15. If fullUnicode is true, set e to GetStringIndex(S, e).
+ * 16. If global is true or sticky is true, then
+ *     a. Perform ? Set(R, "lastIndex", 𝔽(e), true).
+ * 17. Let n be the number of elements in r's captures List.
+ * 18. Assert: n = R.[[RegExpRecord]].[[CapturingGroupsCount]].
+ * 19. Assert: n < 232 - 1.
+ * 20. Let A be ! ArrayCreate(n + 1).
+ * 21. Assert: The mathematical value of A's "length" property is n + 1.
+ * 22. Perform ! CreateDataPropertyOrThrow(A, "index", 𝔽(lastIndex)).
+ * 23. Perform ! CreateDataPropertyOrThrow(A, "input", S).
+ * 24. Let match be the Match Record { [[StartIndex]]: lastIndex, [[EndIndex]]: e }.
+ * 25. Let indices be a new empty List.
+ * 26. Let groupNames be a new empty List.
+ * 27. Append match to indices.
+ * 28. Let matchedSubstr be GetMatchString(S, match).
+ * 29. Perform ! CreateDataPropertyOrThrow(A, "0", matchedSubstr).
+ * 30. If R contains any GroupName, then
+ *     a. Let groups be OrdinaryObjectCreate(null).
+ *     b. Let hasGroups be true.
+ * 31. Else,
+ *     a. Let groups be undefined.
+ *     b. Let hasGroups be false.
+ * 32. Perform ! CreateDataPropertyOrThrow(A, "groups", groups).
+ * 33. For each integer i such that 1 ≤ i ≤ n, in ascending order, do
+ *     a. Let captureI be ith element of r's captures List.
+ *     b. If captureI is undefined, then
+ *         i. Let capturedValue be undefined.
+ *         ii. Append undefined to indices.
+ *     c. Else,
+ *         i. Let captureStart be captureI's startIndex.
+ *         ii. Let captureEnd be captureI's endIndex.
+ *         iii. If fullUnicode is true, then
+ *             1. Set captureStart to GetStringIndex(S, captureStart).
+ *             2. Set captureEnd to GetStringIndex(S, captureEnd).
+ *         iv. Let capture be the Match Record { [[StartIndex]]:
+ *             captureStart, [[EndIndex]]: captureEnd }.
+ *         v. Let capturedValue be GetMatchString(S, capture).
+ *         vi. Append capture to indices.
+ *     d. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(i)), capturedValue).
+ *     e. If the ith capture of R was defined with a GroupName, then
+ *         i. Let s be the CapturingGroupName of that GroupName.
+ *         ii. Perform ! CreateDataPropertyOrThrow(groups, s, capturedValue).
+ *         iii. Append s to groupNames.
+ *     f. Else,
+ *         i. Append undefined to groupNames.
+ * 34. If hasIndices is true, then
+ *     a. Let indicesArray be MakeMatchIndicesIndexPairArray(
+ *        S, indices, groupNames, hasGroups).
+ *     b. Perform ! CreateDataPropertyOrThrow(A, "indices", indicesArray).
+ * 35. Return A.
+ */
+export function* RegExpBuiltinExec(
+  $: VM,
+  R: Obj,
+  S: string,
+): ECR<Obj|null> {
+  const lastIndexVal = yield* Get($, R, 'lastIndex');
+  if (IsAbrupt(lastIndexVal)) return lastIndexVal;
+  let lastIndex = yield* ToLength($, lastIndexVal);
+  if (IsAbrupt(lastIndex)) return lastIndex;
+  const flags = R.OriginalFlags!;
+  const global = flags.includes('g');
+  const sticky = flags.includes('y');
+  const hasIndices = flags.includes('d');
+  if (!global && !sticky) lastIndex = 0;
+  const matcher = R.RegExpMatcher!;
+  // 13.
+  matcher.lastIndex = lastIndex;
+  const r = matcher.exec(S);
+  if (!r) {
+    // NOTE: the sticky-vs-global distinction is handled in internal RegExp.
+    if (sticky || global) yield* Set($, R, 'lastIndex', 0, true);
+    return null;
+  }
+  // 14.
+  let e = r.index + r[0].length; // note: this is already in code units
+  if (global || sticky) {
+    const setStatus = yield* Set($, R, 'lastIndex', e, true);
+    if (IsAbrupt(setStatus)) return setStatus;
+  }
+  // 20.
+  const A = CreateArrayFromList($, r);
+  A.OwnProps.set('index', propWEC(r.index));
+  A.OwnProps.set('input', propWEC(r.input));
+  // 30.
+  let groups: Obj|undefined;
+  if (r.groups) {
+    groups = OrdinaryObjectCreate({Prototype: null});
+    for (const k in r.groups) {  // TODO - if environment is old and doesn't have groups...?
+      groups.OwnProps.set(k, propWEC(r.groups[k]));
+    }
+  }
+  A.OwnProps.set('groups', propWEC(groups));
+  // 34.
+  if (hasIndices) {
+    const indices = CreateArrayFromList($, r.indices!.map(v => CreateArrayFromList($, v)));
+    let groups: Obj|undefined;
+    if (r.indices!.groups) {
+      groups = OrdinaryObjectCreate({Prototype: null});
+      for (const k in r.indices!.groups) {
+        groups.OwnProps.set(k, propWEC(CreateArrayFromList($, r.indices!.groups[k])));
+      }
+    }
+    A.OwnProps.set('indices', propWEC(indices));
+  }
+  return A;
+}
+
+/**
+ * 22.2.7.3 AdvanceStringIndex ( S, index, unicode )
+ * 
+ * The abstract operation AdvanceStringIndex takes arguments S (a
+ * String), index (a non-negative integer), and unicode (a Boolean)
+ * and returns an integer. It performs the following steps when
+ * called:
+ * 
+ * 1. Assert: index ≤ 253 - 1.
+ * 2. If unicode is false, return index + 1.
+ * 3. Let length be the length of S.
+ * 4. If index + 1 ≥ length, return index + 1.
+ * 5. Let cp be CodePointAt(S, index).
+ * 6. Return index + cp.[[CodeUnitCount]].
+ */
+export function AdvanceStringIndex(S: string, index: number, unicode: boolean): number {
+  if (!unicode) return index + 1;
+  const length = S.length;
+  if (index + 1 >= length) return index + 1;
+  const cp = CodePointAt(S, index);
+  return index + cp.CodeUnitCount;
+}
+
+/**
+ * 22.2.7.4 GetStringIndex ( S, codePointIndex )
+ * 
+ * The abstract operation GetStringIndex takes arguments S (a String)
+ * and codePointIndex (a non-negative integer) and returns a
+ * non-negative integer. It interprets S as a sequence of UTF-16
+ * encoded code points, as described in 6.1.4, and returns the code
+ * unit index corresponding to code point index codePointIndex when
+ * such an index exists. Otherwise, it returns the length of S. It
+ * performs the following steps when called:
+ * 
+ * 1. If S is the empty String, return 0.
+ * 2. Let len be the length of S.
+ * 3. Let codeUnitCount be 0.
+ * 4. Let codePointCount be 0.
+ * 5. Repeat, while codeUnitCount < len,
+ *     a. If codePointCount = codePointIndex, return codeUnitCount.
+ *     b. Let cp be CodePointAt(S, codeUnitCount).
+ *     c. Set codeUnitCount to codeUnitCount + cp.[[CodeUnitCount]].
+ *     d. Set codePointCount to codePointCount + 1.
+ * 6. Return len.
+ */
+export function GetStringIndex(S: string, codePointIndex: number): number {
+  if (!S) return 0;
+  const len = S.length;
+  let codeUnitCount = 0;
+  let codePointCount = 0;
+  while (codeUnitCount < len) {
+    if (codePointCount === codePointIndex) return codeUnitCount;
+    const cp = CodePointAt(S, codeUnitCount);
+    codeUnitCount += cp.CodeUnitCount;
+    codePointCount++;
+  }
+  return len;
+}
+
+/**
+ * 11.1.4 Static Semantics: CodePointAt ( string, position )
+ * 
+ * The abstract operation CodePointAt takes arguments string (a
+ * String) and position (a non-negative integer) and returns a Record
+ * with fields [[CodePoint]] (a code point), [[CodeUnitCount]] (a
+ * positive integer), and [[IsUnpairedSurrogate]] (a Boolean). It
+ * interprets string as a sequence of UTF-16 encoded code points, as
+ * described in 6.1.4, and reads from it a single code point starting
+ * with the code unit at index position. It performs the following
+ * steps when called:
+ * 
+ * 1. Let size be the length of string.
+ * 2. Assert: position ≥ 0 and position < size.
+ * 3. Let first be the code unit at index position within string.
+ * 4. Let cp be the code point whose numeric value is the numeric value of first.
+ * 5. If first is neither a leading surrogate nor a trailing surrogate, then
+ *     a. Return the Record { [[CodePoint]]: cp, [[CodeUnitCount]]: 1,
+ *        [[IsUnpairedSurrogate]]: false }.
+ * 6. If first is a trailing surrogate or position + 1 = size, then
+ *     a. Return the Record { [[CodePoint]]: cp, [[CodeUnitCount]]: 1,
+ *        [[IsUnpairedSurrogate]]: true }.
+ * 7. Let second be the code unit at index position + 1 within string.
+ * 8. If second is not a trailing surrogate, then
+ *     a. Return the Record { [[CodePoint]]: cp, [[CodeUnitCount]]: 1,
+ *        [[IsUnpairedSurrogate]]: true }.
+ * 9. Set cp to UTF16SurrogatePairToCodePoint(first, second).
+ * 10. Return the Record { [[CodePoint]]: cp, [[CodeUnitCount]]: 2,
+ *     [[IsUnpairedSurrogate]]: false }.
+ */
+export function CodePointAt(string: string, position: number): CodePointRecord {
+  const size = string.length;
+  Assert(position >= 0 && position < size);
+  const first = string.charCodeAt(position);
+  if (!isSurrogate(first)) {
+    return {CodePoint: first, CodeUnitCount: 1, IsUnpairedSurrogate: false};
+  } else if (isTrailingSurrogate(first) || position + 1 === size) {
+    return { CodePoint: first, CodeUnitCount: 1, IsUnpairedSurrogate: true };
+  }
+  Assert(isLeadingSurrogate(first));
+  const second = string.charCodeAt(position + 1);
+  if (!isTrailingSurrogate(second)) {
+    return { CodePoint: first, CodeUnitCount: 1, IsUnpairedSurrogate: true };
+  }
+  const cp2 = string.codePointAt(position)!;
+  return { CodePoint: cp2, CodeUnitCount: 2, IsUnpairedSurrogate: false };
+}
+function isSurrogate(code: number): boolean {
+  return (code & 0xF800) === 0xD800;
+}
+function isLeadingSurrogate(code: number): boolean {
+  return (code & 0xFC00) === 0xD800;
+}
+function isTrailingSurrogate(code: number): boolean {
+  return (code & 0xFC00) === 0xDC00;
+}
+interface CodePointRecord {
+  CodePoint: number;
+  CodeUnitCount: number;
+  IsUnpairedSurrogate: boolean;
 }
