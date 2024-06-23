@@ -15,7 +15,6 @@ import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
 import { ECR, Plugin, VM, just, when } from './vm';
 
-declare const GetSubstitution: any;
 declare const CreateRegExpStringIterator: any;
 
 /**
@@ -483,188 +482,14 @@ export const regexp: Plugin = {
         /** 22.2.6.11 RegExp.prototype [ @@replace ] ( string, replaceValue ) */
         [Symbol.replace]: method(RegExpPrototypeReplace),
 
-        /**
-         * 22.2.6.12 RegExp.prototype [ @@search ] ( string )
-         * 
-         * This method performs the following steps when called:
-         * 
-         * 1. Let rx be the this value.
-         * 2. If rx is not an Object, throw a TypeError exception.
-         * 3. Let S be ? ToString(string).
-         * 4. Let previousLastIndex be ? Get(rx, "lastIndex").
-         * 5. If SameValue(previousLastIndex, +0𝔽) is false, then
-         *     a. Perform ? Set(rx, "lastIndex", +0𝔽, true).
-         * 6. Let result be ? RegExpExec(rx, S).
-         * 7. Let currentLastIndex be ? Get(rx, "lastIndex").
-         * 8. If SameValue(currentLastIndex, previousLastIndex) is false, then
-         *     a. Perform ? Set(rx, "lastIndex", previousLastIndex, true).
-         * 9. If result is null, return -1𝔽.
-         * 10. Return ? Get(result, "index").
-         * 
-         * The value of the "name" property of this method is "[Symbol.search]".
-         * 
-         * NOTE: The "lastIndex" and "global" properties of this
-         * RegExp object are ignored when performing the search. The
-         * "lastIndex" property is left unchanged.
-         */
+        /** 22.2.6.12 RegExp.prototype [ @@search ] ( string ) */
+        [Symbol.search]: method(RegExpPrototypeSearch),
 
-        /**
-         * 22.2.6.13 get RegExp.prototype.source
-         * 
-         * RegExp.prototype.source is an accessor property whose set
-         * accessor function is undefined. Its get accessor function
-         * performs the following steps when called:
-         * 
-         * 1. Let R be the this value.
-         * 2. If R is not an Object, throw a TypeError exception.
-         * 3. If R does not have an [[OriginalSource]] internal slot, then
-         *     a. If SameValue(R, %RegExp.prototype%) is true, return "(?:)".
-         *     b. Otherwise, throw a TypeError exception.
-         * 4. Assert: R has an [[OriginalFlags]] internal slot.
-         * 5. Let src be R.[[OriginalSource]].
-         * 6. Let flags be R.[[OriginalFlags]].
-         * 7. Return EscapeRegExpPattern(src, flags).
-         */
+        /** 22.2.6.13 get RegExp.prototype.source */
+        'source': getter(($, R) => just(RegExpPrototypeSource($, R))),
 
-        /**
-         * 22.2.6.13.1 EscapeRegExpPattern ( P, F )
-         * 
-         * The abstract operation EscapeRegExpPattern takes arguments
-         * P (a String) and F (a String) and returns a String. It
-         * performs the following steps when called:
-         * 
-         * 1. Let S be a String in the form of a Pattern[~UnicodeMode]
-         *    (Pattern[+UnicodeMode] if F contains "u") equivalent to P
-         *    interpreted as UTF-16 encoded Unicode code points (6.1.4),
-         *    in which certain code points are escaped as described
-         *    below. S may or may not differ from P; however, the
-         *    Abstract Closure that would result from evaluating S as a
-         *    Pattern[~UnicodeMode] (Pattern[+UnicodeMode] if F contains
-         *    "u") must behave identically to the Abstract Closure given
-         *    by the constructed object's [[RegExpMatcher]] internal
-         *    slot. Multiple calls to this abstract operation using the
-         *    same values for P and F must produce identical results.
-         * 2. The code points / or any LineTerminator occurring in the
-         *    pattern shall be escaped in S as necessary to ensure that
-         *    the string-concatenation of "/", S, "/", and F can be
-         *    parsed (in an appropriate lexical context) as a
-         *    RegularExpressionLiteral that behaves identically to the
-         *    constructed regular expression. For example, if P is "/",
-         *    then S could be "\\/" or "\\u002F", among other
-         *    possibilities, but not "/", because /// followed by F would
-         *    be parsed as a SingleLineComment rather than a
-         *    RegularExpressionLiteral. If P is the empty String, this
-         *    specification can be met by letting S be "(?:)".
-         * 3. Return S.
-         */
-
-        /**
-         * 22.2.6.14 RegExp.prototype [ @@split ] ( string, limit )
-         * 
-         * NOTE 1: This method returns an Array into which substrings
-         * of the result of converting string to a String have been
-         * stored. The substrings are determined by searching from
-         * left to right for matches of the this value regular
-         * expression; these occurrences are not part of any String in
-         * the returned array, but serve to divide up the String
-         * value.
-         * 
-         * The this value may be an empty regular expression or a
-         * regular expression that can match an empty String. In this
-         * case, the regular expression does not match the empty
-         * substring at the beginning or end of the input String, nor
-         * does it match the empty substring at the end of the
-         * previous separator match. (For example, if the regular
-         * expression matches the empty String, the String is split up
-         * into individual code unit elements; the length of the
-         * result array equals the length of the String, and each
-         * substring contains one code unit.) Only the first match at
-         * a given index of the String is considered, even if
-         * backtracking could yield a non-empty substring match at
-         * that index. (For example, /a*?/[Symbol.split]("ab")
-         * evaluates to the array ["a", "b"], while / a *
-         * /[Symbol.split]("ab") evaluates to the array ["","b"].)
-         * 
-         * If string is (or converts to) the empty String, the result
-         * depends on whether the regular expression can match the
-         * empty String. If it can, the result array contains no
-         * elements. Otherwise, the result array contains one element,
-         * which is the empty String.
-         * 
-         * If the regular expression contains capturing parentheses,
-         * then each time separator is matched the results (including
-         * any undefined results) of the capturing parentheses are
-         * spliced into the output array. For example,
-         * 
-         * /<(\\/)?([^<>]+)>/[Symbol.split]("A<B>bold</B>and<CODE>coded</CODE>")
-         * 
-         * evaluates to the array
-         * 
-         * ["A", undefined, "B", "bold", "/", "B", "and", undefined,
-         *  "CODE", "coded", "/", "CODE", ""]
-         * 
-         * If limit is not undefined, then the output array is
-         * truncated so that it contains no more than limit elements.
-         * 
-         * This method performs the following steps when called:
-         * 
-         * 1. Let rx be the this value.
-         * 2. If rx is not an Object, throw a TypeError exception.
-         * 3. Let S be ? ToString(string).
-         * 4. Let C be ? SpeciesConstructor(rx, %RegExp%).
-         * 5. Let flags be ? ToString(? Get(rx, "flags")).
-         * 6. If flags contains "u", let unicodeMatching be true.
-         * 7. Else, let unicodeMatching be false.
-         * 8. If flags contains "y", let newFlags be flags.
-         * 9. Else, let newFlags be the string-concatenation of flags and "y".
-         * 10. Let splitter be ? Construct(C, « rx, newFlags »).
-         * 11. Let A be ! ArrayCreate(0).
-         * 12. Let lengthA be 0.
-         * 13. If limit is undefined, let lim be 232 - 1; else let lim
-         *     be ℝ(? ToUint32(limit)).
-         * 14. If lim = 0, return A.
-         * 15. If S is the empty String, then
-         *     a. Let z be ? RegExpExec(splitter, S).
-         *     b. If z is not null, return A.
-         *     c. Perform ! CreateDataPropertyOrThrow(A, "0", S).
-         *     d. Return A.
-         * 16. Let size be the length of S.
-         * 17. Let p be 0.
-         * 18. Let q be p.
-         * 19. Repeat, while q < size,
-         *     a. Perform ? Set(splitter, "lastIndex", 𝔽(q), true).
-         *     b. Let z be ? RegExpExec(splitter, S).
-         *     c. If z is null, set q to AdvanceStringIndex(S, q, unicodeMatching).
-         *     d. Else,
-         *         i. Let e be ℝ(? ToLength(? Get(splitter, "lastIndex"))).
-         *         ii. Set e to min(e, size).
-         *         iii. If e = p, set q to AdvanceStringIndex(S, q, unicodeMatching).
-         *         iv. Else,
-         *             1. Let T be the substring of S from p to q.
-         *             2. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(lengthA)), T).
-         *             3. Set lengthA to lengthA + 1.
-         *             4. If lengthA = lim, return A.
-         *             5. Set p to e.
-         *             6. Let numberOfCaptures be ? LengthOfArrayLike(z).
-         *             7. Set numberOfCaptures to max(numberOfCaptures - 1, 0).
-         *             8. Let i be 1.
-         *             9. Repeat, while i ≤ numberOfCaptures,
-         *                 a. Let nextCapture be ? Get(z, ! ToString(𝔽(i))).
-         *                 b. Perform ! CreateDataPropertyOrThrow(A,
-         *                    ! ToString(𝔽(lengthA)), nextCapture).
-         *                 c. Set i to i + 1.
-         *                 d. Set lengthA to lengthA + 1.
-         *                 e. If lengthA = lim, return A.
-         *             10. Set q to p.
-         * 20. Let T be the substring of S from p to size.
-         * 21. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(lengthA)), T).
-         * 22. Return A.
-         * 
-         * The value of the "name" property of this method is "[Symbol.split]".
-         * 
-         * NOTE 2: This method ignores the value of the "global" and
-         * "sticky" properties of this RegExp object.
-         */
+        /** 22.2.6.14 RegExp.prototype [ @@split ] ( string, limit ) */
+        [Symbol.split]: method(RegExpPrototypeSplit),
 
         /**
          * 22.2.6.15 get RegExp.prototype.sticky
@@ -1064,6 +889,7 @@ export function* RegExpPrototypeReplace(
       if (IsAbrupt(replacement)) return replacement;
     } else {
       // 15.l.i.
+      Assert(typeof replaceValue === 'string');
       if (namedCaptures !== undefined) {
         namedCaptures = ToObject($, namedCaptures);
         if (IsAbrupt(namedCaptures)) return namedCaptures;
@@ -1081,6 +907,196 @@ export function* RegExpPrototypeReplace(
   // 16.
   if (nextSourcePosition >= lengthS) return accumulatedResult;
   return accumulatedResult + S.substring(nextSourcePosition);
+}
+
+/**
+ * 22.2.6.12 RegExp.prototype [ @@search ] ( string )
+ * 
+ * This method performs the following steps when called:
+ * 
+ * 1. Let rx be the this value.
+ * 2. If rx is not an Object, throw a TypeError exception.
+ * 3. Let S be ? ToString(string).
+ * 4. Let previousLastIndex be ? Get(rx, "lastIndex").
+ * 5. If SameValue(previousLastIndex, +0𝔽) is false, then
+ *     a. Perform ? Set(rx, "lastIndex", +0𝔽, true).
+ * 6. Let result be ? RegExpExec(rx, S).
+ * 7. Let currentLastIndex be ? Get(rx, "lastIndex").
+ * 8. If SameValue(currentLastIndex, previousLastIndex) is false, then
+ *     a. Perform ? Set(rx, "lastIndex", previousLastIndex, true).
+ * 9. If result is null, return -1𝔽.
+ * 10. Return ? Get(result, "index").
+ * 
+ * The value of the "name" property of this method is "[Symbol.search]".
+ * 
+ * NOTE: The "lastIndex" and "global" properties of this
+ * RegExp object are ignored when performing the search. The
+ * "lastIndex" property is left unchanged.
+ */
+export function* RegExpPrototypeSearch(
+  $: VM,
+  rx: Val,
+  string: Val,
+): ECR<number> {
+  if (!(rx instanceof Obj)) return $.throw('TypeError', 'not an object');
+  const S = yield* ToString($, string);
+  if (IsAbrupt(S)) return S;
+  const previousLastIndex = yield* Get($, rx, 'lastIndex');
+  if (IsAbrupt(previousLastIndex)) return previousLastIndex;
+  if (!SameValue(previousLastIndex, 0)) {
+    const setStatus = yield* Set($, rx, 'lastIndex', 0, true);
+    if (IsAbrupt(setStatus)) return setStatus;
+  }
+  const result = yield* RegExpExec($, rx, S);
+  if (IsAbrupt(result)) return result;
+  const currentLastIndex = yield* Get($, rx, 'lastIndex');
+  if (IsAbrupt(currentLastIndex)) return currentLastIndex;
+  if (!SameValue(currentLastIndex, previousLastIndex)) {
+    const setStatus = yield* Set($, rx, 'lastIndex', previousLastIndex, true);
+    if (IsAbrupt(setStatus)) return setStatus;
+  }
+  if (result == null) return -1;
+  const index = yield* Get($, result, 'index');
+  if (IsAbrupt(index)) return index;
+  Assert(typeof index === 'number');
+  return index;
+}
+
+/**
+ * 22.2.6.13 get RegExp.prototype.source
+ * 
+ * RegExp.prototype.source is an accessor property whose set
+ * accessor function is undefined. Its get accessor function
+ * performs the following steps when called:
+ * 
+ * 1. Let R be the this value.
+ * 2. If R is not an Object, throw a TypeError exception.
+ * 3. If R does not have an [[OriginalSource]] internal slot, then
+ *     a. If SameValue(R, %RegExp.prototype%) is true, return "(?:)".
+ *     b. Otherwise, throw a TypeError exception.
+ * 4. Assert: R has an [[OriginalFlags]] internal slot.
+ * 5. Let src be R.[[OriginalSource]].
+ * 6. Let flags be R.[[OriginalFlags]].
+ * 7. Return EscapeRegExpPattern(src, flags).
+ */
+export function RegExpPrototypeSource($: VM, R: Val): CR<string> {
+  if (!(R instanceof Obj)) return $.throw('TypeError', 'not an object');
+  if (R.RegExpMatcher == null) {
+    if (SameValue(R, $.getIntrinsic('%RegExp.prototype%'))) return '(?:)';
+    return $.throw('TypeError', 'not a regular expression');
+  }
+  return R.RegExpMatcher.source;
+}
+
+/**
+ * 22.2.6.14 RegExp.prototype [ @@split ] ( string, limit )
+ * 
+ * NOTE 1: This method returns an Array into which substrings
+ * of the result of converting string to a String have been
+ * stored. The substrings are determined by searching from
+ * left to right for matches of the this value regular
+ * expression; these occurrences are not part of any String in
+ * the returned array, but serve to divide up the String
+ * value.
+ * 
+ * The this value may be an empty regular expression or a
+ * regular expression that can match an empty String. In this
+ * case, the regular expression does not match the empty
+ * substring at the beginning or end of the input String, nor
+ * does it match the empty substring at the end of the
+ * previous separator match. (For example, if the regular
+ * expression matches the empty String, the String is split up
+ * into individual code unit elements; the length of the
+ * result array equals the length of the String, and each
+ * substring contains one code unit.) Only the first match at
+ * a given index of the String is considered, even if
+ * backtracking could yield a non-empty substring match at
+ * that index. (For example, /a*?/[Symbol.split]("ab")
+ * evaluates to the array ["a", "b"], while / a *
+ * /[Symbol.split]("ab") evaluates to the array ["","b"].)
+ * 
+ * If string is (or converts to) the empty String, the result
+ * depends on whether the regular expression can match the
+ * empty String. If it can, the result array contains no
+ * elements. Otherwise, the result array contains one element,
+ * which is the empty String.
+ * 
+ * If the regular expression contains capturing parentheses,
+ * then each time separator is matched the results (including
+ * any undefined results) of the capturing parentheses are
+ * spliced into the output array. For example,
+ * 
+ * /<(\\/)?([^<>]+)>/[Symbol.split]("A<B>bold</B>and<CODE>coded</CODE>")
+ * 
+ * evaluates to the array
+ * 
+ * ["A", undefined, "B", "bold", "/", "B", "and", undefined,
+ *  "CODE", "coded", "/", "CODE", ""]
+ * 
+ * If limit is not undefined, then the output array is
+ * truncated so that it contains no more than limit elements.
+ * 
+ * This method performs the following steps when called:
+ * 
+ * 1. Let rx be the this value.
+ * 2. If rx is not an Object, throw a TypeError exception.
+ * 3. Let S be ? ToString(string).
+ * 4. Let C be ? SpeciesConstructor(rx, %RegExp%).
+ * 5. Let flags be ? ToString(? Get(rx, "flags")).
+ * 6. If flags contains "u", let unicodeMatching be true.
+ * 7. Else, let unicodeMatching be false.
+ * 8. If flags contains "y", let newFlags be flags.
+ * 9. Else, let newFlags be the string-concatenation of flags and "y".
+ * 10. Let splitter be ? Construct(C, « rx, newFlags »).
+ * 11. Let A be ! ArrayCreate(0).
+ * 12. Let lengthA be 0.
+ * 13. If limit is undefined, let lim be 232 - 1; else let lim
+ *     be ℝ(? ToUint32(limit)).
+ * 14. If lim = 0, return A.
+ * 15. If S is the empty String, then
+ *     a. Let z be ? RegExpExec(splitter, S).
+ *     b. If z is not null, return A.
+ *     c. Perform ! CreateDataPropertyOrThrow(A, "0", S).
+ *     d. Return A.
+ * 16. Let size be the length of S.
+ * 17. Let p be 0.
+ * 18. Let q be p.
+ * 19. Repeat, while q < size,
+ *     a. Perform ? Set(splitter, "lastIndex", 𝔽(q), true).
+ *     b. Let z be ? RegExpExec(splitter, S).
+ *     c. If z is null, set q to AdvanceStringIndex(S, q, unicodeMatching).
+ *     d. Else,
+ *         i. Let e be ℝ(? ToLength(? Get(splitter, "lastIndex"))).
+ *         ii. Set e to min(e, size).
+ *         iii. If e = p, set q to AdvanceStringIndex(S, q, unicodeMatching).
+ *         iv. Else,
+ *             1. Let T be the substring of S from p to q.
+ *             2. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(lengthA)), T).
+ *             3. Set lengthA to lengthA + 1.
+ *             4. If lengthA = lim, return A.
+ *             5. Set p to e.
+ *             6. Let numberOfCaptures be ? LengthOfArrayLike(z).
+ *             7. Set numberOfCaptures to max(numberOfCaptures - 1, 0).
+ *             8. Let i be 1.
+ *             9. Repeat, while i ≤ numberOfCaptures,
+ *                 a. Let nextCapture be ? Get(z, ! ToString(𝔽(i))).
+ *                 b. Perform ! CreateDataPropertyOrThrow(A,
+ *                    ! ToString(𝔽(lengthA)), nextCapture).
+ *                 c. Set i to i + 1.
+ *                 d. Set lengthA to lengthA + 1.
+ *                 e. If lengthA = lim, return A.
+ *             10. Set q to p.
+ * 20. Let T be the substring of S from p to size.
+ * 21. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(lengthA)), T).
+ * 22. Return A.
+ * 
+ * The value of the "name" property of this method is "[Symbol.split]".
+ * 
+ * NOTE 2: This method ignores the value of the "global" and
+ * "sticky" properties of this RegExp object.
+ */
+export function RegExpPrototypeSplit($: VM, string: Val, limit: Val): Val {
+  throw 'not implemented';
 }
 
 // 22.2.7 Abstract Operations for RegExp Matching
@@ -1388,4 +1404,162 @@ interface CodePointRecord {
   CodePoint: number;
   CodeUnitCount: number;
   IsUnpairedSurrogate: boolean;
+}
+
+/**
+ * 22.1.3.18.1 GetSubstitution ( matched, str, position, captures,
+ * namedCaptures, replacementTemplate )
+ * 
+ * The abstract operation GetSubstitution takes arguments matched (a
+ * String), str (a String), position (a non-negative integer),
+ * captures (a possibly empty List, each of whose elements is a String
+ * or undefined), namedCaptures (an Object or undefined), and
+ * replacementTemplate (a String) and returns either a normal
+ * completion containing a String or a throw completion. For the
+ * purposes of this abstract operation, a decimal digit is a code unit
+ * in the inclusive interval from 0x0030 (DIGIT ZERO) to 0x0039 (DIGIT
+ * NINE). It performs the following steps when called:
+ * 
+ * 1. Let stringLength be the length of str.
+ * 2. Assert: position ≤ stringLength.
+ * 3. Let result be the empty String.
+ * 4. Let templateRemainder be replacementTemplate.
+ * 5. Repeat, while templateRemainder is not the empty String,
+ *     a. NOTE: The following steps isolate ref (a prefix of
+ *        templateRemainder), determine refReplacement (its replacement),
+ *        and then append that replacement to result.
+ *     b. If templateRemainder starts with "$$", then
+ *         i. Let ref be "$$".
+ *         ii. Let refReplacement be "$".
+ *     c. Else if templateRemainder starts with "$`", then
+ *         i. Let ref be "$`".
+ *         ii. Let refReplacement be the substring of str from 0 to position.
+ *     d. Else if templateRemainder starts with "$&", then
+ *         i. Let ref be "$&".
+ *         ii. Let refReplacement be matched.
+ *     e. Else if templateRemainder starts with "$'" (0x0024 (DOLLAR
+ *        SIGN) followed by 0x0027 (APOSTROPHE)), then
+ *         i. Let ref be "$'".
+ *         ii. Let matchLength be the length of matched.
+ *         iii. Let tailPos be position + matchLength.
+ *         iv. Let refReplacement be the substring of str from min(tailPos, stringLength).
+ *         v. NOTE: tailPos can exceed stringLength only if this
+ *            abstract operation was invoked by a call to the intrinsic
+ *            @@replace method of %RegExp.prototype% on an object whose
+ *            "exec" property is not the intrinsic
+ *            %RegExp.prototype.exec%.
+ *     f. Else if templateRemainder starts with "$" followed by 1 or
+ *        more decimal digits, then
+ *         i. If templateRemainder starts with "$" followed by 2 or
+ *            more decimal digits, let digitCount be 2. Otherwise, let
+ *            digitCount be 1.
+ *         ii. Let ref be the substring of templateRemainder from 0 to 1 + digitCount.
+ *         iii. Let digits be the substring of templateRemainder from 1 to 1 + digitCount.
+ *         iv. Let index be ℝ(StringToNumber(digits)).
+ *         v. Assert: 0 ≤ index ≤ 99.
+ *         vi. Let captureLen be the number of elements in captures.
+ *         vii. If 1 ≤ index ≤ captureLen, then
+ *             1. Let capture be captures[index - 1].
+ *             2. If capture is undefined, then
+ *                 a. Let refReplacement be the empty String.
+ *             3. Else,
+ *                 a. Let refReplacement be capture.
+ *         viii. Else,
+ *             1. Let refReplacement be ref.
+ *     g. Else if templateRemainder starts with "$<", then
+ *         i. Let gtPos be StringIndexOf(templateRemainder, ">", 0).
+ *         ii. If gtPos = -1 or namedCaptures is undefined, then
+ *             1. Let ref be "$<".
+ *             2. Let refReplacement be ref.
+ *         iii. Else,
+ *             1. Let ref be the substring of templateRemainder from 0 to gtPos + 1.
+ *             2. Let groupName be the substring of templateRemainder from 2 to gtPos.
+ *             3. Assert: namedCaptures is an Object.
+ *             4. Let capture be ? Get(namedCaptures, groupName).
+ *             5. If capture is undefined, then
+ *                 a. Let refReplacement be the empty String.
+ *             6. Else,
+ *                 a. Let refReplacement be ? ToString(capture).
+ *     h. Else,
+ *         i. Let ref be the substring of templateRemainder from 0 to 1.
+ *         ii. Let refReplacement be ref.
+ *     i. Let refLength be the length of ref.
+ *     j. Set templateRemainder to the substring of templateRemainder from refLength.
+ *     k. Set result to the string-concatenation of result and refReplacement.
+ * 6. Return result.
+ */
+export function* GetSubstitution(
+  $: VM,
+  matched: string,
+  str: string,
+  position: number,
+  captures: (string|undefined)[],
+  namedCaptures: Obj|undefined,
+  replacementTemplate: string,
+): ECR<string> {
+  const stringLength = str.length;
+  Assert(position <= stringLength);
+  let result = '';
+  let templateRemainder = replacementTemplate;
+  let match;
+  while (templateRemainder) {
+    let ref: string;
+    let refReplacement: CR<string>;
+    if (templateRemainder.startsWith('$$')) {
+      // 5.b.
+      ref = '$$';
+      refReplacement = '$';
+    } else if (templateRemainder.startsWith('$`')) {
+      // 5.c.
+      ref = '$`';
+      refReplacement = str.substring(0, position);
+    } else if (templateRemainder.startsWith('$&')) {
+      //5.d.
+      ref = '$&';
+      refReplacement = matched;
+    } else if (templateRemainder.startsWith("$'")) {
+      // 5.e.
+      ref = "$'";
+      const matchLength = matched.length;
+      const tailPos = position + matchLength;
+      refReplacement = str.substring(Math.min(tailPos, stringLength));
+    } else if ((match = /^\$(\d\d?)/.exec(templateRemainder))) {
+      // 5.f.
+      ref = match[0];
+      const index = Number(match[1]);
+      const captureLen = captures.length;
+      if (index >= 1 && index <= captureLen) {
+        const capture = captures[index - 1];
+        refReplacement = capture ?? '';
+      } else {
+        refReplacement = ref;
+      }
+    } else if (templateRemainder.startsWith('$<')) {
+      // 5.g
+      const gtPos = templateRemainder.indexOf('>');
+      if (gtPos === -1 || !namedCaptures) {
+        ref = '$<';
+        refReplacement = ref;
+      } else {
+        // 5.g.iii.
+        ref = templateRemainder.substring(0, gtPos + 1);
+        const groupName = templateRemainder.substring(2, gtPos);
+        Assert(namedCaptures instanceof Obj);
+        const capture = yield* Get($, namedCaptures, groupName);
+        if (IsAbrupt(capture)) return capture;
+        refReplacement = yield* ToString($, capture ?? '');
+        if (IsAbrupt(refReplacement)) return refReplacement;
+      }
+    } else {
+      // 5.h.
+      let nextDollar = templateRemainder.indexOf('$');
+      if (nextDollar < 0) nextDollar = templateRemainder.length;
+      ref = templateRemainder.substring(0, nextDollar);
+      refReplacement = ref;
+    }
+    const refLength = ref.length;
+    templateRemainder = templateRemainder.substring(refLength);
+    result += yield* ToString($, refReplacement);
+  }
+  return result;
 }
