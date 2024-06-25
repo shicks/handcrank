@@ -9,7 +9,7 @@ import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, Func, callOrConstruct, getter, method } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
-import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
+import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate, peekProp } from './obj';
 import { PropertyDescriptor, prop0, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
@@ -320,6 +320,17 @@ export const regexp: Plugin = {
         }),
       });
 
+      const exec = CreateBuiltinFunction({
+        * Call($: VM, R: Val, [string]: Val[]): ECR<Val> {
+          if (!(R instanceof Obj)) return $.throw('TypeError', 'not an object');
+          if (R.RegExpMatcher == null) return $.throw('TypeError', 'not a regular expression');
+          const S = yield* ToString($, string);
+          if (IsAbrupt(S)) return S;
+          return yield* RegExpBuiltinExec($, R, S);
+        },
+      }, 1, 'exec', realm, realm.Intrinsics.get('%Function.prototype%')!);
+      realm.Intrinsics.set('%RegExp.prototype.exec%', exec);
+
       defineProperties(realm, regexpPrototype, {
         /**
          * 22.2.6.1 RegExp.prototype.constructor
@@ -342,13 +353,7 @@ export const regexp: Plugin = {
          * 3. Let S be ? ToString(string).
          * 4. Return ? RegExpBuiltinExec(R, S).
          */
-        'exec': method(function*($, R, string): ECR<Val> {
-          if (!(R instanceof Obj)) return $.throw('TypeError', 'not an object');
-          if (R.RegExpMatcher == null) return $.throw('TypeError', 'not a regular expression');
-          const S = yield* ToString($, string);
-          if (IsAbrupt(S)) return S;
-          return yield* RegExpBuiltinExec($, R, S);
-        }),
+        'exec': propWC(exec),
 
         /**
          * 22.2.6.3 get RegExp.prototype.dotAll
@@ -647,9 +652,7 @@ export function* RegExpPrototypeMatch(
     if (IsAbrupt(matchStr)) return matchStr
     A.push(matchStr);
     if (matchStr === '') {
-      const lastIndex = yield* Get($, rx, 'lastIndex');
-      if (IsAbrupt(lastIndex)) return lastIndex;
-      const thisIndex = yield* ToLength($, lastIndex);
+      const thisIndex = yield* getLastIndex($, rx);
       if (IsAbrupt(thisIndex)) return thisIndex;
       const nextIndex = AdvanceStringIndex(S, thisIndex, fullUnicode);
       const setStatus = yield* Set($, rx, 'lastIndex', nextIndex, true);
@@ -691,9 +694,7 @@ export function* RegExpPrototypeMatchAll($: VM, R: Val, string: Val): ECR<Val> {
   if (IsAbrupt(flags)) return flags;
   const matcher = yield* Construct($, C, [R, flags]);
   if (IsAbrupt(matcher)) return matcher;
-  const getResult = yield* Get($, R, 'lastIndex')
-  if (IsAbrupt(getResult)) return getResult;
-  const lastIndex = yield* ToLength($, getResult);
+  const lastIndex = yield* getLastIndex($, R);
   if (IsAbrupt(lastIndex)) return lastIndex;
   const setStatus = yield* Set($, matcher, 'lastIndex', lastIndex, true);
   if (IsAbrupt(setStatus)) return setStatus;
@@ -835,9 +836,7 @@ export function* RegExpPrototypeReplace(
         const matchStr = yield* ToString($, matchVal);
         if (IsAbrupt(matchStr)) return matchStr;
         if (matchStr === '') {
-          const lastIndex = yield* Get($, rx, 'lastIndex');
-          if (IsAbrupt(lastIndex)) return lastIndex;
-          const thisIndex = yield* ToLength($, lastIndex);
+          const thisIndex = yield* getLastIndex($, rx);
           if (IsAbrupt(thisIndex)) return thisIndex;
           const nextIndex = AdvanceStringIndex(S, thisIndex, fullUnicode);
           const setStatus = yield* Set($, rx, 'lastIndex', nextIndex, true);
@@ -1125,6 +1124,14 @@ export function* RegExpPrototypeSplit(
     if (z !== null) return CreateArrayFromList($, []);
     return CreateArrayFromList($, [S]);
   }
+
+  // Fast path if splitter.exec is untampered with (note: we could skip the
+  // rest of the function for a mostly-accurate implementation.
+  const intrinsicExec = $.getRealm()!.Intrinsics.get('%RegExp.prototype.exec%') ?? {};
+  if (peekProp(splitter, 'exec')?.Value === intrinsicExec) {
+    return CreateArrayFromList($, S.split(new RegExp(splitter.RegExpMatcher!), lim));
+  }
+
   const A: Val[] = [];
   const size = S.length;
   let p = 0;
@@ -1139,9 +1146,7 @@ export function* RegExpPrototypeSplit(
       q = AdvanceStringIndex(S, q, unicodeMatching);
     } else {
       // 19.d.
-      const lastIndex = yield* Get($, splitter, 'lastIndex');
-      if (IsAbrupt(lastIndex)) return lastIndex;
-      let e = yield* ToLength($, lastIndex);
+      let e = yield* getLastIndex($, splitter);
       if (IsAbrupt(e)) return e;
       e = Math.min(e, size);
       if (e === p) {
@@ -1308,9 +1313,7 @@ export function* RegExpBuiltinExec(
   R: Obj,
   S: string,
 ): ECR<Obj|null> {
-  const lastIndexVal = yield* Get($, R, 'lastIndex');
-  if (IsAbrupt(lastIndexVal)) return lastIndexVal;
-  let lastIndex = yield* ToLength($, lastIndexVal);
+  let lastIndex = yield* getLastIndex($, R);
   if (IsAbrupt(lastIndex)) return lastIndex;
   const flags = R.OriginalFlags!;
   const global = flags.includes('g');
@@ -1637,4 +1640,10 @@ export function* GetSubstitution(
     result += yield* ToString($, refReplacement);
   }
   return result;
+}
+
+function* getLastIndex($: VM, R: Obj) {
+  const lastIndexVal = yield* Get($, R, 'lastIndex');
+  if (IsAbrupt(lastIndexVal)) return lastIndexVal;
+  return yield* ToLength($, lastIndexVal);
 }

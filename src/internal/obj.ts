@@ -1153,3 +1153,12 @@ class SimplePropertyMap implements PropertyMap {
     return Reflect.ownKeys(this.obj).map(k => [k, this.obj[k]] as E)[Symbol.iterator]();
   }
 }
+
+export function peekProp(o: Obj, key: PropertyKey): PropertyDescriptor|undefined {
+  while (o) {
+    const desc = o.OwnProps.get(key);
+    if (desc) return desc;
+    o = o.Prototype!;
+  }
+  return undefined;
+}
