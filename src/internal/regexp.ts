@@ -320,16 +320,8 @@ export const regexp: Plugin = {
         }),
       });
 
-      const exec = CreateBuiltinFunction({
-        * Call($: VM, R: Val, [string]: Val[]): ECR<Val> {
-          if (!(R instanceof Obj)) return $.throw('TypeError', 'not an object');
-          if (R.RegExpMatcher == null) return $.throw('TypeError', 'not a regular expression');
-          const S = yield* ToString($, string);
-          if (IsAbrupt(S)) return S;
-          return yield* RegExpBuiltinExec($, R, S);
-        },
-      }, 1, 'exec', realm, realm.Intrinsics.get('%Function.prototype%')!);
-      realm.Intrinsics.set('%RegExp.prototype.exec%', exec);
+      const exec = method(RegExpPrototypeExec)(realm, 'exec');;
+      realm.Intrinsics.set('%RegExp.prototype.exec%', exec.Value as Obj);
 
       defineProperties(realm, regexpPrototype, {
         /**
@@ -339,21 +331,8 @@ export const regexp: Plugin = {
          */
         'constructor': propWC(regexpCtor),
 
-        /**
-         * 22.2.6.2 RegExp.prototype.exec ( string )
-         * 
-         * This method searches string for an occurrence of the
-         * regular expression pattern and returns an Array containing
-         * the results of the match, or null if string did not match.
-         * 
-         * It performs the following steps when called:
-         * 
-         * 1. Let R be the this value.
-         * 2. Perform ? RequireInternalSlot(R, [[RegExpMatcher]]).
-         * 3. Let S be ? ToString(string).
-         * 4. Return ? RegExpBuiltinExec(R, S).
-         */
-        'exec': propWC(exec),
+        /** 22.2.6.2 RegExp.prototype.exec ( string ) */
+        'exec': exec,
 
         /**
          * 22.2.6.3 get RegExp.prototype.dotAll
@@ -507,32 +486,13 @@ export const regexp: Plugin = {
          * 2. Let cu be the code unit 0x0079 (LATIN SMALL LETTER Y).
          * 3. Return ? RegExpHasFlag(R, cu).
          */
+        'sticky': getter(($, R) => just(RegExpHasFlag($, R, 'y'))),
 
-        /**
-         * 22.2.6.16 RegExp.prototype.test ( S )
-         * 
-         * This method performs the following steps when called:
-         * 
-         * 1. Let R be the this value.
-         * 2. If R is not an Object, throw a TypeError exception.
-         * 3. Let string be ? ToString(S).
-         * 4. Let match be ? RegExpExec(R, string).
-         * 5. If match is not null, return true; else return false.
-         */
+        /** 22.2.6.16 RegExp.prototype.test ( S ) */
+        'test': method(RegExpPrototypeTest),
 
-        /**
-         * 22.2.6.17 RegExp.prototype.toString ( )
-         * 1. Let R be the this value.
-         * 2. If R is not an Object, throw a TypeError exception.
-         * 3. Let pattern be ? ToString(? Get(R, "source")).
-         * 4. Let flags be ? ToString(? Get(R, "flags")).
-         * 5. Let result be the string-concatenation of "/", pattern, "/", and flags.
-         * 6. Return result.
-         * 
-         * NOTE: The returned String has the form of a
-         * RegularExpressionLiteral that evaluates to another RegExp
-         * object with the same behaviour as this object.
-         */
+        /** 22.2.6.17 RegExp.prototype.toString ( ) */
+        'toString': method(RegExpPrototypeToString),
 
         /**
          * 22.2.6.18 get RegExp.prototype.unicode
@@ -550,6 +510,28 @@ export const regexp: Plugin = {
     },
   },
 };
+
+/**
+ * 22.2.6.2 RegExp.prototype.exec ( string )
+ * 
+ * This method searches string for an occurrence of the
+ * regular expression pattern and returns an Array containing
+ * the results of the match, or null if string did not match.
+ * 
+ * It performs the following steps when called:
+ * 
+ * 1. Let R be the this value.
+ * 2. Perform ? RequireInternalSlot(R, [[RegExpMatcher]]).
+ * 3. Let S be ? ToString(string).
+ * 4. Return ? RegExpBuiltinExec(R, S).
+ */
+export function* RegExpPrototypeExec($: VM, R: Val, string: Val): ECR<Val> {
+  if (!(R instanceof Obj)) return $.throw('TypeError', 'not an object');
+  if (R.RegExpMatcher == null) return $.throw('TypeError', 'not a regular expression');
+  const S = yield* ToString($, string);
+  if (IsAbrupt(S)) return S;
+  return yield* RegExpBuiltinExec($, R, S);
+}
 
 /**
  * 22.2.6.4.1 RegExpHasFlag ( R, codeUnit )
@@ -629,9 +611,7 @@ export function* RegExpPrototypeMatch(
   if (!(rx instanceof Obj)) return $.throw('TypeError', 'not an object');
   const S = yield* ToString($, string);
   if (IsAbrupt(S)) return S;
-  const flagsVal = yield* Get($, rx, 'flags');
-  if (IsAbrupt(flagsVal)) return flagsVal;
-  const flags = yield* ToString($, flagsVal);
+  const flags = yield* ToStringECR($, Get($, rx, 'flags'));
   if (IsAbrupt(flags)) return flags;
   if (!flags.includes('g')) {
     return yield* RegExpExec($, rx, S);
@@ -646,13 +626,11 @@ export function* RegExpPrototypeMatch(
       if (!A.length) return null;
       return CreateArrayFromList($, A);
     }
-    const matchVal = yield* Get($, result, '0');
-    if (IsAbrupt(matchVal)) return matchVal;
-    const matchStr = yield* ToString($, matchVal);
+    const matchStr = yield* ToStringECR($, Get($, result, '0'));
     if (IsAbrupt(matchStr)) return matchStr
     A.push(matchStr);
     if (matchStr === '') {
-      const thisIndex = yield* getLastIndex($, rx);
+      const thisIndex = yield* ToLengthECR($, Get($, rx, 'lastIndex'));
       if (IsAbrupt(thisIndex)) return thisIndex;
       const nextIndex = AdvanceStringIndex(S, thisIndex, fullUnicode);
       const setStatus = yield* Set($, rx, 'lastIndex', nextIndex, true);
@@ -688,13 +666,11 @@ export function* RegExpPrototypeMatchAll($: VM, R: Val, string: Val): ECR<Val> {
   if (IsAbrupt(S)) return S;
   const C = yield* SpeciesConstructor($, R, $.getIntrinsic('%RegExp%') as Func);
   if (IsAbrupt(C)) return C;
-  const flagsVal = yield* Get($, R, 'flags');
-  if (IsAbrupt(flagsVal)) return flagsVal;
-  const flags = yield* ToString($, flagsVal);
+  const flags = yield* ToStringECR($, Get($, R, 'flags'));
   if (IsAbrupt(flags)) return flags;
   const matcher = yield* Construct($, C, [R, flags]);
   if (IsAbrupt(matcher)) return matcher;
-  const lastIndex = yield* getLastIndex($, R);
+  const lastIndex = yield* ToLengthECR($, Get($, R, 'lastIndex'));
   if (IsAbrupt(lastIndex)) return lastIndex;
   const setStatus = yield* Set($, matcher, 'lastIndex', lastIndex, true);
   if (IsAbrupt(setStatus)) return setStatus;
@@ -806,9 +782,7 @@ export function* RegExpPrototypeReplace(
     replaceValue = yield* ToString($, replaceValue);
     if (IsAbrupt(replaceValue)) return replaceValue;
   }
-  const flagsVal = yield* Get($, rx, 'flags');
-  if (IsAbrupt(flagsVal)) return flagsVal;
-  const flags = yield* ToString($, flagsVal);
+  const flags = yield* ToStringECR($, Get($, rx, 'flags'));
   if (IsAbrupt(flags)) return flags;
   const global = flags.includes('g');
   let fullUnicode = false;
@@ -831,12 +805,10 @@ export function* RegExpPrototypeReplace(
         done = true;
       } else {
         // 12.c.iii.1
-        const matchVal = yield* Get($, result, '0');
-        if (IsAbrupt(matchVal)) return matchVal;
-        const matchStr = yield* ToString($, matchVal);
+        const matchStr = yield* ToStringECR($, Get($, result, '0'));
         if (IsAbrupt(matchStr)) return matchStr;
         if (matchStr === '') {
-          const thisIndex = yield* getLastIndex($, rx);
+          const thisIndex = yield* ToLengthECR($, Get($, rx, 'lastIndex'));
           if (IsAbrupt(thisIndex)) return thisIndex;
           const nextIndex = AdvanceStringIndex(S, thisIndex, fullUnicode);
           const setStatus = yield* Set($, rx, 'lastIndex', nextIndex, true);
@@ -852,9 +824,7 @@ export function* RegExpPrototypeReplace(
     const resultLength = yield* LengthOfArrayLike($, result);
     if (IsAbrupt(resultLength)) return resultLength;
     const nCaptures = Math.max(resultLength - 1, 0);
-    const matchedVal = yield* Get($, result, '0');
-    if (IsAbrupt(matchedVal)) return matchedVal;
-    const matched = yield* ToString($, matchedVal);
+    const matched = yield* ToStringECR($, Get($, result, '0'));
     if (IsAbrupt(matched)) return matched;
     const matchLength = matched.length;
     const positionVal = yield* Get($, result, 'index');
@@ -882,9 +852,8 @@ export function* RegExpPrototypeReplace(
       if (namedCaptures !== undefined) {
         replacerArgs.push(namedCaptures as string);
       }
-      const replValue = yield* Call($, replaceValue, undefined, replacerArgs);
-      if (IsAbrupt(replValue)) return replValue;
-      replacement = yield* ToString($, replValue);
+      replacement = yield* ToStringECR(
+        $, Call($, replaceValue, undefined, replacerArgs));
       if (IsAbrupt(replacement)) return replacement;
     } else {
       // 15.l.i.
@@ -1105,9 +1074,7 @@ export function* RegExpPrototypeSplit(
   if (IsAbrupt(S)) return S;
   const C = yield* SpeciesConstructor($, rx, $.getIntrinsic('%RegExp%') as Func);
   if (IsAbrupt(C)) return C;
-  const flagsVal = yield* Get($, rx, 'flags');
-  if (IsAbrupt(flagsVal)) return flagsVal;
-  const flags = yield* ToString($, flagsVal);
+  const flags = yield* ToStringECR($, Get($, rx, 'flags'));
   if (IsAbrupt(flags)) return flags;
   const unicodeMatching = flags.includes('u');
   const newFlags = flags.includes('y') ? flags : flags + 'y';
@@ -1146,7 +1113,7 @@ export function* RegExpPrototypeSplit(
       q = AdvanceStringIndex(S, q, unicodeMatching);
     } else {
       // 19.d.
-      let e = yield* getLastIndex($, splitter);
+      let e = yield* ToLengthECR($, Get($, splitter, 'lastIndex'));
       if (IsAbrupt(e)) return e;
       e = Math.min(e, size);
       if (e === p) {
@@ -1178,7 +1145,50 @@ export function* RegExpPrototypeSplit(
   return CreateArrayFromList($, A);
 }
 
+/**
+ * 22.2.6.16 RegExp.prototype.test ( S )
+ * 
+ * This method performs the following steps when called:
+ * 
+ * 1. Let R be the this value.
+ * 2. If R is not an Object, throw a TypeError exception.
+ * 3. Let string be ? ToString(S).
+ * 4. Let match be ? RegExpExec(R, string).
+ * 5. If match is not null, return true; else return false.
+ */
+export function* RegExpPrototypeTest($: VM, R: Val, S: Val): ECR<boolean> {
+  if (!(R instanceof Obj)) return $.throw('TypeError', 'not an object');
+  const string = yield* ToString($, S);
+  if (IsAbrupt(string)) return string;
+  const match = yield* RegExpExec($, R, string);
+  if (IsAbrupt(match)) return match;
+  return match !== null;
+}
 
+/**
+ * 22.2.6.17 RegExp.prototype.toString ( )
+ * 
+ * 1. Let R be the this value.
+ * 2. If R is not an Object, throw a TypeError exception.
+ * 3. Let pattern be ? ToString(? Get(R, "source")).
+ * 4. Let flags be ? ToString(? Get(R, "flags")).
+ * 5. Let result be the string-concatenation of "/", pattern, "/", and flags.
+ * 6. Return result.
+ * 
+ * NOTE: The returned String has the form of a
+ * RegularExpressionLiteral that evaluates to another RegExp
+ * object with the same behaviour as this object.
+ */
+export function* RegExpPrototypeToString($: VM, R: Val): ECR<string> {
+  if (!(R instanceof Obj)) return $.throw('TypeError', 'not an object');
+  const pattern = yield* Get($, R, 'source');
+  if (IsAbrupt(pattern)) return pattern;
+  const flags = yield* Get($, R, 'flags');
+  if (IsAbrupt(flags)) return flags;
+  return `/${pattern}/${flags}`;
+}
+
+////////////////////////////////////////////////////////////////
 // 22.2.7 Abstract Operations for RegExp Matching
 
 /**
@@ -1313,7 +1323,7 @@ export function* RegExpBuiltinExec(
   R: Obj,
   S: string,
 ): ECR<Obj|null> {
-  let lastIndex = yield* getLastIndex($, R);
+  let lastIndex = yield* ToLengthECR($, Get($, R, 'lastIndex'));
   if (IsAbrupt(lastIndex)) return lastIndex;
   const flags = R.OriginalFlags!;
   const global = flags.includes('g');
@@ -1642,8 +1652,14 @@ export function* GetSubstitution(
   return result;
 }
 
-function* getLastIndex($: VM, R: Obj) {
-  const lastIndexVal = yield* Get($, R, 'lastIndex');
-  if (IsAbrupt(lastIndexVal)) return lastIndexVal;
-  return yield* ToLength($, lastIndexVal);
+function* ToLengthECR($: VM, arg: ECR<Val>): ECR<number> {
+  const val = yield* arg;
+  if (IsAbrupt(val)) return val;
+  return yield* ToLength($, val);
+}
+
+function* ToStringECR($: VM, arg: ECR<Val>): ECR<string> {
+  const val = yield* arg;
+  if (IsAbrupt(val)) return val;
+  return yield* ToString($, val);
 }
