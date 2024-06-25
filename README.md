@@ -46,7 +46,7 @@ browser or on the server.
     - [x] Array
     - [x] Arguments
     - [x] Iterators
-    - [ ] RegExp
+    - [x] RegExp
     - [ ] Date
     - [ ] Map
     - [ ] Set
