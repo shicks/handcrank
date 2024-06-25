@@ -1640,7 +1640,7 @@ export function* GetSubstitution(
       }
     } else {
       // 5.h.
-      let nextDollar = templateRemainder.indexOf('$');
+      let nextDollar = templateRemainder.indexOf('$', 1);
       if (nextDollar < 0) nextDollar = templateRemainder.length;
       ref = templateRemainder.substring(0, nextDollar);
       refReplacement = ref;
