@@ -1,6 +1,6 @@
 import { IsArrayIndex, IsCallable, IsIntegralNumber, RequireObjectCoercible } from './abstract_compare';
-import { CanonicalNumericIndexString, ToIntegerOrInfinity, ToLength, ToNumber, ToString, ToUint16 } from './abstract_conversion';
-import { Call, Get, GetMethod, Invoke } from './abstract_object';
+import { CanonicalNumericIndexString, ToIntegerOrInfinity, ToLength, ToNumber, ToString, ToUint16, ToUint32 } from './abstract_conversion';
+import { Call, CreateArrayFromList, Get, GetMethod, Invoke } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, callOrConstruct, method } from './func';
@@ -946,13 +946,99 @@ export const stringObject: Plugin = {
          *     b. If splitter is not undefined, then
          *         i. Return ? Call(splitter, separator, « O, limit »).
          * 3. Let S be ? ToString(O).
-         * 4. If limit is undefined, let lim be 232 - 1; else let lim be ℝ(? ToUint32(limit)).
+         * 4. If limit is undefined, let lim be 232 - 1;
+         *    else let lim be ℝ(? ToUint32(limit)).
          * 5. Let R be ? ToString(separator).
-         * ...
+         * 6. If lim = 0, then
+         *     a. Return CreateArrayFromList(« »).
+         * 7. If separator is undefined, then
+         *     a. Return CreateArrayFromList(« S »).
+         * 8. Let separatorLength be the length of R.
+         * 9. If separatorLength = 0, then
+         *     a. Let head be the substring of S from 0 to lim.
+         *     b. Let codeUnits be a List consisting of the sequence
+         *        of code units that are the elements of head.
+         *     c. Return CreateArrayFromList(codeUnits).
+         * 10. If S is the empty String, return CreateArrayFromList(« S »).
+         * 11. Let substrings be a new empty List.
+         * 12. Let i be 0.
+         * 13. Let j be StringIndexOf(S, R, 0).
+         * 14. Repeat, while j ≠ -1,
+         *     a. Let T be the substring of S from i to j.
+         *     b. Append T to substrings.
+         *     c. If the number of elements in substrings is lim,
+         *        return CreateArrayFromList(substrings).
+         *     d. Set i to j + separatorLength.
+         *     e. Set j to StringIndexOf(S, R, i).
+         * 15. Let T be the substring of S from i.
+         * 16. Append T to substrings.
+         * 17. Return CreateArrayFromList(substrings).
+         * 
+         * NOTE 1: The value of separator may be an empty String. In
+         * this case, separator does not match the empty substring at
+         * the beginning or end of the input String, nor does it match
+         * the empty substring at the end of the previous separator
+         * match. If separator is the empty String, the String is
+         * split up into individual code unit elements; the length of
+         * the result array equals the length of the String, and each
+         * substring contains one code unit.
+         * 
+         * If the this value is (or converts to) the empty String, the
+         * result depends on whether separator can match the empty
+         * String. If it can, the result array contains no
+         * elements. Otherwise, the result array contains one element,
+         * which is the empty String.
+         * 
+         * If separator is undefined, then the result array contains
+         * just one String, which is the this value (converted to a
+         * String). If limit is not undefined, then the output array
+         * is truncated so that it contains no more tha limit elements.
+         * 
+         * NOTE 2: This method is intentionally generic; it does not
+         * require that its this value be a String object. Therefore,
+         * it can be transferred to other kinds of objects for use as
+         * a method.
          */
         'split': method(function*($, thisValue, separator, limit = undefined) {
-          // TODO - regex/symbol, returns array, ...
-          throw new Error('NOT IMPLEMENTED');
+          const O = RequireObjectCoercible($, thisValue);
+          if (IsAbrupt(O)) return O;
+          if (separator != null) {
+            const splitter = yield* GetMethod($, separator, Symbol.split);
+            if (IsAbrupt(splitter)) return splitter;
+            if (splitter !== undefined) {
+              return yield* Call($, splitter, separator, [O, limit]);
+            }
+          }
+          // 3.
+          const S = yield* ToString($, O);
+          if (IsAbrupt(S)) return S;
+          const lim = limit === undefined ? 0xFFFFFFFF : yield* ToUint32($, limit);
+          if (IsAbrupt(lim)) return lim;
+          const R = yield* ToString($, separator);
+          if (IsAbrupt(R)) return R;
+          if (lim === 0) return CreateArrayFromList($, []);
+          if (separator === undefined) return CreateArrayFromList($, [S]);
+          const separatorLength = R.length;
+          // 9.
+          if (separatorLength === 0) {
+            const head = S.substring(0, lim);
+            return CreateArrayFromList($, [...head]);
+          }
+          if (!S) return CreateArrayFromList($, [S]);
+          const substrings = [];
+          let i = 0;
+          let j = S.indexOf(R, 0);
+          // 14.
+          while (j !== -1) {
+            const T = S.substring(i, j);
+            substrings.push(T);
+            if (substrings.length === lim) return CreateArrayFromList($, substrings);
+            i = j + separatorLength;
+            j = S.indexOf(R, i);
+          }
+          const T = S.substring(i);
+          substrings.push(T);
+          return CreateArrayFromList($, substrings);
         }),
 
         /**

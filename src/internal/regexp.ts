@@ -3,7 +3,7 @@
 // by cutting some corners, at the expense of correctness.
 
 import { IsCallable, IsRegExp, SameValue } from './abstract_compare';
-import { ToBoolean, ToIntegerOrInfinity, ToLength, ToObject, ToString } from './abstract_conversion';
+import { ToBoolean, ToIntegerOrInfinity, ToLength, ToObject, ToString, ToUint32 } from './abstract_conversion';
 import { Call, Construct, CreateArrayFromList, DefinePropertyOrThrow, Get, LengthOfArrayLike, Set, SpeciesConstructor } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
@@ -1095,9 +1095,84 @@ export function RegExpPrototypeSource($: VM, R: Val): CR<string> {
  * NOTE 2: This method ignores the value of the "global" and
  * "sticky" properties of this RegExp object.
  */
-export function RegExpPrototypeSplit($: VM, string: Val, limit: Val): Val {
-  throw 'not implemented';
+export function* RegExpPrototypeSplit(
+  $: VM,
+  rx: Val,
+  string: Val,
+  limit: Val,
+): ECR<Val> {
+  if (!(rx instanceof Obj)) return $.throw('TypeError', 'not an object');
+  const S = yield* ToString($, string);
+  if (IsAbrupt(S)) return S;
+  const C = yield* SpeciesConstructor($, rx, $.getIntrinsic('%RegExp%') as Func);
+  if (IsAbrupt(C)) return C;
+  const flagsVal = yield* Get($, rx, 'flags');
+  if (IsAbrupt(flagsVal)) return flagsVal;
+  const flags = yield* ToString($, flagsVal);
+  if (IsAbrupt(flags)) return flags;
+  const unicodeMatching = flags.includes('u');
+  const newFlags = flags.includes('y') ? flags : flags + 'y';
+  // 10.
+  const splitter = yield* Construct($, C, [rx, newFlags]);
+  if (IsAbrupt(splitter)) return splitter;
+  const lim = yield* ToUint32($, limit ?? 0xFFFFFFFF);
+  if (IsAbrupt(lim)) return lim;
+  if (lim === 0) return CreateArrayFromList($, []);
+  // 15.
+  if (S === '') {
+    const z = yield* RegExpExec($, splitter, S);
+    if (IsAbrupt(z)) return z;
+    if (z !== null) return CreateArrayFromList($, []);
+    return CreateArrayFromList($, [S]);
+  }
+  const A: Val[] = [];
+  const size = S.length;
+  let p = 0;
+  let q = p;
+  // 19.
+  while (q < size) {
+    const setStatus = yield* Set($, splitter, 'lastIndex', q, true);
+    if (IsAbrupt(setStatus)) return setStatus;
+    const z = yield* RegExpExec($, splitter, S);
+    if (IsAbrupt(z)) return z;
+    if (z == null) {
+      q = AdvanceStringIndex(S, q, unicodeMatching);
+    } else {
+      // 19.d.
+      const lastIndex = yield* Get($, splitter, 'lastIndex');
+      if (IsAbrupt(lastIndex)) return lastIndex;
+      let e = yield* ToLength($, lastIndex);
+      if (IsAbrupt(e)) return e;
+      e = Math.min(e, size);
+      if (e === p) {
+        // NOTE: This is pretty inefficient.
+        // We could do better by removing the 'sticky' flag (if present)
+        // and instead just skipping to the next match here.  But we shoud
+        // get a pedantic baseline first and then optimize later.
+        q = AdvanceStringIndex(S, q, unicodeMatching);
+      } else {
+        const T = S.substring(p, q);
+        A.push(T);
+        if (A.length === lim) return CreateArrayFromList($, A);
+        p = e;
+        const len = yield* LengthOfArrayLike($, z);
+        if (IsAbrupt(len)) return len;
+        const numberOfCaptures = Math.max(len - 1, 0);
+        for (let i = 1; i <= numberOfCaptures; i++) {
+          const nextCapture = yield* Get($, z, String(i));
+          if (IsAbrupt(nextCapture)) return nextCapture;
+          A.push(nextCapture);
+          if (A.length === lim) return CreateArrayFromList($, A);
+        }
+        q = p;
+      }
+    }
+  }
+  const T = S.substring(p, size);
+  A.push(T);
+  return CreateArrayFromList($, A);
 }
+
 
 // 22.2.7 Abstract Operations for RegExp Matching
 
