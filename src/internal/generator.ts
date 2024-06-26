@@ -614,7 +614,9 @@ export function GeneratorValidate(
   generatorBrand: string|EMPTY,
 ): CR<GeneratorState> {
   // TODO - RequireInternalSlot ???
-  if (generator.GeneratorBrand !== generatorBrand) return $.throw('TypeError', 'bad brand');
+  if (generator.GeneratorBrand !== generatorBrand) {
+    return $.throw('TypeError', `bad brand: got ${generator.GeneratorBrand}, expected ${generatorBrand}`);
+  }
   const state = generator.GeneratorState;
   if (state === GeneratorState.executing) return $.throw('TypeError', 'already executing');
   Assert(state);

@@ -8,12 +8,12 @@ import { CreateIterResultObject } from './abstract_iterator';
 import { Call, Construct, CreateArrayFromList, DefinePropertyOrThrow, Get, LengthOfArrayLike, Set, SpeciesConstructor } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { CreateBuiltinFunction, Func, callOrConstruct, getter, method, methodO } from './func';
+import { CreateBuiltinFunction, Func, callOrConstruct, getter, method } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
-import { CreateIteratorFromClosure, GeneratorResume, GeneratorYield } from './generator';
-import { iterators } from './iterators';
+import { CreateIteratorFromClosure, GeneratorYield } from './generator';
+import { createBrandedIteratorPrototype, iterators } from './iterators';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate, peekProp } from './obj';
-import { PropertyDescriptor, prop0, propC, propWC, propWEC } from './property_descriptor';
+import { PropertyDescriptor, prop0, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
 import { ECR, Plugin, VM, just, when } from './vm';
@@ -309,31 +309,8 @@ export const regexp: Plugin = {
        * has a [[Prototype]] internal slot whose value is %IteratorPrototype%.
        * has the following properties:
        */
-      const regexpStringIteratorPrototype = OrdinaryObjectCreate(realm.Intrinsics.get('%IteratorPrototype%')!);
-      realm.Intrinsics.set('%RegExpStringIteratorPrototype%', regexpStringIteratorPrototype);
-
-      defineProperties(realm, regexpStringIteratorPrototype, {
-        /**
-         *
-         * 22.2.9.2.1 %RegExpStringIteratorPrototype%.next ( )
-         *
-         * 1. Return ? GeneratorResume(this value, empty, "%RegExpStringIteratorPrototype%").
-         */
-        'next': methodO(function*($, thisValue) {
-          return yield* GeneratorResume($, thisValue, undefined, '%RegExpStringIteratorPrototype%');
-        }),
-
-        /** 
-         * 22.2.9.2.2 %RegExpStringIteratorPrototype% [ @@toStringTag ]
-         *
-         * The initial value of the @@toStringTag property is the String value
-         * "RegExp String Iterator".
-         *
-         * This property has the attributes { [[Writable]]: false,
-         * [[Enumerable]]: false, [[Configurable]]: true }.
-         */
-        [Symbol.toStringTag]: propC('RegExp String Iterator'),
-      });
+      createBrandedIteratorPrototype(
+        realm, '%RegExpStringIteratorPrototype%', 'RegExp String Iterator');
     },
   },
 };

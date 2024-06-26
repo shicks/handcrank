@@ -1,8 +1,10 @@
-import { method } from './func';
+import { method, methodO } from './func';
 import { Plugin } from './vm';
 import { objectAndFunctionPrototype } from './fundamental';
-import { defineProperties } from './realm_record';
-import { OrdinaryObjectCreate } from './obj';
+import { RealmRecord, defineProperties } from './realm_record';
+import { Obj, OrdinaryObjectCreate } from './obj';
+import { GeneratorResume } from './generator';
+import { propC } from './property_descriptor';
 
 export const iterators: Plugin = {
   id: 'iterators',
@@ -51,3 +53,21 @@ export const iterators: Plugin = {
     },
   },
 };
+
+export function createBrandedIteratorPrototype(
+  realm: RealmRecord,
+  brand: string,
+  toStringTag: string,
+): Obj {
+  const proto = OrdinaryObjectCreate({
+    Prototype: realm.Intrinsics.get('%IteratorPrototype%')!,
+  });
+  realm.Intrinsics.set(brand, proto);
+  defineProperties(realm, proto, {
+    'next': methodO(function*($, thisValue) {
+      return yield* GeneratorResume($, thisValue, undefined, brand);
+    }),
+    [Symbol.toStringTag]: propC(toStringTag),
+  });
+  return proto;
+}
