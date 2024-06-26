@@ -1,7 +1,7 @@
 import { IsArrayIndex, IsCallable, IsIntegralNumber, IsRegExp, RequireObjectCoercible } from './abstract_compare';
-import { CanonicalNumericIndexString, ToIntegerOrInfinity, ToLength, ToNumber, ToString, ToUint16, ToUint32 } from './abstract_conversion';
+import { CanonicalNumericIndexString, ToIntegerOrInfinity, ToLength, ToNumber, ToObject, ToString, ToStringECR, ToUint16, ToUint32 } from './abstract_conversion';
 import { CreateIterResultObject } from './abstract_iterator';
-import { Call, CreateArrayFromList, Get, GetMethod, Invoke } from './abstract_object';
+import { Call, CreateArrayFromList, Get, GetMethod, Invoke, LengthOfArrayLike } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, Func, callOrConstruct, method } from './func';
@@ -11,7 +11,7 @@ import { createBrandedIteratorPrototype, iterators } from './iterators';
 import { GetPrototypeFromConstructor, IsCompatiblePropertyDescriptor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject } from './obj';
 import { PropertyDescriptor, PropertyRecord, prop0, propE, propWC } from './property_descriptor';
 import { defineProperties } from './realm_record';
-import { CodePointAt, RegExpCreate } from './regexp';
+import { CodePointAt, GetSubstitution, RegExpCreate } from './regexp';
 import { memoize } from './slots';
 import { PropertyKey, Val } from './val';
 import { DebugString, ECR, EvalGen, Plugin, VM } from './vm';
@@ -530,8 +530,29 @@ export function* StringFromCodePoint($: VM, _: Val, ...codePoints: Val[]) {
  * first argument will be a well formed template object and
  * the rest parameter will contain the substitution values.
  */
-export function* StringRaw(_$: VM, _: Val, _template: Val, ..._substitutions: Val[]): ECR<Val> {
-  throw new Error('NOT IMPLEMENTED');
+export function* StringRaw($: VM, _: Val, template: Val, ...substitutions: Val[]): ECR<Val> {
+  const substitutionCount = substitutions.length;
+  const cooked = ToObject($, template);
+  if (IsAbrupt(cooked)) return cooked;
+  const literals = yield* Get($, cooked, 'raw');
+  if (IsAbrupt(literals)) return literals;
+  Assert(literals instanceof Obj);
+  const literalCount = yield* LengthOfArrayLike($, literals);
+  if (IsAbrupt(literalCount)) return literalCount;
+  if (literalCount <= 0) return '';
+  let R = '';
+  for (let nextIndex = 0;; nextIndex++) {
+    const nextLiteral = yield* ToStringECR($, Get($, literals, String(nextIndex)));
+    if (IsAbrupt(nextLiteral)) return nextLiteral;
+    R += nextLiteral;
+    if (nextIndex + 1 === literalCount) return R;
+    if (nextIndex < substitutionCount) {
+      const nextSubVal = substitutions[nextIndex];
+      const nextSub = yield* ToString($, nextSubVal);
+      if (IsAbrupt(nextSub)) return nextSub;
+      R += nextSub;
+    }
+  }
 }
 
 /**
@@ -974,19 +995,31 @@ export function* StringPrototypeReplace($: VM, thisValue: Val, searchValue: Val,
       return yield* Call($, replacer, searchValue, [O, replaceValue]);
     }
   }
+  // 3.
   const string = yield* ToString($, O);
   if (IsAbrupt(string)) return string;
   const searchString = yield* ToString($, searchValue);
   if (IsAbrupt(searchString)) return searchString;
   const functionalReplace = IsCallable(replaceValue);
-  //let replaceValue: string|undefined;
   if (!functionalReplace) {
     const replaceValue$ = yield* ToString($, replaceValue);
     if (IsAbrupt(replaceValue$)) return replaceValue$;
-    //replaceValue = replaceValue$;
+    replaceValue = replaceValue$;
   }
-  // TODO - figure out how regex objects work
-  throw new Error('NOT IMPLEMENTED');
+  const searchLength = searchString.length;
+  let position = string.indexOf(searchString);
+  if (position === -1) return string;
+  const preceding = string.substring(0, position);
+  const following = string.substring(position + searchLength);
+  let replacement: CR<Val>;
+  if (functionalReplace) {
+    replacement = yield* ToStringECR($, Call($, replaceValue, undefined, [searchString, position, string]));
+    if (IsAbrupt(replacement)) return replacement;
+  } else {
+    Assert(typeof replaceValue === 'string');
+    replacement = CastNotAbrupt(yield* GetSubstitution($, searchString, string, position, [], undefined, replaceValue));
+  }
+  return preceding + replacement + following;
 }
 
 /**
@@ -1036,8 +1069,68 @@ export function* StringPrototypeReplace($: VM, thisValue: Val, searchValue: Val,
  *        string from endOfLastMatch.
  * 16. Return result.
  */
-export function* StringPrototypeReplaceAll(_$: VM, _thisValue: Val, _searchValue: Val, _replaceValue: Val): ECR<Val> {
-  throw new Error('NOT IMPLEMENTED');
+export function* StringPrototypeReplaceAll($: VM, thisValue: Val, searchValue: Val, replaceValue: Val): ECR<Val> {
+  const O = RequireObjectCoercible($, thisValue);
+  if (IsAbrupt(O)) return O;
+  if (searchValue != null) {
+    const isRegExp = yield* IsRegExp($, searchValue);
+    if (IsAbrupt(isRegExp)) return isRegExp;
+    if (isRegExp) {
+      const flags = yield* Get($, searchValue as Obj, 'flags');
+      if (IsAbrupt(flags)) return flags;
+      const coercible = RequireObjectCoercible($, flags);
+      if (IsAbrupt(coercible)) return coercible;
+      const s = yield* ToString($, flags);
+      if (IsAbrupt(s)) return s;
+      if (!s.includes('g')) {
+        return $.throw('TypeError', 'RegExp must have "g" flag for replaceAll');
+      }
+    }
+    const replacer = yield* GetMethod($, searchValue, Symbol.replace);
+    if (IsAbrupt(replacer)) return replacer;
+    if (replacer !== undefined) {
+      return yield* Call($, replacer, searchValue, [O, replaceValue]);
+    }
+  }
+  // 3.
+  const string = yield* ToString($, O);
+  if (IsAbrupt(string)) return string;
+  const searchString = yield* ToString($, searchValue);
+  if (IsAbrupt(searchString)) return searchString;
+  const functionalReplace = IsCallable(replaceValue);
+  if (!functionalReplace) {
+    const replaceValue$ = yield* ToString($, replaceValue);
+    if (IsAbrupt(replaceValue$)) return replaceValue$;
+    replaceValue = replaceValue$;
+  }
+  const searchLength = searchString.length;
+  const advanceBy = Math.max(1, searchLength);
+  const matchPositions: number[] = [];
+  let position = string.indexOf(searchString);
+  while (position !== -1) {
+    matchPositions.push(position);
+    position = string.indexOf(searchString, position + advanceBy);
+  }
+  let endOfLastMatch = 0;
+  // 13.
+  let result = '';
+  for (const p of matchPositions) {
+    const preserved = string.substring(endOfLastMatch, p);
+    let replacement: CR<Val>;
+    if (functionalReplace) {
+      replacement = yield* ToStringECR($, Call($, replaceValue, undefined, [searchString, p, string]));
+      if (IsAbrupt(replacement)) return replacement;
+    } else {
+      Assert(typeof replaceValue === 'string');
+      replacement = CastNotAbrupt(yield* GetSubstitution($, searchString, string, p, [], undefined, replaceValue));
+    }
+    result += preserved + replacement;
+    endOfLastMatch = p + searchLength;
+  }
+  if (endOfLastMatch < string.length) {
+    result += string.substring(endOfLastMatch);
+  }
+  return result;
 }
 
 /**
