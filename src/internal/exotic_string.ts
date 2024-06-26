@@ -1,4 +1,4 @@
-import { IsArrayIndex, IsCallable, IsIntegralNumber, RequireObjectCoercible } from './abstract_compare';
+import { IsArrayIndex, IsCallable, IsIntegralNumber, IsRegExp, RequireObjectCoercible } from './abstract_compare';
 import { CanonicalNumericIndexString, ToIntegerOrInfinity, ToLength, ToNumber, ToString, ToUint16, ToUint32 } from './abstract_conversion';
 import { Call, CreateArrayFromList, Get, GetMethod, Invoke } from './abstract_object';
 import { Assert } from './assert';
@@ -8,14 +8,12 @@ import { SymbolDescriptiveString, objectAndFunctionPrototype } from './fundament
 import { GetPrototypeFromConstructor, IsCompatiblePropertyDescriptor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject } from './obj';
 import { PropertyDescriptor, PropertyRecord, prop0, propE, propWC } from './property_descriptor';
 import { defineProperties } from './realm_record';
+import { RegExpCreate } from './regexp';
 import { memoize } from './slots';
 import { PropertyKey, Val } from './val';
 import { DebugString, ECR, EvalGen, Plugin, VM } from './vm';
 
 const {} = {DebugString};
-
-function IsRegExp(..._args: unknown[]) { return false; }
-declare const RegExpCreate: any;
 
 // abstract class CachedPropsExoticObject extends Obj {
 //   cachedProps: Map<string, PropertyDesciptor>|undefined = undefined;
@@ -459,7 +457,9 @@ export const stringObject: Plugin = {
       }
 
       function* noRegExpToString($: VM, value: Val): ECR<string> {
-        if (IsRegExp(value)) {
+        const isRegExp = yield* IsRegExp($, value);
+        if (IsAbrupt(isRegExp)) return isRegExp;
+        if (isRegExp) {
           return $.throw('TypeError', 'argument must not be a regular expression');
         }
         return yield* ToString($, value);
@@ -676,7 +676,8 @@ export const stringObject: Plugin = {
           }
           const S = yield* ToString($, O);
           if (IsAbrupt(S)) return S;
-          const rx = RegExpCreate($, regexp, undefined);
+          const rx = yield* RegExpCreate($, regexp, undefined);
+          if (IsAbrupt(rx)) return rx;
           return yield* Invoke($, rx, Symbol.match, [S]);
         }),
 
@@ -702,7 +703,7 @@ export const stringObject: Plugin = {
           const O = RequireObjectCoercible($, thisValue);
           if (IsAbrupt(O)) return O;
           if (regexp != null) {
-            const isRegExp = IsRegExp(regexp);
+            const isRegExp = yield* IsRegExp($, regexp);
             if (IsAbrupt(isRegExp)) return isRegExp;
             if (isRegExp) {
               const flags = yield* Get($, regexp as Obj, 'flags');
@@ -719,7 +720,8 @@ export const stringObject: Plugin = {
           }
           const S = yield* ToString($, O);
           if (IsAbrupt(S)) return S;
-          const rx = RegExpCreate($, regexp, 'g');
+          const rx = yield* RegExpCreate($, regexp, 'g');
+          if (IsAbrupt(rx)) return rx;
           return yield* Invoke($, rx, Symbol.matchAll, [S]);
         }),
 
@@ -915,7 +917,8 @@ export const stringObject: Plugin = {
           }
           const string = yield* ToString($, O);
           if (IsAbrupt(string)) return string;
-          const rx = RegExpCreate($, regexp, undefined);
+          const rx = yield* RegExpCreate($, regexp, undefined);
+          if (IsAbrupt(rx)) return rx;
           return yield* Invoke($, rx, Symbol.search, [string]);
         }),
 
