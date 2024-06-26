@@ -503,6 +503,17 @@ export function* ToString($: VM, argument: Val): ECR<string> {
   return String(argument);  
 }
 
+/** Modified version of ToString that takes a CR instead. */
+export function* ToStringCR($: VM, arg: CR<Val>): ECR<string> {
+  if (IsAbrupt(arg)) return arg;
+  return yield* ToString($, arg);
+}
+
+/** Modified version of ToString that takes an ECR instead. */
+export function* ToStringECR($: VM, arg: ECR<Val>): ECR<string> {
+  return yield* ToStringCR($, yield* arg);
+}
+
 /**
  * 7.1.18 ToObject ( argument )
  *
@@ -587,6 +598,17 @@ export function* ToLength($: VM, argument: Val): ECR<number> {
   if (IsAbrupt(len)) return len;
   if (len <= 0) return 0;
   return Math.min(len, 2**53 - 1);
+}
+
+/** Modified version of ToLength that takes a CR instead. */
+export function* ToLengthCR($: VM, arg: CR<Val>): ECR<number> {
+  if (IsAbrupt(arg)) return arg;
+  return yield* ToLength($, arg);
+}
+
+/** Modified version of ToLength that takes an ECR instead. */
+export function* ToLengthECR($: VM, arg: ECR<Val>): ECR<number> {
+  return yield* ToLengthCR($, yield* arg);
 }
 
 /**

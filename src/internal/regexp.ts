@@ -3,246 +3,26 @@
 // by cutting some corners, at the expense of correctness.
 
 import { IsCallable, IsRegExp, SameValue } from './abstract_compare';
-import { ToBoolean, ToIntegerOrInfinity, ToLength, ToObject, ToString, ToUint32 } from './abstract_conversion';
+import { ToBoolean, ToIntegerOrInfinity, ToLengthECR, ToObject, ToString, ToStringECR, ToUint32 } from './abstract_conversion';
+import { CreateIterResultObject } from './abstract_iterator';
 import { Call, Construct, CreateArrayFromList, DefinePropertyOrThrow, Get, LengthOfArrayLike, Set, SpeciesConstructor } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { CreateBuiltinFunction, Func, callOrConstruct, getter, method } from './func';
+import { CreateBuiltinFunction, Func, callOrConstruct, getter, method, methodO } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
+import { CreateIteratorFromClosure, GeneratorResume, GeneratorYield } from './generator';
+import { iterators } from './iterators';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate, peekProp } from './obj';
-import { PropertyDescriptor, prop0, propWC, propWEC } from './property_descriptor';
+import { PropertyDescriptor, prop0, propC, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
 import { ECR, Plugin, VM, just, when } from './vm';
 
-declare const CreateRegExpStringIterator: any;
-
-/**
- * 22.2.8 Properties of RegExp Instances
- * 
- * RegExp instances are ordinary objects that inherit properties from
- * the RegExp prototype object. RegExp instances have internal slots
- * [[OriginalSource]], [[OriginalFlags]], [[RegExpRecord]], and
- * [[RegExpMatcher]]. The value of the [[RegExpMatcher]] internal slot
- * is an Abstract Closure representation of the Pattern of the RegExp
- * object.
- * 
- * NOTE: Prior to ECMAScript 2015, RegExp instances were specified as
- * having the own data properties "source", "global", "ignoreCase",
- * and "multiline". Those properties are now specified as accessor
- * properties of RegExp.prototype.
- * 
- * RegExp instances also have the following property:
- */
-interface RegExpInstanceSlots {
-  OriginalSource?: string;
-  OriginalFlags?: string;
-  RegExpRecord?: never;
-  RegExpMatcher?: RegExp;
-}
-declare global {
-  interface ObjectSlots extends RegExpInstanceSlots {}
-}
-
-// 22.2.3 Abstract Operations for RegExp Creation
-
-/**
- * 22.2.3.1 RegExpCreate ( P, F )
- * 
- * The abstract operation RegExpCreate takes arguments P (an
- * ECMAScript language value) and F (a String or undefined) and
- * returns either a normal completion containing an Object or a throw
- * completion. It performs the following steps when called:
- * 
- * 1. Let obj be ! RegExpAlloc(%RegExp%).
- * 2. Return ? RegExpInitialize(obj, P, F).
- */
-export function* RegExpCreate($: VM, P: Val, F?: string): ECR<Obj> {
-  const obj = CastNotAbrupt(yield* RegExpAlloc($, $.getIntrinsic('%RegExp%') as Func));
-  return yield* RegExpInitialize($, obj, P, F);
-}
-
-/**
- * 22.2.3.2 RegExpAlloc ( newTarget )
- * 
- * The abstract operation RegExpAlloc takes argument newTarget (a
- * constructor) and returns either a normal completion containing an
- * Object or a throw completion. It performs the following steps when
- * called:
- * 
- * 1. Let obj be ? OrdinaryCreateFromConstructor(newTarget,
- *    "%RegExp.prototype%", « [[OriginalSource]], [[OriginalFlags]],
- *    [[RegExpRecord]], [[RegExpMatcher]] »).
- * 2. Perform ! DefinePropertyOrThrow(obj, "lastIndex",
- *    PropertyDescriptor { [[Writable]]: true, [[Enumerable]]: false,
- *    [[Configurable]]: false }).
- * 3. Return obj.
- */
-export function* RegExpAlloc($: VM, newTarget: Func): ECR<Obj> {
-  const obj = yield* OrdinaryCreateFromConstructor($, newTarget, '%RegExp.prototype%', {
-    OriginalSource: undefined,
-    OriginalFlags: undefined,
-    RegExpRecord: undefined,
-    RegExpMatcher: undefined,
-  });
-  if (IsAbrupt(obj)) return obj;
-  // TODO - what if newtarget makes lastIndex non-writable?
-  CastNotAbrupt(DefinePropertyOrThrow($, obj, 'lastIndex', {
-    Writable: true,
-    Enumerable: false,
-    Configurable: false,
-  }));
-  return obj;
-}
-
-/**
- * 22.2.3.3 RegExpInitialize ( obj, pattern, flags )
- * 
- * The abstract operation RegExpInitialize takes arguments obj (an
- * Object), pattern (an ECMAScript language value), and flags (an
- * ECMAScript language value) and returns either a normal completion
- * containing an Object or a throw completion. It performs the
- * following steps when called:
- * 
- * 1. If pattern is undefined, let P be the empty String.
- * 2. Else, let P be ? ToString(pattern).
- * 3. If flags is undefined, let F be the empty String.
- * 4. Else, let F be ? ToString(flags).
- * 5. If F contains any code unit other than "d", "g", "i", "m", "s",
- *    "u", or "y", or if F contains any code unit more than once, throw a
- *    SyntaxError exception.
- * 6. If F contains "i", let i be true; else let i be false.
- * 7. If F contains "m", let m be true; else let m be false.
- * 8. If F contains "s", let s be true; else let s be false.
- * 9. If F contains "u", let u be true; else let u be false.
- * 10. If u is true, then
- *     a. Let patternText be StringToCodePoints(P).
- * 11. Else,
- *     a. Let patternText be the result of interpreting each of P's
- *     16-bit elements as a Unicode BMP code point. UTF-16 decoding is
- *     not applied to the elements.
- * 12. Let parseResult be ParsePattern(patternText, u).
- * 13. If parseResult is a non-empty List of SyntaxError objects,
- *     throw a SyntaxError exception.
- * 14. Assert: parseResult is a Pattern Parse Node.
- * 15. Set obj.[[OriginalSource]] to P.
- * 16. Set obj.[[OriginalFlags]] to F.
- * 17. Let capturingGroupsCount be CountLeftCapturingParensWithin(parseResult).
- * 18. Let rer be the RegExp Record { [[IgnoreCase]]: i,
- *     [[Multiline]]: m, [[DotAll]]: s, [[Unicode]]: u,
- *     [[CapturingGroupsCount]]: capturingGroupsCount }.
- * 19. Set obj.[[RegExpRecord]] to rer.
- * 20. Set obj.[[RegExpMatcher]] to CompilePattern of parseResult with argument rer.
- * 21. Perform ? Set(obj, "lastIndex", +0𝔽, true).
- * 22. Return obj.
- */
-export function* RegExpInitialize($: VM, obj: Obj, pattern: Val, flags: Val): ECR<Obj> {
-  const P = pattern === undefined ? '' : yield* ToString($, pattern);
-  if (IsAbrupt(P)) return P;
-  const F = flags === undefined ? '' : yield* ToString($, flags);
-  if (IsAbrupt(F)) return F;
-  if (F.match(/[^dgimsuy]/) || F.match(/(.).*\1/)) {
-    return $.throw('SyntaxError', 'Invalid flags');
-  }
-  // skip tracking flags
-  obj.OriginalSource = P;
-  obj.OriginalFlags = F;
-  obj.RegExpMatcher = new RegExp(P, F);
-  const setStatus = yield* Set($, obj, 'lastIndex', 0, true);
-  if (IsAbrupt(setStatus)) return setStatus;
-  return obj;
-}
-
-/**
- * 22.2.4 The RegExp Constructor
- * 
- * The RegExp constructor:
- * 
- *   - is %RegExp%.
- *   - is the initial value of the "RegExp" property of the global object.
- *   - creates and initializes a new RegExp object when called as a
- *     function rather than as a constructor. Thus the function call
- *     RegExp(…) is equivalent to the object creation expression new
- *     RegExp(…) with the same arguments.
- *   - may be used as the value of an extends clause of a class
- *     definition. Subclass constructors that intend to inherit the
- *     specified RegExp behaviour must include a super call to the RegExp
- *     constructor to create and initialize subclass instances with the
- *     necessary internal slots.
- *
- * ---
- *
- * 22.2.4.1 RegExp ( pattern, flags )
- *
- * This function performs the following steps when called:
- * 
- * 1. Let patternIsRegExp be ? IsRegExp(pattern).
- * 2. If NewTarget is undefined, then
- *     a. Let newTarget be the active function object.
- *     b. If patternIsRegExp is true and flags is undefined, then
- *         i. Let patternConstructor be ? Get(pattern, "constructor").
- *         ii. If SameValue(newTarget, patternConstructor) is true, return pattern.
- * 3. Else, let newTarget be NewTarget.
- * 4. If pattern is an Object and pattern has a [[RegExpMatcher]] internal slot, then
- *     a. Let P be pattern.[[OriginalSource]].
- *     b. If flags is undefined, let F be pattern.[[OriginalFlags]].
- *     c. Else, let F be flags.
- * 5. Else if patternIsRegExp is true, then
- *     a. Let P be ? Get(pattern, "source").
- *     b. If flags is undefined, then
- *         i. Let F be ? Get(pattern, "flags").
- *     c. Else, let F be flags.
- * 6. Else,
- *     a. Let P be pattern.
- *     b. Let F be flags.
- * 7. Let O be ? RegExpAlloc(newTarget).
- * 8. Return ? RegExpInitialize(O, P, F).
- * 
- * NOTE: If pattern is supplied using a StringLiteral, the usual
- * escape sequence substitutions are performed before the String is
- * processed by this function. If pattern must contain an escape
- * sequence to be recognized by this function, an U+005C (REVERSE
- * SOLIDUS) code points must be escaped within the StringLiteral to
- * prevent them being removed when the contents of the StringLiteral
- * are formed.
- */
-export function* RegExpConstructor(
-  $: VM, NewTarget: Func|undefined,
-  pattern: Val, flags: Val,
-): ECR<Obj> {
-  const patternIsRegExp = yield* IsRegExp($, pattern);
-  if (NewTarget === undefined) {
-    NewTarget = $.getActiveFunctionObject()!;
-    if (patternIsRegExp && flags === undefined) {
-      Assert(pattern instanceof Obj);
-      const patternConstructor = yield* Get($, pattern, 'constructor');
-      if (IsAbrupt(patternConstructor)) return patternConstructor;
-      if (SameValue(NewTarget, patternConstructor)) return pattern;
-    }
-  }
-  let P: CR<Val>;
-  let F: CR<Val>;
-  if (pattern instanceof Obj && pattern.RegExpMatcher) {
-    P = pattern.OriginalSource!;
-    F = flags === undefined ? pattern.OriginalFlags : flags;
-  } else if (patternIsRegExp) {
-    Assert(pattern instanceof Obj);
-    P = yield* Get($, pattern, 'source');
-    if (IsAbrupt(P)) return P;
-    F = flags === undefined ? yield* Get($, pattern, 'flags') : flags;
-    if (IsAbrupt(F)) return F;
-  } else {
-    P = pattern;
-    F = flags;
-  }
-  const O = yield* RegExpAlloc($, NewTarget);
-  if (IsAbrupt(O)) return O;
-  return yield* RegExpInitialize($, O, P, F);
-}
-
 export const regexp: Plugin = {
   id: 'regexp',
-  deps: () => [objectAndFunctionPrototype],
+  // NOTE: iterators is optional, but we should omit @@matchAll if it's not present
+  // (or else have it return an array).
+  deps: () => [objectAndFunctionPrototype, iterators],
   syntax: {
     Evaluation(on) {
       on('Literal', when(n => n.value instanceof RegExp, ($, n) => {
@@ -507,9 +287,279 @@ export const regexp: Plugin = {
          */
         'unicode': getter(($, R) => just(RegExpHasFlag($, R, 'u'))),
       });
+
+      /**
+       * 22.2.9 RegExp String Iterator Objects
+       * 
+       * A RegExp String Iterator is an object, that represents a specific
+       * iteration over some specific String instance object, matching
+       * against some specific RegExp instance object. There is not a named
+       * constructor for RegExp String Iterator objects. Instead, RegExp
+       * String Iterator objects are created by calling certain methods of
+       * RegExp instance objects.
+       *
+       * --- 
+       *
+       * 22.2.9.2 The %RegExpStringIteratorPrototype% Object
+       * 
+       * The %RegExpStringIteratorPrototype% object:
+       * 
+       * has properties that are inherited by all RegExp String Iterator Objects.
+       * is an ordinary object.
+       * has a [[Prototype]] internal slot whose value is %IteratorPrototype%.
+       * has the following properties:
+       */
+      const regexpStringIteratorPrototype = OrdinaryObjectCreate(realm.Intrinsics.get('%IteratorPrototype%')!);
+      realm.Intrinsics.set('%RegExpStringIteratorPrototype%', regexpStringIteratorPrototype);
+
+      defineProperties(realm, regexpStringIteratorPrototype, {
+        /**
+         *
+         * 22.2.9.2.1 %RegExpStringIteratorPrototype%.next ( )
+         *
+         * 1. Return ? GeneratorResume(this value, empty, "%RegExpStringIteratorPrototype%").
+         */
+        'next': methodO(function*($, thisValue) {
+          return yield* GeneratorResume($, thisValue, undefined, '%RegExpStringIteratorPrototype%');
+        }),
+
+        /** 
+         * 22.2.9.2.2 %RegExpStringIteratorPrototype% [ @@toStringTag ]
+         *
+         * The initial value of the @@toStringTag property is the String value
+         * "RegExp String Iterator".
+         *
+         * This property has the attributes { [[Writable]]: false,
+         * [[Enumerable]]: false, [[Configurable]]: true }.
+         */
+        [Symbol.toStringTag]: propC('RegExp String Iterator'),
+      });
     },
   },
 };
+
+/**
+ * 22.2.8 Properties of RegExp Instances
+ * 
+ * RegExp instances are ordinary objects that inherit properties from
+ * the RegExp prototype object. RegExp instances have internal slots
+ * [[OriginalSource]], [[OriginalFlags]], [[RegExpRecord]], and
+ * [[RegExpMatcher]]. The value of the [[RegExpMatcher]] internal slot
+ * is an Abstract Closure representation of the Pattern of the RegExp
+ * object.
+ * 
+ * NOTE: Prior to ECMAScript 2015, RegExp instances were specified as
+ * having the own data properties "source", "global", "ignoreCase",
+ * and "multiline". Those properties are now specified as accessor
+ * properties of RegExp.prototype.
+ * 
+ * RegExp instances also have the following property:
+ */
+interface RegExpInstanceSlots {
+  OriginalSource?: string;
+  OriginalFlags?: string;
+  RegExpRecord?: never;
+  RegExpMatcher?: RegExp;
+}
+declare global {
+  interface ObjectSlots extends RegExpInstanceSlots {}
+}
+
+// 22.2.3 Abstract Operations for RegExp Creation
+
+/**
+ * 22.2.3.1 RegExpCreate ( P, F )
+ * 
+ * The abstract operation RegExpCreate takes arguments P (an
+ * ECMAScript language value) and F (a String or undefined) and
+ * returns either a normal completion containing an Object or a throw
+ * completion. It performs the following steps when called:
+ * 
+ * 1. Let obj be ! RegExpAlloc(%RegExp%).
+ * 2. Return ? RegExpInitialize(obj, P, F).
+ */
+export function* RegExpCreate($: VM, P: Val, F?: string): ECR<Obj> {
+  const obj = CastNotAbrupt(yield* RegExpAlloc($, $.getIntrinsic('%RegExp%') as Func));
+  return yield* RegExpInitialize($, obj, P, F);
+}
+
+/**
+ * 22.2.3.2 RegExpAlloc ( newTarget )
+ * 
+ * The abstract operation RegExpAlloc takes argument newTarget (a
+ * constructor) and returns either a normal completion containing an
+ * Object or a throw completion. It performs the following steps when
+ * called:
+ * 
+ * 1. Let obj be ? OrdinaryCreateFromConstructor(newTarget,
+ *    "%RegExp.prototype%", « [[OriginalSource]], [[OriginalFlags]],
+ *    [[RegExpRecord]], [[RegExpMatcher]] »).
+ * 2. Perform ! DefinePropertyOrThrow(obj, "lastIndex",
+ *    PropertyDescriptor { [[Writable]]: true, [[Enumerable]]: false,
+ *    [[Configurable]]: false }).
+ * 3. Return obj.
+ */
+export function* RegExpAlloc($: VM, newTarget: Func): ECR<Obj> {
+  const obj = yield* OrdinaryCreateFromConstructor($, newTarget, '%RegExp.prototype%', {
+    OriginalSource: undefined,
+    OriginalFlags: undefined,
+    RegExpRecord: undefined,
+    RegExpMatcher: undefined,
+  });
+  if (IsAbrupt(obj)) return obj;
+  // TODO - what if newtarget makes lastIndex non-writable?
+  CastNotAbrupt(DefinePropertyOrThrow($, obj, 'lastIndex', {
+    Writable: true,
+    Enumerable: false,
+    Configurable: false,
+  }));
+  return obj;
+}
+
+/**
+ * 22.2.3.3 RegExpInitialize ( obj, pattern, flags )
+ * 
+ * The abstract operation RegExpInitialize takes arguments obj (an
+ * Object), pattern (an ECMAScript language value), and flags (an
+ * ECMAScript language value) and returns either a normal completion
+ * containing an Object or a throw completion. It performs the
+ * following steps when called:
+ * 
+ * 1. If pattern is undefined, let P be the empty String.
+ * 2. Else, let P be ? ToString(pattern).
+ * 3. If flags is undefined, let F be the empty String.
+ * 4. Else, let F be ? ToString(flags).
+ * 5. If F contains any code unit other than "d", "g", "i", "m", "s",
+ *    "u", or "y", or if F contains any code unit more than once, throw a
+ *    SyntaxError exception.
+ * 6. If F contains "i", let i be true; else let i be false.
+ * 7. If F contains "m", let m be true; else let m be false.
+ * 8. If F contains "s", let s be true; else let s be false.
+ * 9. If F contains "u", let u be true; else let u be false.
+ * 10. If u is true, then
+ *     a. Let patternText be StringToCodePoints(P).
+ * 11. Else,
+ *     a. Let patternText be the result of interpreting each of P's
+ *     16-bit elements as a Unicode BMP code point. UTF-16 decoding is
+ *     not applied to the elements.
+ * 12. Let parseResult be ParsePattern(patternText, u).
+ * 13. If parseResult is a non-empty List of SyntaxError objects,
+ *     throw a SyntaxError exception.
+ * 14. Assert: parseResult is a Pattern Parse Node.
+ * 15. Set obj.[[OriginalSource]] to P.
+ * 16. Set obj.[[OriginalFlags]] to F.
+ * 17. Let capturingGroupsCount be CountLeftCapturingParensWithin(parseResult).
+ * 18. Let rer be the RegExp Record { [[IgnoreCase]]: i,
+ *     [[Multiline]]: m, [[DotAll]]: s, [[Unicode]]: u,
+ *     [[CapturingGroupsCount]]: capturingGroupsCount }.
+ * 19. Set obj.[[RegExpRecord]] to rer.
+ * 20. Set obj.[[RegExpMatcher]] to CompilePattern of parseResult with argument rer.
+ * 21. Perform ? Set(obj, "lastIndex", +0𝔽, true).
+ * 22. Return obj.
+ */
+export function* RegExpInitialize($: VM, obj: Obj, pattern: Val, flags: Val): ECR<Obj> {
+  const P = pattern === undefined ? '' : yield* ToString($, pattern);
+  if (IsAbrupt(P)) return P;
+  const F = flags === undefined ? '' : yield* ToString($, flags);
+  if (IsAbrupt(F)) return F;
+  if (F.match(/[^dgimsuy]/) || F.match(/(.).*\1/)) {
+    return $.throw('SyntaxError', 'Invalid flags');
+  }
+  // skip tracking flags
+  obj.OriginalSource = P;
+  obj.OriginalFlags = F;
+  obj.RegExpMatcher = new RegExp(P, F);
+  const setStatus = yield* Set($, obj, 'lastIndex', 0, true);
+  if (IsAbrupt(setStatus)) return setStatus;
+  return obj;
+}
+
+/**
+ * 22.2.4 The RegExp Constructor
+ * 
+ * The RegExp constructor:
+ * 
+ *   - is %RegExp%.
+ *   - is the initial value of the "RegExp" property of the global object.
+ *   - creates and initializes a new RegExp object when called as a
+ *     function rather than as a constructor. Thus the function call
+ *     RegExp(…) is equivalent to the object creation expression new
+ *     RegExp(…) with the same arguments.
+ *   - may be used as the value of an extends clause of a class
+ *     definition. Subclass constructors that intend to inherit the
+ *     specified RegExp behaviour must include a super call to the RegExp
+ *     constructor to create and initialize subclass instances with the
+ *     necessary internal slots.
+ *
+ * ---
+ *
+ * 22.2.4.1 RegExp ( pattern, flags )
+ *
+ * This function performs the following steps when called:
+ * 
+ * 1. Let patternIsRegExp be ? IsRegExp(pattern).
+ * 2. If NewTarget is undefined, then
+ *     a. Let newTarget be the active function object.
+ *     b. If patternIsRegExp is true and flags is undefined, then
+ *         i. Let patternConstructor be ? Get(pattern, "constructor").
+ *         ii. If SameValue(newTarget, patternConstructor) is true, return pattern.
+ * 3. Else, let newTarget be NewTarget.
+ * 4. If pattern is an Object and pattern has a [[RegExpMatcher]] internal slot, then
+ *     a. Let P be pattern.[[OriginalSource]].
+ *     b. If flags is undefined, let F be pattern.[[OriginalFlags]].
+ *     c. Else, let F be flags.
+ * 5. Else if patternIsRegExp is true, then
+ *     a. Let P be ? Get(pattern, "source").
+ *     b. If flags is undefined, then
+ *         i. Let F be ? Get(pattern, "flags").
+ *     c. Else, let F be flags.
+ * 6. Else,
+ *     a. Let P be pattern.
+ *     b. Let F be flags.
+ * 7. Let O be ? RegExpAlloc(newTarget).
+ * 8. Return ? RegExpInitialize(O, P, F).
+ * 
+ * NOTE: If pattern is supplied using a StringLiteral, the usual
+ * escape sequence substitutions are performed before the String is
+ * processed by this function. If pattern must contain an escape
+ * sequence to be recognized by this function, an U+005C (REVERSE
+ * SOLIDUS) code points must be escaped within the StringLiteral to
+ * prevent them being removed when the contents of the StringLiteral
+ * are formed.
+ */
+export function* RegExpConstructor(
+  $: VM, NewTarget: Func|undefined,
+  pattern: Val, flags: Val,
+): ECR<Obj> {
+  const patternIsRegExp = yield* IsRegExp($, pattern);
+  if (NewTarget === undefined) {
+    NewTarget = $.getActiveFunctionObject()!;
+    if (patternIsRegExp && flags === undefined) {
+      Assert(pattern instanceof Obj);
+      const patternConstructor = yield* Get($, pattern, 'constructor');
+      if (IsAbrupt(patternConstructor)) return patternConstructor;
+      if (SameValue(NewTarget, patternConstructor)) return pattern;
+    }
+  }
+  let P: CR<Val>;
+  let F: CR<Val>;
+  if (pattern instanceof Obj && pattern.RegExpMatcher) {
+    P = pattern.OriginalSource!;
+    F = flags === undefined ? pattern.OriginalFlags : flags;
+  } else if (patternIsRegExp) {
+    Assert(pattern instanceof Obj);
+    P = yield* Get($, pattern, 'source');
+    if (IsAbrupt(P)) return P;
+    F = flags === undefined ? yield* Get($, pattern, 'flags') : flags;
+    if (IsAbrupt(F)) return F;
+  } else {
+    P = pattern;
+    F = flags;
+  }
+  const O = yield* RegExpAlloc($, NewTarget);
+  if (IsAbrupt(O)) return O;
+  return yield* RegExpInitialize($, O, P, F);
+}
 
 /**
  * 22.2.6.2 RegExp.prototype.exec ( string )
@@ -1181,9 +1231,9 @@ export function* RegExpPrototypeTest($: VM, R: Val, S: Val): ECR<boolean> {
  */
 export function* RegExpPrototypeToString($: VM, R: Val): ECR<string> {
   if (!(R instanceof Obj)) return $.throw('TypeError', 'not an object');
-  const pattern = yield* Get($, R, 'source');
+  const pattern = yield* ToStringECR($, Get($, R, 'source'));
   if (IsAbrupt(pattern)) return pattern;
-  const flags = yield* Get($, R, 'flags');
+  const flags = yield* ToStringECR($, Get($, R, 'flags'));
   if (IsAbrupt(flags)) return flags;
   return `/${pattern}/${flags}`;
 }
@@ -1652,14 +1702,59 @@ export function* GetSubstitution(
   return result;
 }
 
-function* ToLengthECR($: VM, arg: ECR<Val>): ECR<number> {
-  const val = yield* arg;
-  if (IsAbrupt(val)) return val;
-  return yield* ToLength($, val);
-}
-
-function* ToStringECR($: VM, arg: ECR<Val>): ECR<string> {
-  const val = yield* arg;
-  if (IsAbrupt(val)) return val;
-  return yield* ToString($, val);
+/** 
+ * 22.2.9.1 CreateRegExpStringIterator ( R, S, global, fullUnicode )
+ * 
+ * The abstract operation CreateRegExpStringIterator takes arguments R
+ * (an Object), S (a String), global (a Boolean), and fullUnicode (a
+ * Boolean) and returns a Generator. It performs the following steps
+ * when called:
+ * 
+ * 1. Let closure be a new Abstract Closure with no parameters that
+ *    captures R, S, global, and fullUnicode and performs the following
+ *    steps when called:
+ *     a. Repeat,
+ *         i. Let match be ? RegExpExec(R, S).
+ *         ii. If match is null, return undefined.
+ *         iii. If global is false, then
+ * 1. Perform ? GeneratorYield(CreateIterResultObject(match, false)).
+ * 2. Return undefined.
+ *         iv. Let matchStr be ? ToString(? Get(match, "0")).
+ *         v. If matchStr is the empty String, then
+ * 1. Let thisIndex be ℝ(? ToLength(? Get(R, "lastIndex"))).
+ * 2. Let nextIndex be AdvanceStringIndex(S, thisIndex, fullUnicode).
+ * 3. Perform ? Set(R, "lastIndex", 𝔽(nextIndex), true).
+ *         vi. Perform ? GeneratorYield(CreateIterResultObject(match, false)).
+ * 2. Return CreateIteratorFromClosure(closure,
+ *    "%RegExpStringIteratorPrototype%",
+ *    %RegExpStringIteratorPrototype%).
+ */
+export function* CreateRegExpStringIterator(
+  $: VM,
+  R: Obj,
+  S: string,
+  global: boolean,
+  fullUnicode: boolean,
+): ECR<Obj> {
+  const closure = function*() {
+    while (true) {
+      const match = yield* RegExpExec($, R, S);
+      if (IsAbrupt(match)) return match;
+      if (match === null) return undefined;
+      if (!global) {
+        yield* GeneratorYield($, CreateIterResultObject($, match, false));
+        return undefined;
+      }
+      const matchStr = yield* ToStringECR($, Get($, match, '0'));
+      if (IsAbrupt(matchStr)) return matchStr;
+      if (matchStr === '') {
+        const thisIndex = yield* ToLengthECR($, Get($, R, 'lastIndex'));
+        if (IsAbrupt(thisIndex)) return thisIndex;
+        const nextIndex = AdvanceStringIndex(S, thisIndex, fullUnicode);
+        yield* Set($, R, 'lastIndex', nextIndex, true);
+      }
+      yield* GeneratorYield($, CreateIterResultObject($, match, false));
+    }
+  };
+  return CreateIteratorFromClosure($, closure, '%RegExpStringIteratorPrototype%', $.getIntrinsic('%RegExpStringIteratorPrototype%'));
 }
