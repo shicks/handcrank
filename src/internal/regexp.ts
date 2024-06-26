@@ -225,10 +225,10 @@ export const regexp: Plugin = {
         'ignoreCase': getter(($, R) => just(RegExpHasFlag($, R, 'i'))),
 
         /** 22.2.6.8 RegExp.prototype [ @@match ] ( string ) */
-        [Symbol.match]: method(RegExpPrototypeMatch),
+        [Symbol.match]: method(RegExpPrototype$$Match),
 
         /** 22.2.6.9 RegExp.prototype [ @@matchAll ] ( string ) */
-        [Symbol.matchAll]: method(RegExpPrototypeMatchAll),
+        [Symbol.matchAll]: method(RegExpPrototype$$MatchAll),
 
         /**
          * 22.2.6.10 get RegExp.prototype.multiline
@@ -244,16 +244,16 @@ export const regexp: Plugin = {
         'multiline': getter(($, R) => just(RegExpHasFlag($, R, 'm'))),
 
         /** 22.2.6.11 RegExp.prototype [ @@replace ] ( string, replaceValue ) */
-        [Symbol.replace]: method(RegExpPrototypeReplace),
+        [Symbol.replace]: method(RegExpPrototype$$Replace),
 
         /** 22.2.6.12 RegExp.prototype [ @@search ] ( string ) */
-        [Symbol.search]: method(RegExpPrototypeSearch),
+        [Symbol.search]: method(RegExpPrototype$$Search),
 
         /** 22.2.6.13 get RegExp.prototype.source */
         'source': getter(($, R) => just(RegExpPrototypeSource($, R))),
 
         /** 22.2.6.14 RegExp.prototype [ @@split ] ( string, limit ) */
-        [Symbol.split]: method(RegExpPrototypeSplit),
+        [Symbol.split]: method(RegExpPrototype$$Split),
 
         /**
          * 22.2.6.15 get RegExp.prototype.sticky
@@ -630,7 +630,7 @@ export function RegExpHasFlag($: VM, R: Val, codeUnit: string): CR<boolean|undef
  * Boolean coerce to true indicates that the object is not
  * intended to be used as a regular expression object.
  */
-export function* RegExpPrototypeMatch(
+export function* RegExpPrototype$$Match(
   $: VM,
   rx: Val,
   string: Val,
@@ -687,7 +687,7 @@ export function* RegExpPrototypeMatch(
  * 
  * The value of the "name" property of this method is "[Symbol.matchAll]".
  */
-export function* RegExpPrototypeMatchAll($: VM, R: Val, string: Val): ECR<Val> {
+export function* RegExpPrototype$$MatchAll($: VM, R: Val, string: Val): ECR<Val> {
   if (!(R instanceof Obj)) return $.throw('TypeError', 'not an object');
   const S = yield* ToString($, string);
   if (IsAbrupt(S)) return S;
@@ -792,7 +792,7 @@ export function* RegExpPrototypeMatchAll($: VM, R: Val, string: Val): ECR<Val> {
  * 
  * The value of the "name" property of this method is "[Symbol.replace]".
  */
-export function* RegExpPrototypeReplace(
+export function* RegExpPrototype$$Replace(
   $: VM,
   rx: Val,
   string: Val,
@@ -928,7 +928,7 @@ export function* RegExpPrototypeReplace(
  * RegExp object are ignored when performing the search. The
  * "lastIndex" property is left unchanged.
  */
-export function* RegExpPrototypeSearch(
+export function* RegExpPrototype$$Search(
   $: VM,
   rx: Val,
   string: Val,
@@ -1090,7 +1090,7 @@ export function RegExpPrototypeSource($: VM, R: Val): CR<string> {
  * NOTE 2: This method ignores the value of the "global" and
  * "sticky" properties of this RegExp object.
  */
-export function* RegExpPrototypeSplit(
+export function* RegExpPrototype$$Split(
   $: VM,
   rx: Val,
   string: Val,
