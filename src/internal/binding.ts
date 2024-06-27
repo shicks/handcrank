@@ -300,7 +300,8 @@ export function* BindingInitialization_ArrayPattern(
 ): ECR<UNUSED> {
   const iteratorRecord = yield* GetIterator($, value, SYNC);
   if (IsAbrupt(iteratorRecord)) return iteratorRecord;
-  const result = yield* IteratorBindingInitialization($, pattern, iteratorRecord, environment);
+  const result = yield* IteratorBindingInitialization(
+    $, pattern.elements, iteratorRecord, environment);
   if (!iteratorRecord.Done) {
     return yield* IteratorClose($, iteratorRecord, result);
   }
@@ -438,11 +439,11 @@ export function* InitializeBoundName(
  */
 export function* IteratorBindingInitialization(
   $: VM,
-  node: ESTree.ArrayPattern,
+  elements: ESTree.ArrayPattern['elements'],
   iteratorRecord: IteratorRecord,
   environment: EnvironmentRecord|undefined,
 ): ECR<UNUSED> {
-  for (let element of node.elements) {
+  for (let element of elements) {
     // TODO - unify this with IteratorDestructuringAssignmentEvaluation
     if (!element) {
       const next = yield* IteratorStep($, iteratorRecord);

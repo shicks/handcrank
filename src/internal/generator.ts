@@ -459,6 +459,9 @@ function CreateIntrinsics(realm: RealmRecord) {
      */
     [Symbol.toStringTag]: propC('Generator'),
   });
+  realm.Intrinsics.set(
+    '%GeneratorFunction.prototype.prototype.next%',
+    generatorFunctionPrototypePrototype.OwnProps.get('next')!.Value as Obj);
 
   /**
    * 27.3.2.2 GeneratorFunction.prototype

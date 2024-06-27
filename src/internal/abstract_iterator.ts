@@ -3,16 +3,15 @@ import { Call, Get, GetMethod, GetV } from './abstract_object';
 import { Assert } from './assert';
 import { CR, IsAbrupt, IsThrowCompletion, NotGen } from './completion_record';
 import { ASYNC, EMPTY, SYNC, UNUSED } from './enums';
-import { CreateBuiltinFunction, Func, IsFunc } from './func';
+import { Func, IsFunc } from './func';
+import { CreateIteratorFromClosure, GeneratorYield } from './generator';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { propWEC } from './property_descriptor';
 import { Val } from './val';
 import { ECR, VM } from './vm';
 
 declare const Await: any;
-declare const GeneratorYield: any;
 declare const CreateAsyncFromSyncIterator: any;
-declare const CreateIteratorFromClosure: any;
 
 /**
  * 7.4.1 Iterator Records
@@ -366,14 +365,12 @@ export function CreateIterResultObject(
  */
 export function CreateListIteratorRecord($: VM, list: Val[]): IteratorRecord {
   // TODO - we can probably simplify this a whole bunch
-  const closure = CreateBuiltinFunction({
-    *Call($): ECR<undefined> {
-      for (const value of list) {
-        yield GeneratorYield($, CreateIterResultObject($, value, false));
-      }
-      return undefined;
-    },
-  }, 0, 'ListIteratorRecord', $.getRealm()!, $.getIntrinsic('%Function.prototype%')!);
+  function* closure(): ECR<undefined> {
+    for (const value of list) {
+      yield* GeneratorYield($, CreateIterResultObject($, value, false));
+    }
+    return undefined;
+  }
   const iterator =
     CreateIteratorFromClosure($, closure, EMPTY, $.getIntrinsic('%IteratorPrototype%')!);
   return new IteratorRecord(

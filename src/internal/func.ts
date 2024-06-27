@@ -9,7 +9,7 @@ import * as ESTree from 'estree';
 import { RealmRecord } from './realm_record';
 import { ScriptRecord } from './script_record';
 import { ModuleRecord } from './module_record';
-import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext, GetActiveScriptOrModule, ResolveBinding } from './execution_context';
+import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext, GetActiveScriptOrModule } from './execution_context';
 import { PrivateElement, PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 import { BoundNames, IsConstantDeclaration, IsStrictMode, LexicallyDeclaredNames, LexicallyScopedDeclarations, VarDeclaredNames, VarScopedDeclarations } from './static/scope';
 import { ContainsExpression, ExpectedArgumentCount, GetSourceText, IsSimpleParameterList } from './static/functions';
@@ -17,13 +17,14 @@ import { EvaluatePropertyKey, Obj, OrdinaryCreateFromConstructor, OrdinaryObject
 import { PropertyKey, Val } from './val';
 import { BlockLike, Source, isBlockLike } from './tree';
 import { ToObject } from './abstract_conversion';
-import { GetThisValue, GetValue, InitializeReferencedBinding, IsPropertyReference, PutValue, ReferenceRecord } from './reference_record';
+import { GetThisValue, GetValue, IsPropertyReference, ReferenceRecord } from './reference_record';
 import { IsCallable, IsConstructor } from './abstract_compare';
 import { memoize } from './slots';
-import { GetIterator, IteratorStep, IteratorValue } from './abstract_iterator';
+import { CreateListIteratorRecord, GetIterator, IteratorStep, IteratorValue } from './abstract_iterator';
 import { functionConstructor } from './fundamental';
 import type { ClassFieldDefinitionRecord } from './class';
 import { CreateMappedArgumentsObject, CreateUnmappedArgumentsObject } from './exotic_arguments';
+import { IteratorBindingInitialization } from './binding';
 
 type Node = ESTree.Node;
 
@@ -1420,47 +1421,52 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
   //     a. Perform ? IteratorBindingInitialization of formals with
   //        arguments iteratorRecord and env.
 
-  // if (hasDuplicates) {
-  //   const iteratorRecord = CreateListIteratorRecord($, argumentsList);
-  //   const result = yield* IteratorBindingInitialization(
-  //     $, iteratorRecord, undefined, formals);
-  //   if (IsAbrupt(result)) return result;
-  // } else {
-  //   const iteratorRecord = CreateListIteratorRecord($, argumentsList);
-  //   const result = yield* IteratorBindingInitialization(
-  //     $, iteratorRecord, env, formals);
-  //   if (IsAbrupt(result)) return result;
-  // }
-  let argIndex = 0;
-  for (const formal of formals) {
+  const iteratorRecord = CreateListIteratorRecord($, argumentsList);
+  const bindingStatus = yield* IteratorBindingInitialization(
+      $, formals, iteratorRecord, hasDuplicates ? undefined : env);
+  if (IsAbrupt(bindingStatus)) return bindingStatus;
+
+  // let argIndex = 0;
+  // for (const formal of formals) {
     // NOTE: This is going off-spec a bit, but the overhead of doing
     // a full iterator here is a bit ridiculous - we can revisit this if
     // we need to support destructuring (etc) more faithfully someday.
-    switch (formal?.type) {
-      case undefined:
-        argIndex++;
-        break;
-      case 'Identifier': {
-        const name = formal.name;
-        const lhs = ResolveBinding($, name, hasDuplicates ? env : undefined);
-        if (IsAbrupt(lhs)) return lhs;
-        const result = hasDuplicates ?
-          yield* PutValue($, lhs, argumentsList[argIndex++]) :
-          yield* InitializeReferencedBinding($, lhs, argumentsList[argIndex++]);
-        if (IsAbrupt(result)) return result;
-        break;
-      }
-      case 'RestElement': {
-        // TODO - recurse because this could be a pattern?
-        //  - probably need to pull this out into a separate function
-      }
-      case 'AssignmentPattern': {
-        // NOTE: we may need to recurse here if `left` is a pattern
-      }
-      default:
-        throw new Error('not implemented: complex bindings');
-    }
-  }
+
+    // // NOTE: this is an attempt at handling the complex cases...? but it doesn't work.
+    // if (!formal) {
+    //   // elision
+    //   argIndex++;
+    //   continue;
+    // }
+    // const status = yield* $.BindingInitialization(
+    //   formal, argumentsList[argIndex++], hasDuplicates ? env : undefined);
+    // if (IsAbrupt(status)) return status;
+    
+    // switch (formal?.type) {
+    //   case undefined:
+    //     argIndex++;
+    //     break;
+    //   case 'Identifier': {
+    //     const name = formal.name;
+    //     const lhs = ResolveBinding($, name, hasDuplicates ? env : undefined);
+    //     if (IsAbrupt(lhs)) return lhs;
+    //     const result = hasDuplicates ?
+    //       yield* PutValue($, lhs, argumentsList[argIndex++]) :
+    //       yield* InitializeReferencedBinding($, lhs, argumentsList[argIndex++]);
+    //     if (IsAbrupt(result)) return result;
+    //     break;
+    //   }
+    //   case 'RestElement': {
+    //     // TODO - recurse because this could be a pattern?
+    //     //  - probably need to pull this out into a separate function
+    //   }
+    //   case 'AssignmentPattern': {
+    //     // NOTE: we may need to recurse here if `left` is a pattern
+    //   }
+    //   default:
+    //     throw new Error('not implemented: complex bindings');
+    // }
+  // }
 
   let varEnv: EnvironmentRecord;
 
