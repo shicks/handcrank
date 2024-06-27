@@ -229,6 +229,40 @@ export const stringObject: Plugin = {
 // TODO - decouple this into a function???
 
 /**
+ * 6.1.4.1 StringIndexOf ( string, searchValue, fromIndex )
+ * 
+ * The abstract operation StringIndexOf takes arguments string (a
+ * String), searchValue (a String), and fromIndex (a non-negative
+ * integer) and returns an integer. It performs the following steps
+ * when called:
+ * 
+ * 1. Let len be the length of string.
+ * 2. If searchValue is the empty String and fromIndex ≤ len, return fromIndex.
+ * 3. Let searchLen be the length of searchValue.
+ * 4. For each integer i such that fromIndex ≤ i ≤ len - searchLen, in
+ *    ascending order, do
+ *     a. Let candidate be the substring of string from i to i + searchLen.
+ *     b. If candidate is searchValue, return i.
+ * 5. Return -1.
+ * 
+ * NOTE 1: If searchValue is the empty String and fromIndex ≤ the
+ * length of string, this algorithm returns fromIndex. The empty
+ * String is effectively found at every position within a string,
+ * including after the last code unit.
+ * 
+ * NOTE 2: This algorithm always returns -1 if fromIndex + the length
+ * of searchValue > the length of string.
+ */
+export function StringIndexOf(
+  string: string,
+  searchValue: string,
+  fromIndex: number,
+): number {
+  return fromIndex <= string.length - searchValue.length ?
+    string.indexOf(searchValue, fromIndex) : -1;
+}
+
+/**
  * 10.4.3 String Exotic Objects
  *
  * A String object is an exotic object that encapsulates a String
@@ -1109,7 +1143,7 @@ export function* StringPrototypeReplaceAll($: VM, thisValue: Val, searchValue: V
   let position = string.indexOf(searchString);
   while (position !== -1) {
     matchPositions.push(position);
-    position = string.indexOf(searchString, position + advanceBy);
+    position = StringIndexOf(string, searchString, position + advanceBy);
   }
   let endOfLastMatch = 0;
   // 13.
@@ -1288,7 +1322,7 @@ export function* StringPrototypeSplit(
     substrings.push(T);
     if (substrings.length === lim) return CreateArrayFromList($, substrings);
     i = j + separatorLength;
-    j = S.indexOf(R, i);
+    j = StringIndexOf(S, R, i);
   }
   const T = S.substring(i);
   substrings.push(T);
