@@ -4,17 +4,17 @@
  *   - 21 Numbers and Dates
  */
 
-import { IsArray, IsCallable, IsExtensible, RequireObjectCoercible, SameValue } from './abstract_compare';
+import { IsArray, IsCallable, IsConstructor, IsExtensible, RequireObjectCoercible, SameValue } from './abstract_compare';
 import { ToBoolean, ToInt32, ToIntegerOrInfinity, ToNumeric, ToObject, ToPropertyKey, ToString } from './abstract_conversion';
 import { AddEntriesFromIterable } from './abstract_iterator';
 import { Call, CreateArrayFromList, CreateListFromArrayLike, DefinePropertyOrThrow, EnumerableOwnProperties, Get, HasOwnProperty, Invoke, OrdinaryHasInstance, Set, SetIntegrityLevel, TestIntegrityLevel } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { FROZEN, SEALED, STRING, SYMBOL } from './enums';
+import { FROZEN, NON_LEXICAL_THIS, SEALED, STRING, SYMBOL } from './enums';
 import { BoundFunctionCreate } from './exotic_bind';
-import { BuiltinFunction, BuiltinFunctionBehavior, CreateBuiltinFunction, SetFunctionLength, SetFunctionName, callOrConstruct, getter, method } from './func';
-import { Obj, OrdinaryCreateFromConstructor, OrdinaryObject, OrdinaryObjectCreate } from './obj';
-import { FromPropertyDescriptor, PropertyDescriptor, ToPropertyDescriptor, prop0, propC, propWC, propWEC } from './property_descriptor';
+import { BuiltinFunction, BuiltinFunctionBehavior, CreateBuiltinFunction, IsFunc, MakeConstructor, OrdinaryFunctionCreate, SetFunctionLength, SetFunctionName, callOrConstruct, getter, method } from './func';
+import { GetPrototypeFromConstructor, Obj, OrdinaryCreateFromConstructor, OrdinaryObject, OrdinaryObjectCreate } from './obj';
+import { FromPropertyDescriptor, PropertyDescriptor, ToPropertyDescriptor, prop0, propC, propW, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { PropertyKey, Val } from './val';
 import { DebugString, ECR, Plugin, VM } from './vm';
@@ -1065,11 +1065,9 @@ export const functionConstructor: Plugin = {
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       const functionPrototype = realm.Intrinsics.get('%Function.prototype%')!;
-      const functionCtor = CreateBuiltinFunction({
-        // TODO - implement dynamic functions
-        *Call() { throw new Error('NOT IMPLEMENTED'); },
-        *Construct() { throw new Error('NOT IMPLEMENTED'); },
-      }, 1, 'Function', realm, functionPrototype);
+      const functionCtor = CreateBuiltinFunction(
+        callOrConstruct(FunctionConstructor),
+        1, 'Function', realm, functionPrototype);
       functionCtor.OwnProps.set('prototype', propWC(functionPrototype));
       functionPrototype.OwnProps.set('constructor', propWC(functionCtor));
 
@@ -1078,6 +1076,219 @@ export const functionConstructor: Plugin = {
     },
   },
 };
+
+/**
+ * 20.2.1.1 Function ( ...parameterArgs, bodyArg )
+ * 
+ * The last argument (if any) specifies the body (executable code) of
+ * a function; any preceding arguments specify formal parameters.
+ * 
+ * This function performs the following steps when called:
+ * 
+ * 1. Let C be the active function object.
+ * 2. If bodyArg is not present, set bodyArg to the empty String.
+ * 3. Return ? CreateDynamicFunction(C, NewTarget, normal,
+ *    parameterArgs, bodyArg).
+ * 
+ * NOTE: It is permissible but not necessary to have one argument for
+ * each formal parameter to be specified. For example, all three of
+ * the following expressions produce the same result:
+ * 
+ * new Function("a", "b", "c", "return a+b+c")
+ * new Function("a, b, c", "return a+b+c")
+ * new Function("a,b", "c", "return a+b+c")
+ */
+export function* FunctionConstructor($: VM, NewTarget: Val, ...args: Val[]): ECR<Obj> {
+  Assert(NewTarget instanceof Obj);
+  const C = $.getActiveFunctionObject()!;
+  const bodyArg = args.pop() ?? '';
+  return yield* CreateDynamicFunction($, C, NewTarget, 'normal', args, bodyArg);
+}
+
+/**
+ * 20.2.1.1.1 CreateDynamicFunction ( constructor, newTarget, kind, parameterArgs, bodyArg )
+ * 
+ * The abstract operation CreateDynamicFunction takes arguments
+ * constructor (a constructor), newTarget (a constructor), kind
+ * (normal, generator, async, or asyncGenerator), parameterArgs (a
+ * List of ECMAScript language values), and bodyArg (an ECMAScript
+ * language value) and returns either a normal completion containing a
+ * function object or a throw completion. constructor is the
+ * constructor function that is performing this action. newTarget is
+ * the constructor that new was initially applied to. parameterArgs
+ * and bodyArg reflect the argument values that were passed to
+ * constructor. It performs the following steps when called:
+ * 
+ * 1. Let currentRealm be the current Realm Record.
+ * 2. Perform ? HostEnsureCanCompileStrings(currentRealm).
+ * 3. If newTarget is undefined, set newTarget to constructor.
+ * 4. If kind is normal, then
+ *     a. Let prefix be "function".
+ *     b. Let exprSym be the grammar symbol FunctionExpression.
+ *     c. Let bodySym be the grammar symbol FunctionBody[~Yield, ~Await].
+ *     d. Let parameterSym be the grammar symbol FormalParameters[~Yield, ~Await].
+ *     e. Let fallbackProto be "%Function.prototype%".
+ * 5. Else if kind is generator, then
+ *     a. Let prefix be "function*".
+ *     b. Let exprSym be the grammar symbol GeneratorExpression.
+ *     c. Let bodySym be the grammar symbol GeneratorBody.
+ *     d. Let parameterSym be the grammar symbol FormalParameters[+Yield, ~Await].
+ *     e. Let fallbackProto be "%GeneratorFunction.prototype%".
+ * 6. Else if kind is async, then
+ *     a. Let prefix be "async function".
+ *     b. Let exprSym be the grammar symbol AsyncFunctionExpression.
+ *     c. Let bodySym be the grammar symbol AsyncFunctionBody.
+ *     d. Let parameterSym be the grammar symbol FormalParameters[~Yield, +Await].
+ *     e. Let fallbackProto be "%AsyncFunction.prototype%".
+ * 7. Else,
+ *     a. Assert: kind is asyncGenerator.
+ *     b. Let prefix be "async function*".
+ *     c. Let exprSym be the grammar symbol AsyncGeneratorExpression.
+ *     d. Let bodySym be the grammar symbol AsyncGeneratorBody.
+ *     e. Let parameterSym be the grammar symbol FormalParameters[+Yield, +Await].
+ *     f. Let fallbackProto be "%AsyncGeneratorFunction.prototype%".
+ * 8. Let argCount be the number of elements in parameterArgs.
+ * 9. Let P be the empty String.
+ * 10. If argCount > 0, then
+ *     a. Let firstArg be parameterArgs[0].
+ *     b. Set P to ? ToString(firstArg).
+ *     c. Let k be 1.
+ *     d. Repeat, while k < argCount,
+ *         i. Let nextArg be parameterArgs[k].
+ *         ii. Let nextArgString be ? ToString(nextArg).
+ *         iii. Set P to the string-concatenation of P, "," (a comma), and nextArgString.
+ *         iv. Set k to k + 1.
+ * 11. Let bodyString be the string-concatenation of 0x000A (LINE
+ *     FEED), ? ToString(bodyArg), and 0x000A (LINE FEED).
+ * 12. Let sourceString be the string-concatenation of prefix, "
+ *     anonymous(", P, 0x000A (LINE FEED), ") {", bodyString, and "}".
+ * 13. Let sourceText be StringToCodePoints(sourceString).
+ * 14. Let parameters be ParseText(StringToCodePoints(P), parameterSym).
+ * 15. If parameters is a List of errors, throw a SyntaxError exception.
+ * 16. Let body be ParseText(StringToCodePoints(bodyString), bodySym).
+ * 17. If body is a List of errors, throw a SyntaxError exception.
+ * 18. NOTE: The parameters and body are parsed separately to ensure
+ *     that each is valid alone. For example, new Function("/*", "* / )
+ *     {") does not evaluate to a function.
+ * 19. NOTE: If this step is reached, sourceText must have the syntax
+ *     of exprSym (although the reverse implication does not hold). The
+ *     purpose of the next two steps is to enforce any Early Error rules
+ *     which apply to exprSym directly.
+ * 20. Let expr be ParseText(sourceText, exprSym).
+ * 21. If expr is a List of errors, throw a SyntaxError exception.
+ * 22. Let proto be ? GetPrototypeFromConstructor(newTarget, fallbackProto).
+ * 23. Let realmF be the current Realm Record.
+ * 24. Let env be realmF.[[GlobalEnv]].
+ * 25. Let privateEnv be null.
+ * 26. Let F be OrdinaryFunctionCreate(proto, sourceText, parameters,
+ *     body, non-lexical-this, env, privateEnv).
+ * 27. Perform SetFunctionName(F, "anonymous").
+ * 28. If kind is generator, then
+ *     a. Let prototype be OrdinaryObjectCreate(%GeneratorFunction.prototype.prototype%).
+ *     b. Perform ! DefinePropertyOrThrow(F, "prototype",
+ *        PropertyDescriptor { [[Value]]: prototype, [[Writable]]: true,
+ *        [[Enumerable]]: false, [[Configurable]]: false }).
+ * 29. Else if kind is asyncGenerator, then
+ *     a. Let prototype be OrdinaryObjectCreate(
+ *        %AsyncGeneratorFunction.prototype.prototype%).
+ *     b. Perform ! DefinePropertyOrThrow(F, "prototype",
+ *        PropertyDescriptor { [[Value]]: prototype, [[Writable]]: true,
+ *        [[Enumerable]]: false, [[Configurable]]: false }).
+ * 30. Else if kind is normal, perform MakeConstructor(F).
+ * 31. NOTE: Functions whose kind is async are not constructible and
+ *     do not have a [[Construct]] internal method or a "prototype"
+ *     property.
+ * 32. Return F.
+ * 
+ * NOTE: CreateDynamicFunction defines a "prototype" property on any
+ * function it creates whose kind is not async to provide for the
+ * possibility that the function will be used as a constructor.
+ */
+export function* CreateDynamicFunction(
+  $: VM,
+  constructor: Obj,
+  newTarget: Obj,
+  kind: FunctionKind,
+  parameterArgs: Val[],
+  bodyArg: Val,
+): ECR<Obj> {
+  const currentRealm = $.getRealm()!;
+  const status = HostEnsureCanCompileStrings($, currentRealm);
+  if (IsAbrupt(status)) return status;
+  if (newTarget === undefined) newTarget = constructor;
+  let prefix: string;
+  let fallbackProto: string;
+  switch (kind) {
+    case 'normal':
+      prefix = 'function';
+      fallbackProto = '%Function.prototype%';
+      break;
+    case 'generator':
+      prefix = 'function*';
+      fallbackProto = '%GeneratorFunction.prototype%';
+      break;
+    case 'async':
+      prefix = 'async function';
+      fallbackProto = '%AsyncFunction.prototype%';
+      break;
+    case 'asyncGenerator':
+      prefix = 'async function*';
+      fallbackProto = '%AsyncGeneratorFunction.prototype%';
+      break;
+  }
+  let bodyString = yield* ToString($, bodyArg);
+  if (IsAbrupt(bodyString)) return bodyString;
+  const P: string[] = [];
+  for (const arg of parameterArgs) {
+    const str = yield* ToString($, arg);
+    if (IsAbrupt(str)) return str;
+    P.push(str);
+  }
+  // 11.
+  const joinedParams = P.join(',');
+  const sourceText = `${prefix} anonymous(${joinedParams
+                      }\n) {\n${bodyString}\n}`;
+  const parameterText = `${prefix} anonymous(${joinedParams}\n) {}`;
+  const bodyText = `${prefix} anonymous() {\n${bodyString}\n}`;
+  // 14.
+  const parameterTree = $.parseScript(parameterText);
+  if (IsAbrupt(parameterTree)) return parameterTree;
+  const bodyTree = $.parseScript(bodyText);
+  if (IsAbrupt(bodyTree)) return bodyTree;
+  // 20.
+  const exprTree = $.parseScript(sourceText);
+  if (IsAbrupt(exprTree)) return exprTree;
+  Assert(exprTree.body[0].type === 'FunctionDeclaration');
+  const parameters = exprTree.body[0].params;
+  const body = exprTree.body[0].body;
+  // 22.
+  Assert(IsFunc(newTarget));
+  const proto = yield* GetPrototypeFromConstructor($, newTarget, fallbackProto);
+  if (IsAbrupt(proto)) return proto;
+  const realmF = $.getRealm()!;
+  const env = realmF.GlobalEnv!;
+  // 26.
+  const F = OrdinaryFunctionCreate(
+    $, proto, sourceText, parameters, body, NON_LEXICAL_THIS, env, null);
+  if (IsAbrupt(F)) return F;
+  SetFunctionName(F, 'anonymous');
+  // 28.
+  if (kind === 'generator') {
+    const prototype = OrdinaryObjectCreate({
+      Prototype: $.getIntrinsic('%GeneratorFunction.prototype.prototype%'),
+    });
+    F.OwnProps.set('prototype', propW(prototype));
+  } else if (kind === 'asyncGenerator') {
+    const prototype = OrdinaryObjectCreate({
+      Prototype: $.getIntrinsic('%AsyncGeneratorFunction.prototype.prototype%'),
+    });
+    F.OwnProps.set('prototype', propW(prototype));
+  } else if (kind === 'normal') {
+    MakeConstructor($, F);
+  }
+  return F;
+}
+type FunctionKind = 'normal'|'generator'|'async'|'asyncGenerator';
 
 function makeWrapper(
   realm: RealmRecord,
@@ -1926,6 +2137,30 @@ export const numberObject: Plugin = {
     },
   },
 };
+
+/**
+ * 19.2.1.2 HostEnsureCanCompileStrings ( calleeRealm )
+ * 
+ * The host-defined abstract operation HostEnsureCanCompileStrings
+ * takes argument calleeRealm (a Realm Record) and returns either a
+ * normal completion containing unused or a throw completion. It
+ * allows host environments to block certain ECMAScript functions
+ * which allow developers to interpret and evaluate strings as
+ * ECMAScript code.
+ * 
+ * An implementation of HostEnsureCanCompileStrings must conform to
+ * the following requirements:
+ * 
+ * If the returned Completion Record is a normal completion, it must
+ * be a normal completion containing unused.
+ * 
+ * The default implementation of HostEnsureCanCompileStrings is to
+ * return NormalCompletion(unused).
+ */
+export function HostEnsureCanCompileStrings(_$: VM, _calleeRealm: RealmRecord): CR<undefined> {
+  // TODO - provide a mechanism to override this? maybe via plugin?
+  return undefined;
+}
 
 // TODO - BigInt object 21.2
 // TODO - Math object 21.3

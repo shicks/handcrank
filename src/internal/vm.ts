@@ -241,6 +241,17 @@ export class VM {
     O.ErrorData = stack;
   }
 
+  parseScript(source: string): CR<ESTree.Program> {
+    if (!this.esprima) return this.throw('SyntaxError', 'No parser');
+    try {
+      const tree = this.esprima.parseScript(source) as ESTree.Program;
+      preprocess(tree, {sourceFile: '<anonymous>', sourceText: source});
+      return tree;
+    } catch (err) {
+      return this.throw('SyntaxError', err.message);
+    }
+  }
+
   // NOTE: this helper method is typically more useful than direct
   // Evaluation because it additionally unwraps ReferenceRecords.  The
   // spec does this in a production that's basically transparent to
