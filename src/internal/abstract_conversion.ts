@@ -493,7 +493,7 @@ export function StringToBigInt(str: string): bigint|undefined {
  */ 
 export function* ToString($: VM, argument: Val): ECR<string> {
   if (argument instanceof Obj) {
-    const primValue = yield* ToPrimitive($, argument);
+    const primValue = yield* ToPrimitive($, argument, STRING);
     if (IsAbrupt(primValue)) return primValue;
     Assert(!(primValue instanceof Obj));
     return yield* ToString($, primValue);
