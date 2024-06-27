@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "npx esbuild src/main.ts --minify --bundle --platform=node --outfile=dist/main.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "time bun test/test.ts -x annexB -x Temporal -x [aA]sync -x intl -x staging -x codeURI -x Set -x Map -x TypedArray -x Reflect -x Proxy -x JSON -x DataView -x ArrayBuffer -x Promise"
   },
   "repository": {
     "type": "git",
