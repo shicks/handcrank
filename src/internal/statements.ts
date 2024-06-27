@@ -242,29 +242,29 @@ export function* Evaluation_LexicalDeclaration($: VM, n: VariableDeclaration): E
  */
 export function* Evaluation_VariableStatement($: VM, n: VariableDeclaration): EvalGen<CR<EMPTY>> {
   for (const binding of n.declarations) {
-    switch (binding.id.type) {
-      case 'Identifier': {
-        const lhs = CastNotAbrupt(ResolveBinding($, binding.id.name));
-        if (binding.init == null) {
-          // VariableDeclaration : BindingIdentifier
-          break;
-        } else {
-          // VariableDeclaration : BindingIdentifier Initializer
-          let value;
-          if (IsAnonymousFunctionDefinition(binding.init)) {
-            value = yield* $.NamedEvaluation(binding.init, binding.id.name)
-          } else {
-            value = yield* $.evaluateValue(binding.init);
-          }
-          if (IsAbrupt(value)) return value;
-          CastNotAbrupt(yield* PutValue($, lhs, value));
-        }
+    if (binding.id.type === 'Identifier') {
+      const lhs = CastNotAbrupt(ResolveBinding($, binding.id.name));
+      if (binding.init == null) {
+        // VariableDeclaration : BindingIdentifier
         break;
+      } else {
+        // VariableDeclaration : BindingIdentifier Initializer
+        let value;
+        if (IsAnonymousFunctionDefinition(binding.init)) {
+          value = yield* $.NamedEvaluation(binding.init, binding.id.name)
+        } else {
+          value = yield* $.evaluateValue(binding.init);
+        }
+        if (IsAbrupt(value)) return value;
+        CastNotAbrupt(yield* PutValue($, lhs, value));
       }
-      case 'ObjectPattern':
-      case 'ArrayPattern':
-      default:
-        throw new Error(`not implemented: binding to ${binding.id.type}`);
+      break;
+    } else {
+      const value = binding.init != null ?
+        yield* $.evaluateValue(binding.init) : binding.init;
+      if (IsAbrupt(value)) return value;
+      const bindingStatus = yield* $.BindingInitialization(binding.id, value, undefined);
+      if (IsAbrupt(bindingStatus)) return bindingStatus;
     }
   }
   return EMPTY;
