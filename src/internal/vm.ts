@@ -22,6 +22,8 @@ export type Yield = {yield: Val};
 export type EvalGen<T> = Generator<Yield|undefined, T, CR<Val>|undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
 
+type EvaluationMode = 'step'|'run';
+
 interface SyntaxOp {
   Evaluation(): ECR<Val|ReferenceRecord|EMPTY>;
   NamedEvaluation(name: string): ECR<Val>;
@@ -126,8 +128,8 @@ export class VM {
   };
 
   isStrict = false;
-
   jobQueue: JobQueueEntry[] = [];
+  evaluationMode: EvaluationMode = 'run';
 
   constructor(private readonly esprima?: Esprima) {}
 
@@ -372,7 +374,7 @@ export class VM {
 
   * Evaluation(n: Node): ECR<Val|ReferenceRecord|EMPTY> {
     this.isStrict = IsStrictMode(n);
-    // yield; // TODO - this costs about 10% in performance - opt in for debugging?
+    if (this.evaluationMode === 'step') yield; // This costs ~10% performance.
     //this.log(`Evaluating ${n.type}: ${GetSourceText(n)}`);
     //this.indent();
     return yield* this.operate('Evaluation', n, []);
