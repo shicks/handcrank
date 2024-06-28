@@ -234,6 +234,7 @@ export function* DoWhileLoopEvaluation(
 ): ECR<Val|EMPTY> {
   let V: Val = undefined;
   while (true) {
+    yield;  // pause before repeating to avoid infinite loops
     const stmtResult = yield* $.evaluateValue(n.body);
     if (!LoopContinues(stmtResult, labelSet)) {
       return BreakableStatement(UpdateEmpty(stmtResult, V));
@@ -275,6 +276,7 @@ export function* WhileLoopEvaluation(
 ): ECR<Val|EMPTY> {
   let V: Val = undefined;
   while (true) {
+    yield;  // pause before repeating to avoid infinite loops
     const exprValue = yield* $.evaluateValue(n.test);
     if (IsAbrupt(exprValue)) return exprValue;
     if (!ToBoolean(exprValue)) return V;
@@ -433,6 +435,7 @@ function* ForBodyEvaluation(
   const createStatus = yield* CreatePerIterationEnvironment($, perIterationBindings);
   if (IsAbrupt(createStatus)) return createStatus;
   while (true) {
+    yield;  // pause before repeating to avoid infinite loops
     if (test) {
       const testValue = yield* $.evaluateValue(test);
       if (IsAbrupt(testValue)) return testValue;
@@ -872,6 +875,7 @@ function* ForInOfBodyEvaluation(
     lhs.declarations.length === 1 && !lhs.declarations[0].init);
   // const assignmentPattern = lhs;
   while (true) {
+    yield;  // pause before repeating to avoid infinite loops
     let nextResult = yield* Call($, iteratorRecord.NextMethod, iteratorRecord.Iterator)
     if (IsAbrupt(nextResult)) return nextResult;
     if (iteratorKind === ASYNC) {

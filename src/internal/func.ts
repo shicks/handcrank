@@ -30,6 +30,11 @@ type Node = ESTree.Node;
 
 function PrepareForTailCall(..._: any): void {}
 
+// TODO - Is this a useful concept?  We might want to expose a method to wrap
+// a Func as an AbstractClosure<Val, Val>?  Alternatively, we can use
+// MakeInternalClosure and ignore the different argument types...?
+// export type AbstractClosure<A extends unknown[], R> = (...args: A) => ECR<R>;
+
 export const functions: Plugin = {
   id: 'functions',
   deps: () => [functionConstructor],
@@ -964,6 +969,7 @@ export function* EvaluateBody(
  */
 export function* OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]): ECR<Val> {
   Assert(F.ECMAScriptCode);
+  yield;  // pause before executing a function to avoid infinite recursion
   const result = yield* EvaluateBody($, F, argumentsList, F.ECMAScriptCode);
   if (!IsAbrupt(result) && !isBlockLike(F.ECMAScriptCode)) {
     // Handle concise bodies
