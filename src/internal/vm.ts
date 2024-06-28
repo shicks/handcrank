@@ -5,8 +5,7 @@ import { EMPTY, NOT_APPLICABLE, UNINITIALIZED, UNRESOLVABLE, UNUSED } from './en
 import { NodeType, NodeMap, Node, Esprima, preprocess, Source } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
 import { InitializeHostDefinedRealm, RealmAdvice, RealmRecord, getIntrinsicName } from './realm_record';
-import { ParseScript, ScriptEvaluation } from './script_record';
-import * as ESTree from 'estree';
+import { ParseScript, ScriptEvaluation, ScriptRecord } from './script_record';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { EnvironmentRecord, FunctionEnvironmentRecord } from './environment_record';
 import { HasValueField, propWC } from './property_descriptor';
@@ -16,6 +15,8 @@ import { ArrayExoticObject } from './exotic_array';
 import { PrivateEnvironmentRecord } from './private_environment_record';
 import { IsConstructor } from './abstract_compare';
 import { IsStrictMode } from './static/scope';
+import * as ESTree from 'estree';
+import { ModuleRecord } from './module_record';
 
 export type Yield = {yield: Val};
 export type EvalGen<T> = Generator<Yield|undefined, T, CR<Val>|undefined>;
@@ -103,9 +104,15 @@ export function runAsync<T>(
   });
 }
 
+interface JobQueueEntry {
+  readonly job: () => ECR<void>;
+  readonly realm: RealmRecord|null;
+  readonly scriptOrModule: ScriptRecord|ModuleRecord|null;
+}
+
 export class VM {
 
-  executionStack: ExecutionContext[] = [];
+  private executionStack: ExecutionContext[] = [];
 
   // Plugins - note: globals and intrinsics built in RealmRecord
   plugins = new Map<string|symbol|Plugin, Plugin>();
@@ -120,11 +127,15 @@ export class VM {
 
   isStrict = false;
 
+  jobQueue: JobQueueEntry[] = [];
+
   constructor(private readonly esprima?: Esprima) {}
 
   initialize() {
     if (!this.executionStack.length) {
       CastNotAbrupt(InitializeHostDefinedRealm(this));
+    } else if (this.isRunning()) {
+      throw new Error(`Already running`);
     }
   }
 
@@ -133,7 +144,9 @@ export class VM {
     return OrdinaryObjectCreate();
   }
 
-  // TODO - can we store strictness of executing production here?
+  isRunning(): boolean {
+    return this.executionStack.length > 1;
+  }
 
   enterContext(context: ExecutionContext) {
     // TODO - resume? suspend previous?
@@ -153,12 +166,30 @@ export class VM {
     return this.executionStack.at(-1)!;
   }
 
+  * withEmptyStack<T>(fn: () => EvalGen<T>): EvalGen<T> {
+    const stack = this.executionStack;
+    this.executionStack = [];
+    const result = yield* fn();
+    this.executionStack = stack;
+    return result;
+  }
+
   getActiveFunctionObject(): Func|undefined {
     return this.getRunningContext().Function ?? undefined;
   }
 
   getRealm(): RealmRecord|undefined {
     return this.executionStack.at(-1)?.Realm;
+  }
+
+  // 9.4.1
+  getActiveScriptOrModule(): ScriptRecord|ModuleRecord|null {
+    if (this.executionStack.length < 1) return null;
+    for (let i = this.executionStack.length - 1; i >= 0; i--) {
+      const sm = this.executionStack[i].ScriptOrModule;
+      if (sm != null) return sm;
+    }
+    return null;
   }
 
   getIntrinsic(name: string): Obj {
@@ -258,7 +289,7 @@ export class VM {
   // ESTree, so we don't have a good opportunity, but we do know when
   // an rvalue is required from a child.
   * evaluateValue(node: Node): ECR<Val> {
-    this.initialize()
+    if (!this.isRunning()) throw new Error(`Not running`);
     const result: CR<EMPTY|Val|ReferenceRecord> = yield* this.Evaluation(node);
     if (IsAbrupt(result)) return result;
     if (EMPTY.is(result)) return undefined;
@@ -271,7 +302,7 @@ export class VM {
     script: string|ESTree.Program,
     {filename, strict}: EvaluateOptions = {},
   ): ECR<Val> {
-    this.initialize()
+    this.initialize();
     if (typeof script === 'string') {
       const source = script;
       if (!this.esprima) throw new Error(`no parser`);
@@ -323,6 +354,15 @@ export class VM {
       yield* GetValue(this, result);
   }
 
+  enqueuePromiseJob(job: () => ECR<void>, realm: RealmRecord|null) {
+    // TODO - what does this do?  we need to add a job queue (and probably also a
+    // scheduler for non-strictly-ordered deferreds - could this live in a plugin?)
+    // Though we may need to build some idea of a clock directly into VM, and
+    // possibly allow plugins to register "idle" actions?
+    const scriptOrModule = this.getRunningContext().ScriptOrModule;
+    this.jobQueue.push({job, realm, scriptOrModule});
+  }
+
   log(msg: string) {
     console.log(`${this._indent}${msg.replace(/\n/g, `\n${this._indent}  `)}`);
   }
@@ -331,23 +371,26 @@ export class VM {
   dedent() { this._indent = this._indent.substring(2); }
 
   * Evaluation(n: Node): ECR<Val|ReferenceRecord|EMPTY> {
-    yield; // TODO - figure out what to do with this performance-wise.
     this.isStrict = IsStrictMode(n);
+    // yield; // TODO - this costs about 10% in performance - opt in for debugging?
     //this.log(`Evaluating ${n.type}: ${GetSourceText(n)}`);
     //this.indent();
-    const result = yield*  this.operate('Evaluation', n, []);
+    return yield* this.operate('Evaluation', n, []);
     //this.dedent();
     //this.log(`=> ${IsAbrupt(result) ? result.Type : DebugString(result as any)}`);
-    return result;
   }
+
   NamedEvaluation(n: Node, name: string): ECR<Val> {
+    this.isStrict = IsStrictMode(n);
     return this.operate('NamedEvaluation', n, [name]);
   }
   LabelledEvaluation(n: Node, labelSet: string[]): ECR<Val|EMPTY> {
+    this.isStrict = IsStrictMode(n);
     return this.operate('LabelledEvaluation', n, [labelSet],
                         () => this.evaluateValue(n));
   }
   ArgumentListEvaluation(n: Node): ECR<Val[]> {
+    this.isStrict = IsStrictMode(n);
     return this.operate('ArgumentListEvaluation', n, []);
   }
   InstantiateFunctionObject(

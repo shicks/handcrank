@@ -4,7 +4,7 @@
  *   - 21 Numbers and Dates
  */
 
-import { IsArray, IsCallable, IsConstructor, IsExtensible, RequireObjectCoercible, SameValue } from './abstract_compare';
+import { IsArray, IsCallable, IsExtensible, RequireObjectCoercible, SameValue } from './abstract_compare';
 import { ToBoolean, ToInt32, ToIntegerOrInfinity, ToNumeric, ToObject, ToPropertyKey, ToString } from './abstract_conversion';
 import { AddEntriesFromIterable } from './abstract_iterator';
 import { Call, CreateArrayFromList, CreateListFromArrayLike, DefinePropertyOrThrow, EnumerableOwnProperties, Get, HasOwnProperty, Invoke, OrdinaryHasInstance, Set, SetIntegrityLevel, TestIntegrityLevel } from './abstract_object';

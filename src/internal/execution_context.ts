@@ -198,12 +198,7 @@ export function GetVariableEnvironment($: VM): EnvironmentRecord|undefined {
  * execution context. It performs the following steps when called:
  */
 export function GetActiveScriptOrModule($: VM): ScriptRecord|ModuleRecord|null {
-  if ($.executionStack.length < 1) return null;
-  for (let i = $.executionStack.length - 1; i >= 0; i--) {
-    const sm = $.executionStack[i].ScriptOrModule;
-    if (sm != null) return sm;
-  }
-  return null;
+  return $.getActiveScriptOrModule();
 }
 
 /**

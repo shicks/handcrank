@@ -65,21 +65,19 @@ export const test262: Plugin = {
         }
         // Pull the realm out of the object
         const realm = $.getActiveFunctionObject()!.Realm;
-        const stack = $.executionStack;
-        $.executionStack = [];
-        const newContext = new RootExecutionContext(realm);
-        $.enterContext(newContext);
+        return yield* $.withEmptyStack(function*() {
+          const newContext = new RootExecutionContext(realm);
+          $.enterContext(newContext);
 
-        let result = yield* $.evaluateScript(sourceText, {filename: 'script'});
-        if (IsThrowCompletion(result)) {
-          const props = (result.Value as Obj).OwnProps || new Map();
-          if (props.get('name')?.Value === 'SyntaxError') {
-            result = ThrowCompletion(props.get('message')?.Value);
+          let result = yield* $.evaluateScript(sourceText, {filename: 'script'});
+          if (IsThrowCompletion(result)) {
+            const props = (result.Value as Obj).OwnProps || new Map();
+            if (props.get('name')?.Value === 'SyntaxError') {
+              result = ThrowCompletion(props.get('message')?.Value);
+            }
           }
-        }
-
-        $.executionStack = stack;
-        return result;
+          return result;
+        });
       });
 
       def($262, 'gc', function*($): ECR<Val> {
