@@ -76,7 +76,6 @@ export function ParseScript(script: ESTree.Program,
  * the following steps when called:
  */
 export function* ScriptEvaluation($: VM, scriptRecord: ScriptRecord): ECR<Val> {
-
   const globalEnv = scriptRecord.Realm?.GlobalEnv;
   if (!globalEnv) throw new Error('no global env!');
   // TODO - this isn't quite right... need to use the InitHost... op.

@@ -13,11 +13,10 @@ import { memoize } from './slots';
 import { PropertyKey, Val } from './val';
 import { DebugString, ECR, Plugin, VM, run } from './vm';
 import { CreateIteratorFromClosure, GeneratorResume, GeneratorYield } from './generator';
-import { CreateIterResultObject, GetIterator, IteratorClose, IteratorStep, IteratorValue } from './abstract_iterator';
+import { CreateIterResultObject, GetIterator, GetIteratorFromMethod, IteratorClose, IteratorStep, IteratorValue } from './abstract_iterator';
 import { iterators } from './iterators';
 import { EMPTY, SYNC } from './enums';
 
-declare const GetIteratorFromMethod: any;
 declare const IsDetachedBuffer: any;
 
 declare global {
@@ -492,10 +491,13 @@ export const arrayObject: Plugin = {
             return $.throw('TypeError', `${DebugString(mapfn)} is not a function`);
           }
           const usingIterator = yield* GetMethod($, items, Symbol.iterator);
+          if (IsAbrupt(usingIterator)) return usingIterator;
           if (usingIterator != null) {
+            Assert(IsCallable(usingIterator));
             const A = IsConstructor(C) ? yield* Construct($, C) : ArrayCreate($, 0);
             if (IsAbrupt(A)) return A;
             const iteratorRecord = yield* GetIteratorFromMethod($, items, usingIterator);
+            if (IsAbrupt(iteratorRecord)) return iteratorRecord;
             for (let k = 0;; k++) {
               if (k >= Number.MAX_SAFE_INTEGER) {
                 const error = $.throw('TypeError', 'Too many items');

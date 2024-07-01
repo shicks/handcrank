@@ -231,6 +231,7 @@ function visitVarScopedDecls(node: Node, visitor: Visitor): void {
         node.cases.forEach(visit);
         return;
 
+      case 'BlockStatement':
       case 'StaticBlock':
       case 'Program':
         node.body.forEach(visit);
@@ -274,7 +275,7 @@ function visitLexicallyScopedDecls(node: Node, visitor: Visitor): void {
         return;
       case 'FunctionDeclaration':
         // NOTE: top-level functions are treatd as var.
-        if (!IsTopLevel(node)) {console.log(`lex ${node.id.name}`);visitor(node);}
+        if (!IsTopLevel(node)) visitor(node);
         return;
       case 'ClassDeclaration':
         visitor(node);
