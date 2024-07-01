@@ -207,7 +207,7 @@ export function* HostCallJobCallback(
  */
 export function HostEnqueuePromiseJob(
   $: VM,
-  job: () => ECR<void>,
+  job: ($: VM) => ECR<void>,
   realm: RealmRecord | null,
 ): UNUSED {
   $.enqueuePromiseJob(job, realm);

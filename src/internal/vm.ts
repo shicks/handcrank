@@ -21,6 +21,7 @@ import { ModuleRecord } from './module_record';
 export type Yield = {yield: Val};
 export type EvalGen<T> = Generator<Yield|undefined, T, CR<Val>|undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
+export type Job = () => EvalGen<void>;
 
 type EvaluationMode = 'step'|'run';
 
@@ -106,12 +107,6 @@ export function runAsync<T>(
   });
 }
 
-interface JobQueueEntry {
-  readonly job: () => ECR<void>;
-  readonly realm: RealmRecord|null;
-  readonly scriptOrModule: ScriptRecord|ModuleRecord|null;
-}
-
 export class VM {
   private executionStack: ExecutionContext[] = [];
 
@@ -127,7 +122,8 @@ export class VM {
   };
 
   isStrict = false;
-  jobQueue: JobQueueEntry[] = [];
+  microtaskQueue: Job[] = [];
+  macrotaskQueue: Job[] = [];
   evaluationMode: EvaluationMode = 'run';
 
   constructor(private readonly esprima?: Esprima) {}
@@ -377,7 +373,15 @@ export class VM {
     return result;
   }
 
-  enqueuePromiseJob(job: () => ECR<void>, realm: RealmRecord|null) {
+  hasPendingMicrotask(): boolean {
+    return this.microtaskQueue.length > 0;
+  }
+
+  hasPendingTask(): boolean {
+    return this.microtaskQueue.length + this.macrotaskQueue.length > 0;
+  }
+
+  enqueuePromiseJob(job: ($: VM) => ECR<void>, realm: RealmRecord|null): void {
     // TODO - what does this do?  we need to add a job queue (and probably also a
     // scheduler for non-strictly-ordered deferreds - could this live in a plugin?)
     // Though we may need to build some idea of a clock directly into VM, and
@@ -387,7 +391,51 @@ export class VM {
     // run the queue, we'll need to verify the SUSPENDED ---> RUNNING transition.
 
     const scriptOrModule = this.getRunningContext().ScriptOrModule;
-    this.jobQueue.push({job, realm, scriptOrModule});
+    const $ = this;
+    this.microtaskQueue.push(function*(): EvalGen<void> {
+
+      // TODO - what context?!?!?
+
+      const ctx = new CodeExecutionContext(scriptOrModule, null, realm!, null, null!, null!);
+      $.enterContext(ctx);
+      const status = yield* job($);
+      if (IsAbrupt(status)) {
+        // TODO - arrange for something?
+      }
+      $.popContext(ctx);
+    });
+  }
+
+  idle(): EvalGen<void> {
+    // NOTE: This needs to verify that we're not currently running, and then
+    // maybe store a returned generator as the current one?
+
+    // Do we just run a single job off the queue?  plugin idle jobs?
+    // Can we get away with keeping a single idle generator always active and
+    // have a loop that does nothing and yields when we're not actually idle?
+    // That doesn't seem very logical... how would one know how long to pump it?
+    // We _could_ have a Generator<EvalGen<void>|undefined> that cycles through the
+    // queue? but that's a weird racy/stateful iterator.
+
+    // Alternatively, rather than any special handling for plugins, we could just
+    // have the plugin enqueue a recurring job - whenever it comes up in the queue,
+    // it checks if there's any work to do (and maybe does it) and then re-queues
+    // itself.  DOWNSIDE: timeouts would probably happen before promise microtasks.
+    //  - we'd need to have multiple layers of queues anyway, probably...
+
+    // How does top-level await work?  Probably evaluateModule returns a generator
+    // that can yield `await`s, and `import` is essentially just a top-level await
+    // always?  We probably can't express these constraints (cleanly) in the typings
+    // because it requires syntactical enforcement that await/yield can only appear
+    // in certain types of functions... so it would just be a cast if we wanted
+    // evaluateScript() and evaluateModule() to _not_ yield these things.
+
+    if (this.isRunning()) throw new Error(`Already running`);
+    const job = this.microtaskQueue.shift() ?? this.macrotaskQueue.shift();
+    if (!job) return just(undefined);
+    // TODO - set up the execution context
+    ScriptEvaluation(this, null!); // TODO - reference what ScriptEvaluation does.
+    return (job as any).job();
   }
 
   log(msg: string) {
