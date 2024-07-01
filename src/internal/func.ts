@@ -1817,17 +1817,15 @@ export function CreateBuiltinFunction(
   behaviour: BuiltinFunctionBehavior,
   length: number,
   name: string,
-  realm: RealmRecord,
-  functionPrototype: Obj,
+  {$, ...slotsArg}: BuiltinFunctionSlotsParam,
   prefix?: string,
 ) {
   const fnName = prefix ? `${prefix} ${name}` : name;
-  const slots: BuiltinFunctionSlots = {
-    Prototype: functionPrototype,
-    Extensible: true,
-    Realm: realm,
-    InitialName: fnName,
-  };
+  const slots = slotsArg as BuiltinFunctionSlots;
+  slots.Realm ??= $!.getRealm()!;
+  slots.Prototype ??= slots.Realm.Intrinsics.get('%Function.prototype%')!;
+  slots.Extensible = true;
+  slots.InternalName = fnName;
   if (behaviour.Call) slots.CallBehavior = behaviour.Call;
   if (behaviour.Construct) slots.ConstructBehavior = behaviour.Construct;
   return new (BuiltinFunction())(
@@ -1836,6 +1834,11 @@ export function CreateBuiltinFunction(
       name: propC(fnName),
     });
 }
+
+type BuiltinFunctionSlotsParam =
+  Exclude<ObjectSlots, 'Extensible'|'InitialName'> &
+  ({$: VM, Realm?: RealmRecord, Prototype?: Obj} |
+    {$?: VM, Realm: RealmRecord, Prototype?: Obj});
 
 /**
  * Returns an internal Func object that should not be exposed to users.
@@ -2086,9 +2089,9 @@ export function method(
   length = fn.length - 2,
   specifiedName?: string,
 ): (realm: RealmRecord, name: string) => PropertyDescriptor {
-  return (realm, name) => propWC(CreateBuiltinFunction({
-    Call($, thisObj, argumentsList) { return fn($, thisObj, ...argumentsList); },
-  }, length, specifiedName ?? name, realm, realm.Intrinsics.get('%Function.prototype%')!));
+  return (realm, name) => propWC(CreateBuiltinFunction(
+    {Call($, thisObj, argumentsList) { return fn($, thisObj, ...argumentsList); }},
+    length, specifiedName ?? name, {Realm: realm}));
 }
 
 /**
@@ -2120,7 +2123,7 @@ export function getter(
     Configurable: true,
     Get: CreateBuiltinFunction({
       Call($, thisObj) { return fn($, thisObj); },
-    }, 0, name, realm, realm.Intrinsics.get('%Function.prototype%')!, 'get'),
+    }, 0, name, {Realm: realm}, 'get'),
     Set: undefined,
     ...attrs,
   });

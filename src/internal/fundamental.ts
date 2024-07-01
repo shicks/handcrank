@@ -46,7 +46,7 @@ export const objectAndFunctionPrototype: Plugin = {
       const objectPrototype = OrdinaryObjectCreate();
       realm.Intrinsics.set('%Object.prototype%', objectPrototype);
       const functionPrototype = CreateBuiltinFunction(
-        {*Call() { return undefined; }}, 0, '', realm, objectPrototype);
+        {*Call() { return undefined; }}, 0, '', {Realm: realm, Prototype: objectPrototype});
       realm.Intrinsics.set('%Function.prototype%', functionPrototype);
 
       // Now populate the methods.
@@ -496,7 +496,7 @@ export const objectConstructor: Plugin = {
           if (value == null) return OrdinaryObjectCreate(objectPrototype);
           return ToObject($, value);
         }),
-        1, 'Object', realm, functionPrototype);
+        1, 'Object', {Realm: realm, Prototype: functionPrototype});
       objectCtor.OwnProps.set('prototype', propWC(objectPrototype));
       objectPrototype.OwnProps.set('constructor', propWC(objectCtor));
 
@@ -1067,7 +1067,7 @@ export const functionConstructor: Plugin = {
       const functionPrototype = realm.Intrinsics.get('%Function.prototype%')!;
       const functionCtor = CreateBuiltinFunction(
         callOrConstruct(FunctionConstructor),
-        1, 'Function', realm, functionPrototype);
+        1, 'Function', {Realm: realm, Prototype: functionPrototype});
       functionCtor.OwnProps.set('prototype', propWC(functionPrototype));
       functionPrototype.OwnProps.set('constructor', propWC(functionCtor));
 
@@ -1296,8 +1296,7 @@ function makeWrapper(
   superClass: string|null,
   behavior: BuiltinFunctionBehavior,
 ): [BuiltinFunction, OrdinaryObject] {
-  const ctor = CreateBuiltinFunction(
-    behavior, 1, name, realm, realm.Intrinsics.get('%Function.prototype%')!);
+  const ctor = CreateBuiltinFunction(behavior, 1, name, {Realm: realm});
   const prototype = OrdinaryObjectCreate({
     Prototype: superClass != null ? realm.Intrinsics.get(superClass) : null,
   }, {
@@ -1747,7 +1746,7 @@ export const numberObject: Plugin = {
           if (IsAbrupt(inputString)) return inputString;
           return Number.parseFloat(inputString);
         },
-      }, 1, 'parseFloat', realm, realm.Intrinsics.get('%Function.prototype%')!);
+      }, 1, 'parseFloat', {Realm: realm});
       realm.Intrinsics.set('%parseFloat%', parseFloatIntrinsic);
 
       /**
@@ -1819,7 +1818,7 @@ export const numberObject: Plugin = {
           if (IsAbrupt(R)) return R;
           return Number.parseInt(inputString, R);
         },
-      }, 2, 'parseInt', realm, realm.Intrinsics.get('%Function.prototype%')!);
+      }, 2, 'parseInt', {Realm: realm});
       realm.Intrinsics.set('%parseInt%', parseIntIntrinsic);
 
       function adapt(fn: (arg: number) => Val) {

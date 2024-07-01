@@ -50,8 +50,7 @@ export const errorObject: Plugin = {
        *     subclass instances with an [[ErrorData]] internal slot.
        */
       const errorCtor = CreateBuiltinFunction(
-        callOrConstruct(errorBehavior),
-        1, 'Error', realm, realm.Intrinsics.get('%Function.prototype%')!);
+        callOrConstruct(errorBehavior), 1, 'Error', {Realm: realm});
       realm.Intrinsics.set('%Error%', errorCtor);
       stagedGlobals.set('Error', propWC(errorCtor));
 
@@ -243,8 +242,7 @@ export const errorObject: Plugin = {
          * defined.
          */
         const ctor = CreateBuiltinFunction(
-          callOrConstruct(errorBehavior),
-          1, name, realm, realm.Intrinsics.get('%Function.prototype%')!);
+          callOrConstruct(errorBehavior), 1, name, {Realm: realm});
         realm.Intrinsics.set(`%${name}%`, ctor);
         stagedGlobals.set(name, propWC(ctor));
 
@@ -296,7 +294,7 @@ export const errorObject: Plugin = {
       realm.Intrinsics.set('%ThrowTypeError%', (() => {
         const throwTypeError = CreateBuiltinFunction({
           *Call($) { return $.throw('TypeError', '%ThrowTypeError%'); },
-        }, 0, '', realm, realm.Intrinsics.get('%Function.prototype%')!);
+        }, 0, '', {Realm: realm});
         throwTypeError.OwnProps.set('length', prop0(0));
         throwTypeError.OwnProps.set('name', prop0(''));
         return throwTypeError;

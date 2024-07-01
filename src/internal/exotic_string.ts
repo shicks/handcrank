@@ -62,8 +62,7 @@ export const stringObject: Plugin = {
     CreateIntrinsics(realm, stagedGlobals) {
       /** 22.1.1.1 String ( value ) */
       const stringCtor = CreateBuiltinFunction(
-        callOrConstruct(StringConstructor),
-        1, 'String', realm, realm.Intrinsics.get('%Function.prototype%')!);
+        callOrConstruct(StringConstructor), 1, 'String', {Realm: realm});
 
       const stringPrototype =
         StringCreate('', realm.Intrinsics.get('%Object.prototype%')!);

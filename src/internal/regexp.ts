@@ -42,8 +42,7 @@ export const regexp: Plugin = {
        *   - has the following properties:
        */
       const regexpCtor = CreateBuiltinFunction(
-        callOrConstruct(RegExpConstructor), 2, 'RegExp', realm,
-        realm.Intrinsics.get('%Function.prototype%')!);
+        callOrConstruct(RegExpConstructor), 2, 'RegExp', {Realm: realm});
       realm.Intrinsics.set('%RegExp%', regexpCtor);
       stagedGlobals.set('RegExp', propWC(regexpCtor));
 

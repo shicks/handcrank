@@ -345,7 +345,10 @@ function CreateIntrinsics(realm: RealmRecord) {
       const parameterArgs = args;
       const C = $.getActiveFunctionObject();
       return CreateDynamicFunction($, C, NewTarget, 'generator', parameterArgs, bodyArg);
-    }), 1, 'GeneratorFunction', realm, realm.Intrinsics.get('%Function%')!);
+    }), 1, 'GeneratorFunction', {
+      Realm: realm,
+      Prototype: realm.Intrinsics.get('%Function%')!,
+    });
   realm.Intrinsics.set('%GeneratorFunction%', generatorFunction);
 
   /**

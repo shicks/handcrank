@@ -416,7 +416,7 @@ export const arrayObject: Plugin = {
           }
           array.OwnProps.set('length', propW(numberOfArgs));
           return array;
-        }), 1, 'Array', realm, realm.Intrinsics.get('%Function.prototype%')!);
+        }), 1, 'Array', {Realm: realm});
       arrayPrototype.OwnProps.set('constructor', propWC(arrayCtor));
       arrayCtor.OwnProps.set('prototype', prop0(arrayPrototype));
       realm.Intrinsics.set('%Array%', arrayCtor);
@@ -618,8 +618,7 @@ export const arrayObject: Plugin = {
               *Call(_$, thisValue) {
                 return thisValue;
               },
-            }, 0, '[Symbol.species]', realm,
-            realm.Intrinsics.get('%Function.prototype%')!, 'get'),
+            }, 0, '[Symbol.species]', {Realm: realm}, 'get'),
           Configurable: true,
           Enumerable: false,
         },
@@ -640,7 +639,7 @@ export const arrayObject: Plugin = {
             if (IsAbrupt(O)) return O;
             return CreateArrayIterator($, O, 'value');
           },
-        }, 0, 'values', realm, realm.Intrinsics.get('%Function.prototype%')!);
+        }, 0, 'values', {Realm: realm});
       realm.Intrinsics.set('%Array.prototype.values%', arrayPrototypeValues);
       arrayPrototype.OwnProps.set('values', propWC(arrayPrototypeValues));
       arrayPrototype.OwnProps.set(Symbol.iterator, propWC(arrayPrototypeValues));

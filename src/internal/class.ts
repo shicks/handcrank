@@ -680,7 +680,7 @@ export function* ClassDefinitionEvaluation(
           if (IsAbrupt(status)) return status;
           return result;
         },
-      }, 0, className, $.getRealm()!, constructorParent);
+      }, 0, className, {$, Prototype: constructorParent});
   } else {
     const constructorInfo =
       CastNotAbrupt(

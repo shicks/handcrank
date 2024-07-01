@@ -17,7 +17,11 @@ export const test262: Plugin = {
     SetDefaultGlobalBindings(realm) {
 
       function def(owner: Obj, name: string, fn: ($: VM, ...args: Val[]) => ECR<Val>) {
-        owner.OwnProps.set(name, prop0(CreateBuiltinFunction({Call: ($, _, args) => fn($, ...args)}, fn.length - 2, name, realm, realm.Intrinsics.get('%Function.prototype%')!)));
+        owner.OwnProps.set(
+          name,
+          prop0(CreateBuiltinFunction(
+            {Call: ($, _, args) => fn($, ...args)},
+            fn.length - 2, name, {Realm: realm})));
       }
 
       def(realm.GlobalObject!, 'print', function*($, arg): ECR<Val> {
