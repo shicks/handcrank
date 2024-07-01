@@ -117,9 +117,10 @@ class TestCase {
     });
     vm.install(full);
     vm.install(test262);
+    const realm = vm.createRealm();
     // Load the prerequisites and the test
     for (const f of this.includes) {
-      const result = yield* vm.evaluateScript(f.content, {filename: f.path});
+      const result = yield* vm.evaluateScript(f.content, realm, {filename: f.path});
       if (IsThrowCompletion(result)) {
         let msg = `Unexpected rejection: ${DebugString(result.Value)}`;
         if ((vm as any).lastThrow) {
@@ -129,7 +130,7 @@ class TestCase {
       }
     }
     const result =
-      yield* vm.evaluateScript(this.file.content, {filename: this.file.path, strict});
+      yield* vm.evaluateScript(this.file.content, realm, {filename: this.file.path, strict});
 
     // TODO - pass in a reporter?
 

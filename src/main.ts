@@ -20,6 +20,7 @@ export const vm = new VM({
 //          - maybe deps still allows grouping?
 
 vm.install(full);
+const realm = vm.createRealm();
 
 // TODO - consider adding REPL directives like .report to dump the
 // most recent trace.
@@ -27,7 +28,7 @@ let reportStackTraceOnThrow = true;
 let strict = false;
 
 function runScript(script: string, filename: string, printResult = false) {
-  const cr = run(vm.evaluateScript(script, {filename, strict}));
+  const cr = run(vm.evaluateScript(script, realm, {filename, strict}));
   if (IsAbrupt(cr)) {
     if (IsThrowCompletion(cr)) {
       console.error(`Uncaught ${DebugString(cr.Value)}`);

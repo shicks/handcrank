@@ -14,7 +14,9 @@ browser or on the server.
 
 ## TODO
 
-- array/function instance methods
+- Figure out promise scheduling
+- RootExecutionContext??? - [9.5 Jobs] expects the stack to be empty...?
+
 - consider exposing bindings a little more, lazy-initialized binding
   for arguments objects, etc
 - we should probably make a subtype of PropertyMap that stores array

@@ -113,7 +113,6 @@ interface JobQueueEntry {
 }
 
 export class VM {
-
   private executionStack: ExecutionContext[] = [];
 
   // Plugins - note: globals and intrinsics built in RealmRecord
@@ -133,12 +132,10 @@ export class VM {
 
   constructor(private readonly esprima?: Esprima) {}
 
-  initialize() {
-    if (!this.executionStack.length) {
-      CastNotAbrupt(InitializeHostDefinedRealm(this));
-    } else if (this.isRunning()) {
-      throw new Error(`Already running`);
-    }
+  createRealm(): RealmRecord {
+    const realm = new RealmRecord();
+    CastNotAbrupt(InitializeHostDefinedRealm(this, realm));
+    return realm;
   }
 
   newError(_name: string): Obj {
@@ -157,14 +154,15 @@ export class VM {
   }
 
   popContext(context?: ExecutionContext) {
-    Assert(this.executionStack.length > 1, 'Cannot pop last context');
+    //Assert(this.executionStack.length > 1, 'Cannot pop last context');
     if (context) Assert(this.executionStack.at(-1) === context, `Wrong context to pop`);
     this.executionStack.pop()!.suspend();
-    this.getRunningContext().resume();
+    this.executionStack.at(-1)?.resume();
   }
 
   getRunningContext(): ExecutionContext {
     // TODO - what if stack empty?!?
+    Assert(this.executionStack.length > 0, 'Not running');
     return this.executionStack.at(-1)!;
   }
 
@@ -200,16 +198,7 @@ export class VM {
     return intrinsic;
   }
 
-  throw(name: string, message?: string, saveStack = false): CR<never> {
-
-    // NOTE: This can help with debugging; use Assert to compile it out in prod.
-    let lastThrowMessage: string|undefined;
-    try {
-      Assert(1 > 2);
-    } catch (e) {
-      lastThrowMessage = message ? `${name}: ${message}` : name;
-    }
-
+  makeError(name: string, message?: string): Obj {
     const prototype = this.getIntrinsic(`%${name}.prototype%`);
     if (!prototype) throw new Error(`No such error: ${name}`);
     const error = OrdinaryObjectCreate({
@@ -219,6 +208,19 @@ export class VM {
       message: propWC(message),
     });
     this.captureStackTrace(error);
+    return error;
+  }
+
+  throw(name: string, message?: string, saveStack = false): CR<never> {
+
+    // NOTE: This can help with debugging; use Assert to compile it out in prod.
+    let lastThrowMessage: string|undefined;
+    try {
+      Assert(1 > 2);
+    } catch (e) {
+      lastThrowMessage = message ? `${name}: ${message}` : name;
+    }
+    const error = this.makeError(name, message);
     if (lastThrowMessage) {
       if (saveStack) {
         lastThrowMessage = error.ErrorData;
@@ -300,18 +302,31 @@ export class VM {
     return result;
   }
 
+  // TODO - we might still want to extract a wrapper to immediately set isRunning,
+  // but instead of using the stack size, we store the active generator itself??
   * evaluateScript(
     script: string|ESTree.Program,
+    realm: RealmRecord,
     {filename, strict}: EvaluateOptions = {},
   ): ECR<Val> {
-    this.initialize();
+    // TODO - if we can ensure any ongoing operation is properly suspended and doesn't
+    // resume out-of-band, then it _MIGHT_ be fine to allow an interrupt to run in the
+    // middle.  But if the outer iterator advances, we're in trouble.  This might be
+    // doable by wrapping the generator and saving the currently-running iterator, but
+    // it fails if the evaluateScript call comes from within, since any delegated yields
+    // would look like the first iterator is running but really it's delegated to the
+    // second one.  Probably not worth fussing about.
+    if (this.isRunning()) throw new Error(`Already running`);
     if (typeof script === 'string') {
       const source = script;
       if (!this.esprima) throw new Error(`no parser`);
       try {
         script = this.esprima.parseScript(source) as ESTree.Program;
       } catch (err) {
-        return this.throw('SyntaxError', err.message);
+        this.enterContext(realm.RootContext);
+        const abrupt = this.throw('SyntaxError', err.message);
+        this.popContext(realm.RootContext);
+        return abrupt;
       }
       preprocess(script, {sourceFile: filename, sourceText: source}, strict);
 
@@ -347,13 +362,19 @@ export class VM {
       //   delete n.range;
       // }) as ESTree.Program;
     }
-    const record = ParseScript(script, this.getRealm(), undefined);
+    const record = ParseScript(script, realm, undefined);
     if (Array.isArray(record)) {
       throw record[0]; // TODO - handle failure better
     }
-    const result = yield* ScriptEvaluation(this, record);
-    return IsAbrupt(result) ? result : EMPTY.is(result) ? undefined :
-      yield* GetValue(this, result);
+    this.enterContext(realm.RootContext);
+    let result = yield* ScriptEvaluation(this, record);
+    
+    if (!IsAbrupt(result)) {
+      result = EMPTY.is(result) ? undefined : yield* GetValue(this, result);
+    }
+    // TODO - flush microtasks
+    this.popContext(); // pop whatever context is left, microtasks may have changed it.
+    return result;
   }
 
   enqueuePromiseJob(job: () => ECR<void>, realm: RealmRecord|null) {
@@ -361,6 +382,10 @@ export class VM {
     // scheduler for non-strictly-ordered deferreds - could this live in a plugin?)
     // Though we may need to build some idea of a clock directly into VM, and
     // possibly allow plugins to register "idle" actions?
+
+    // TODO - should we create an ExecutionContext right here?  When we actually
+    // run the queue, we'll need to verify the SUSPENDED ---> RUNNING transition.
+
     const scriptOrModule = this.getRunningContext().ScriptOrModule;
     this.jobQueue.push({job, realm, scriptOrModule});
   }

@@ -44,7 +44,7 @@ export class RealmRecord {
   // NOTE 1: Once a Parse Node becomes unreachable, the corresponding
   // [[Array]] is also unreachable, and it would be unobservable if an
   // implementation removed the pair from the [[TemplateMap]] list.
-  TemplateMap = new WeakMap<ESTree.TemplateLiteral, Obj>();
+  readonly TemplateMap = new WeakMap<ESTree.TemplateLiteral, Obj>();
   
   // a List of Records with fields [[Specifier]] (a String) and
   // [[Module]] (a Module Record).  A map from the specifier strings
@@ -59,6 +59,12 @@ export class RealmRecord {
   // Field reserved for use by hosts that need to associate additional
   // information with a Realm Record.
   HostDefined: unknown = undefined;
+
+  readonly RootContext: RootExecutionContext;
+
+  constructor() {
+    this.RootContext = new RootExecutionContext(this);
+  }
 
   // TODO - lock down the constructor so that it's never called outside
   // of CreateRealm?
@@ -188,17 +194,15 @@ export function SetDefaultGlobalBindings($: VM, realmRec: RealmRecord): CR<Obj> 
  * arguments and returns either a normal completion containing unused
  * or a throw completion. It performs the following steps when called:
  */
-export function InitializeHostDefinedRealm($: VM): CR<UNUSED> {
+export function InitializeHostDefinedRealm($: VM, realm: RealmRecord): CR<UNUSED> {
   // 1. Let realm be CreateRealm(). [NOTE: we create intrinsics later]
-  const realm = new RealmRecord();
   // 2. Let newContext be a new execution context.
   // 3. Set the Function of newContext to null.
   // 4. Set the Realm of newContext to realm.
   // 5. Set the ScriptOrModule of newContext to null.
-  const newContext = new RootExecutionContext(realm);
   // 6. Push newContext onto the execution context stack; newContext
   //    is now the running execution context.
-  $.enterContext(newContext);
+  $.enterContext(realm.RootContext);
   CreateIntrinsics($, realm);
 
   for (const [k, v] of realm.Intrinsics) {
@@ -226,6 +230,7 @@ export function InitializeHostDefinedRealm($: VM): CR<UNUSED> {
   // 10. Let globalObj be ? SetDefaultGlobalBindings(realm).
   // 11. Create any host-defined global object properties on globalObj.
   const globalObj = SetDefaultGlobalBindings($, realm);
+  $.popContext(realm.RootContext);
   if (IsAbrupt(globalObj)) return globalObj;
   // 12. Return unused.
   return UNUSED;
