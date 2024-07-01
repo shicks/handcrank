@@ -291,15 +291,21 @@ async function* asyncFlatMap<T, U>(iter: AsyncIterable<T>, fn: (t: T) => AsyncIt
   }
 }
 
+// NOTE: Return files first because it's a little nicer test output
 type Stats = typeof stat extends (...args: any[]) => Promise<infer U> ? U : never;
 async function* asyncReaddir(path: string): AsyncIterable<[string, Stats]> {
   const promises = new Map<string, Promise<Stats>>();
   for (const f of await readdir(path)) {
     promises.set(f, stat(`${path}/${f}`));
   }
+  const files = new Map<string, Stats>();
+  const dirs = new Map<string, Stats>();
   for (const k of [...promises.keys()].sort()) {
-    yield [k, await promises.get(k)!];
+    const p = await promises.get(k)!;
+    (p.isDirectory() ? dirs : files).set(k, p);
   }
+  yield* files;
+  yield* dirs;
 }
 
 export function readdirRecursive(path: string): AsyncIterableIterator<string> {
