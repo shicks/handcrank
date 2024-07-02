@@ -19,7 +19,7 @@
       (when (not (string-match " $" comment))
         (setq comment (concat comment " ")))
       ;; Look for "#. #." and delete one
-      (when (looking-at "[0-9a-iv]+\\. [0-9a-iv]+\\. ")
+      (when (looking-at "[0-9a-z]+\\. [0-9a-z]+\\. ")
         (delete-char (/ (length (match-string 0)) 2))
         (when (looking-at "[iv]") (save-excursion (insert "        ")))
         (when (looking-at "[a-hj-uw-z]") (save-excursion (insert "    "))))

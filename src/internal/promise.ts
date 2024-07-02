@@ -9,7 +9,7 @@ import { objectAndFunctionPrototype } from './fundamental';
 import { iterators } from './iterators';
 import { HostCallJobCallback, HostEnqueuePromiseJob, HostMakeJobCallback, JobCallback } from './job';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
-import { prop0, propWC } from './property_descriptor';
+import { prop0, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
 import { DebugString, ECR, Plugin, VM } from './vm';
@@ -59,8 +59,39 @@ export const promises: Plugin = {
 
       defineProperties(realm, promiseCtor, {
         'all': method(PromiseCtorAll, 1),
+        'allSettled': method(PromiseCtorAllSettled, 1),
+        'any': method(PromiseCtorAny, 1),
         'prototype': prop0(promisePrototype),
+        'race': method(PromiseCtorRace, 1),
+        'reject': method(PromiseCtorReject, 1),
         'resolve': method(PromiseCtorResolve, 1),
+
+        /**
+         * 27.2.4.8 get Promise [ @@species ]
+         * 
+         * Promise[@@species] is an accessor property whose set accessor
+         * function is undefined. Its get accessor function performs the
+         * following steps when called:
+         * 
+         * 1. Return the this value.
+         * 
+         * The value of the "name" property of this function is "get [Symbol.species]".
+         * 
+         * NOTE: Promise prototype methods normally use their this value's
+         * constructor to create a derived object. However, a subclass
+         * constructor may over-ride that default behaviour by redefining
+         * its @@species property.
+         */
+        [Symbol.species]: {
+          Get: CreateBuiltinFunction(
+            {
+              *Call(_$, thisValue) {
+                return thisValue;
+              },
+            }, 0, '[Symbol.species]', {Realm: realm}, 'get'),
+          Configurable: true,
+          Enumerable: false,
+        },
       });
 
       defineProperties(realm, promisePrototype, {
@@ -975,8 +1006,608 @@ export function* PromiseAllResolveElement($: VM, _: Val, [x]: Val[]): ECR<undefi
   return;
 }
 
-// TODO - other Promise ctor methods, starting at
-// 27.2.4.2 Promise.allSettled ( iterable )
+/**
+ * 27.2.4.2 Promise.allSettled ( iterable )
+ * 
+ * This function returns a promise that is fulfilled with an array of
+ * promise state snapshots, but only after all the original promises
+ * have settled, i.e. become either fulfilled or rejected. It resolves
+ * all elements of the passed iterable to promises as it runs this
+ * algorithm.
+ * 
+ * 1. Let C be the this value.
+ * 2. Let promiseCapability be ? NewPromiseCapability(C).
+ * 3. Let promiseResolve be Completion(GetPromiseResolve(C)).
+ * 4. IfAbruptRejectPromise(promiseResolve, promiseCapability).
+ * 5. Let iteratorRecord be Completion(GetIterator(iterable, sync)).
+ * 6. IfAbruptRejectPromise(iteratorRecord, promiseCapability).
+ * 7. Let result be
+ *    Completion(PerformPromiseAllSettled(iteratorRecord, C,
+ *    promiseCapability, promiseResolve)).
+ * 8. If result is an abrupt completion, then
+ *     a. If iteratorRecord.[[Done]] is false, set result to
+ *        Completion(IteratorClose(iteratorRecord, result)).
+ *     b. IfAbruptRejectPromise(result, promiseCapability).
+ * 9. Return ? result.
+ * 
+ * NOTE: This function requires its this value to be a constructor
+ * function that supports the parameter conventions of the Promise
+ * constructor.
+ */
+export function* PromiseCtorAllSettled($: VM, C: Val, iterable: Val): ECR<Val> {
+  const promiseCapability = yield* NewPromiseCapability($, C);
+  if (IsAbrupt(promiseCapability)) return promiseCapability;
+  Assert(C instanceof Obj);
+  const promiseResolve = yield* GetPromiseResolve($, C);
+  if (IsAbrupt(promiseResolve)) {
+    return yield* RejectAndReturnPromise($, promiseResolve, promiseCapability);
+  }
+  const iteratorRecord = yield* GetIterator($, iterable, SYNC);
+  if (IsAbrupt(iteratorRecord)) {
+    return yield* RejectAndReturnPromise($, iteratorRecord, promiseCapability);
+  }
+  let result = yield* PerformPromiseAllSettled($, iteratorRecord, C, promiseCapability, promiseResolve);
+  if (IsAbrupt(result)) {
+    if (!iteratorRecord.Done) {
+      result = yield* IteratorClose($, iteratorRecord, result);
+    }
+    if (IsAbrupt(result)) return yield* RejectAndReturnPromise($, result, promiseCapability);
+  }
+  return result;
+}
+
+/**
+ * 27.2.4.2.1 PerformPromiseAllSettled ( iteratorRecord, constructor,
+ *                                       resultCapability, promiseResolve )
+ * 
+ * The abstract operation PerformPromiseAllSettled takes arguments
+ * iteratorRecord (an Iterator Record), constructor (a constructor),
+ * resultCapability (a PromiseCapability Record), and promiseResolve
+ * (a function object) and returns either a normal completion
+ * containing an ECMAScript language value or a throw completion. It
+ * performs the following steps when called:
+ * 
+ * 1. Let values be a new empty List.
+ * 2. Let remainingElementsCount be the Record { [[Value]]: 1 }.
+ * 3. Let index be 0.
+ * 4. Repeat,
+ *     a. Let next be Completion(IteratorStep(iteratorRecord)).
+ *     b. If next is an abrupt completion, set iteratorRecord.[[Done]] to true.
+ *     c. ReturnIfAbrupt(next).
+ *     d. If next is false, then
+ *         i. Set iteratorRecord.[[Done]] to true.
+ *         ii. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
+ *         iii. If remainingElementsCount.[[Value]] = 0, then
+ *             1. Let valuesArray be CreateArrayFromList(values).
+ *             2. Perform ? Call(resultCapability.[[Resolve]], undefined, « valuesArray »).
+ *         iv. Return resultCapability.[[Promise]].
+ *     e. Let nextValue be Completion(IteratorValue(next)).
+ *     f. If nextValue is an abrupt completion, set iteratorRecord.[[Done]] to true.
+ *     g. ReturnIfAbrupt(nextValue).
+ *     h. Append undefined to values.
+ *     i. Let nextPromise be ? Call(promiseResolve, constructor, « nextValue »).
+ *     j. Let stepsFulfilled be the algorithm steps defined in
+ *        Promise.allSettled Resolve Element Functions.
+ *     k. Let lengthFulfilled be the number of non-optional parameters
+ *        of the function definition in Promise.allSettled Resolve
+ *        Element Functions.
+ *     l. Let onFulfilled be CreateBuiltinFunction(stepsFulfilled,
+ *        lengthFulfilled, "", « [[AlreadyCalled]], [[Index]],
+ *        [[Values]], [[Capability]], [[RemainingElements]] »).
+ *     m. Let alreadyCalled be the Record { [[Value]]: false }.
+ *     n. Set onFulfilled.[[AlreadyCalled]] to alreadyCalled.
+ *     o. Set onFulfilled.[[Index]] to index.
+ *     p. Set onFulfilled.[[Values]] to values.
+ *     q. Set onFulfilled.[[Capability]] to resultCapability.
+ *     r. Set onFulfilled.[[RemainingElements]] to remainingElementsCount.
+ *     s. Let stepsRejected be the algorithm steps defined in
+ *        Promise.allSettled Reject Element Functions.
+ *     t. Let lengthRejected be the number of non-optional parameters of the
+ *        function definition in Promise.allSettled Reject Element Functions.
+ *     u. Let onRejected be CreateBuiltinFunction(stepsRejected,
+ *        lengthRejected, "", « [[AlreadyCalled]], [[Index]], [[Values]],
+ *        [[Capability]], [[RemainingElements]] »).
+ *     v. Set onRejected.[[AlreadyCalled]] to alreadyCalled.
+ *     w. Set onRejected.[[Index]] to index.
+ *     x. Set onRejected.[[Values]] to values.
+ *     y. Set onRejected.[[Capability]] to resultCapability.
+ *     z. Set onRejected.[[RemainingElements]] to remainingElementsCount.
+ *     aa. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] + 1.
+ *     ab. Perform ? Invoke(nextPromise, "then", « onFulfilled, onRejected »).
+ *     ac. Set index to index + 1.
+ */
+export function* PerformPromiseAllSettled(
+  $: VM,
+  iteratorRecord: IteratorRecord,
+  constructor: Val,
+  resultCapability: PromiseCapability,
+  promiseResolve: Val,
+): ECR<Val> {
+  const values: Val[] = [];
+  const remainingElementsCount = {Value: 1};
+  for (let index = 0;; index++) {
+    // 4.a
+    const next = yield* IteratorStep($, iteratorRecord);
+    if (IsAbrupt(next)) return (iteratorRecord.Done = true, next);
+    if (!next) {
+      iteratorRecord.Done = true;
+      remainingElementsCount.Value--;
+      if (remainingElementsCount.Value === 0) {
+        const valuesArray = CreateArrayFromList($, values);
+        const status = yield* Call($, resultCapability.Resolve, undefined, [valuesArray]);
+        if (IsAbrupt(status)) return status;
+      }
+      return resultCapability.Promise;
+    }
+    const nextValue = yield* IteratorValue($, next);
+    if (IsAbrupt(nextValue)) return (iteratorRecord.Done = true, nextValue);
+    // 4.h
+    values.push(undefined);
+    const nextPromise = yield* Call($, promiseResolve, constructor, [nextValue]);
+    if (IsAbrupt(nextPromise)) return nextPromise;
+    const onFulfilled = CreateBuiltinFunction(
+      {Call: PromiseAllSettledResolveElement}, 1, '', {
+        $,
+        AlreadyCalled: false,
+        Index: index,
+        Values: values,
+        Capability: resultCapability,
+        RemainingElements: remainingElementsCount,
+      });
+    const onRejected = CreateBuiltinFunction(
+      {Call: PromiseAllSettledRejectElement}, 1, '', {
+        $,
+        AlreadyCalled: false,
+        Index: index,
+        Values: values,
+        Capability: resultCapability,
+        RemainingElements: remainingElementsCount,
+      });
+    remainingElementsCount.Value++;
+    const invokeStatus = yield* Invoke(
+      $, nextPromise, 'then', [onFulfilled, onRejected]);
+    if (IsAbrupt(invokeStatus)) return invokeStatus;
+  }
+}
+
+/**
+ * 27.2.4.2.2 Promise.allSettled Resolve Element Functions
+ * 
+ * A Promise.allSettled resolve element function is an anonymous
+ * built-in function that is used to resolve a specific
+ * Promise.allSettled element. Each Promise.allSettled resolve element
+ * function has [[Index]], [[Values]], [[Capability]],
+ * [[RemainingElements]], and [[AlreadyCalled]] internal slots.
+ * 
+ * When a Promise.allSettled resolve element function is called with
+ * argument x, the following steps are taken:
+ * 
+ * 1. Let F be the active function object.
+ * 2. Let alreadyCalled be F.[[AlreadyCalled]].
+ * 3. If alreadyCalled.[[Value]] is true, return undefined.
+ * 4. Set alreadyCalled.[[Value]] to true.
+ * 5. Let index be F.[[Index]].
+ * 6. Let values be F.[[Values]].
+ * 7. Let promiseCapability be F.[[Capability]].
+ * 8. Let remainingElementsCount be F.[[RemainingElements]].
+ * 9. Let obj be OrdinaryObjectCreate(%Object.prototype%).
+ * 10. Perform ! CreateDataPropertyOrThrow(obj, "status", "fulfilled").
+ * 11. Perform ! CreateDataPropertyOrThrow(obj, "value", x).
+ * 12. Set values[index] to obj.
+ * 13. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
+ * 14. If remainingElementsCount.[[Value]] = 0, then
+ *     a. Let valuesArray be CreateArrayFromList(values).
+ *     b. Return ? Call(promiseCapability.[[Resolve]], undefined, « valuesArray »).
+ * 15. Return undefined.
+ * 
+ * The "length" property of a Promise.allSettled resolve element function is 1𝔽.
+ */
+export function* PromiseAllSettledResolveElement($: VM, _: Val, [x]: Val[]): ECR<undefined> {
+  const F = $.getActiveFunctionObject()! as PromiseAllElementSlots;
+  if (F.AlreadyCalled) return;
+  F.AlreadyCalled = true;
+  const obj = OrdinaryObjectCreate({
+    Prototype: $.getIntrinsic('%Object.prototype%'),
+  }, {
+    'status': propWEC('fulfilled'),
+    'value': propWEC(x),
+  });
+  F.Values[F.Index] = obj;
+  F.RemainingElements.Value--;
+  if (F.RemainingElements.Value === 0) {
+    const valuesArray = CreateArrayFromList($, F.Values);
+    const status = yield* Call($, F.Capability.Resolve, undefined, [valuesArray]);
+    if (IsAbrupt(status)) return status;
+  }
+  return;
+}
+
+/**
+ * 27.2.4.2.3 Promise.allSettled Reject Element Functions
+ * 
+ * A Promise.allSettled reject element function is an anonymous
+ * built-in function that is used to reject a specific
+ * Promise.allSettled element. Each Promise.allSettled reject element
+ * function has [[Index]], [[Values]], [[Capability]],
+ * [[RemainingElements]], and [[AlreadyCalled]] internal slots.
+ * 
+ * When a Promise.allSettled reject element function is called with
+ * argument x, the following steps are taken:
+ * 
+ * 1. Let F be the active function object.
+ * 2. Let alreadyCalled be F.[[AlreadyCalled]].
+ * 3. If alreadyCalled.[[Value]] is true, return undefined.
+ * 4. Set alreadyCalled.[[Value]] to true.
+ * 5. Let index be F.[[Index]].
+ * 6. Let values be F.[[Values]].
+ * 7. Let promiseCapability be F.[[Capability]].
+ * 8. Let remainingElementsCount be F.[[RemainingElements]].
+ * 9. Let obj be OrdinaryObjectCreate(%Object.prototype%).
+ * 10. Perform ! CreateDataPropertyOrThrow(obj, "status", "rejected").
+ * 11. Perform ! CreateDataPropertyOrThrow(obj, "reason", x).
+ * 12. Set values[index] to obj.
+ * 13. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
+ * 14. If remainingElementsCount.[[Value]] = 0, then
+ *     a. Let valuesArray be CreateArrayFromList(values).
+ *     b. Return ? Call(promiseCapability.[[Resolve]], undefined, « valuesArray »).
+ * 15. Return undefined.
+ * 
+ * The "length" property of a Promise.allSettled reject element function is 1𝔽.
+ */
+export function* PromiseAllSettledRejectElement($: VM, _: Val, [x]: Val[]): ECR<undefined> {
+  const F = $.getActiveFunctionObject()! as PromiseAllElementSlots;
+  if (F.AlreadyCalled) return;
+  F.AlreadyCalled = true;
+  const obj = OrdinaryObjectCreate({
+    Prototype: $.getIntrinsic('%Object.prototype%'),
+  }, {
+    'status': propWEC('rejected'),
+    'reason': propWEC(x),
+  });
+  F.Values[F.Index] = obj;
+  F.RemainingElements.Value--;
+  if (F.RemainingElements.Value === 0) {
+    const valuesArray = CreateArrayFromList($, F.Values);
+    const status = yield* Call($, F.Capability.Resolve, undefined, [valuesArray]);
+    if (IsAbrupt(status)) return status;
+  }
+  return;
+}
+
+/**
+ * 27.2.4.3 Promise.any ( iterable )
+ * 
+ * This function returns a promise that is fulfilled by the first
+ * given promise to be fulfilled, or rejected with an AggregateError
+ * holding the rejection reasons if all of the given promises are
+ * rejected. It resolves all elements of the passed iterable to
+ * promises as it runs this algorithm.
+ * 
+ * 1. Let C be the this value.
+ * 2. Let promiseCapability be ? NewPromiseCapability(C).
+ * 3. Let promiseResolve be Completion(GetPromiseResolve(C)).
+ * 4. IfAbruptRejectPromise(promiseResolve, promiseCapability).
+ * 5. Let iteratorRecord be Completion(GetIterator(iterable, sync)).
+ * 6. IfAbruptRejectPromise(iteratorRecord, promiseCapability).
+ * 7. Let result be Completion(PerformPromiseAny(iteratorRecord, C,
+ *    promiseCapability, promiseResolve)).
+ * 8. If result is an abrupt completion, then
+ *     a. If iteratorRecord.[[Done]] is false, set result to
+ *        Completion(IteratorClose(iteratorRecord, result)).
+ *     b. IfAbruptRejectPromise(result, promiseCapability).
+ * 9. Return ? result.
+ * 
+ * NOTE: This function requires its this value to be a constructor
+ * function that supports the parameter conventions of the Promise
+ * constructor.
+ */
+export function* PromiseCtorAny($: VM, C: Val, iterable: Val): ECR<Val> {
+  const promiseCapability = yield* NewPromiseCapability($, C);
+  if (IsAbrupt(promiseCapability)) return promiseCapability;
+  Assert(C instanceof Obj);
+  const promiseResolve = yield* GetPromiseResolve($, C);
+  if (IsAbrupt(promiseResolve)) {
+    return yield* RejectAndReturnPromise($, promiseResolve, promiseCapability);
+  }
+  const iteratorRecord = yield* GetIterator($, iterable, SYNC);
+  if (IsAbrupt(iteratorRecord)) {
+    return yield* RejectAndReturnPromise($, iteratorRecord, promiseCapability);
+  }
+  let result = yield* PerformPromiseAny($, iteratorRecord, C, promiseCapability, promiseResolve);
+  if (IsAbrupt(result)) {
+    if (!iteratorRecord.Done) {
+      result = yield* IteratorClose($, iteratorRecord, result);
+    }
+    if (IsAbrupt(result)) return yield* RejectAndReturnPromise($, result, promiseCapability);
+  }
+  return result;
+}
+
+/**
+ * 27.2.4.3.1 PerformPromiseAny ( iteratorRecord, constructor,
+ *                                resultCapability, promiseResolve )
+ * 
+ * The abstract operation PerformPromiseAny takes arguments
+ * iteratorRecord (an Iterator Record), constructor (a constructor),
+ * resultCapability (a PromiseCapability Record), and promiseResolve
+ * (a function object) and returns either a normal completion
+ * containing an ECMAScript language value or a throw completion. It
+ * performs the following steps when called:
+ * 
+ * 1. Let errors be a new empty List.
+ * 2. Let remainingElementsCount be the Record { [[Value]]: 1 }.
+ * 3. Let index be 0.
+ * 4. Repeat,
+ *     a. Let next be Completion(IteratorStep(iteratorRecord)).
+ *     b. If next is an abrupt completion, set iteratorRecord.[[Done]] to true.
+ *     c. ReturnIfAbrupt(next).
+ *     d. If next is false, then
+ *         i. Set iteratorRecord.[[Done]] to true.
+ *         ii. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
+ *         iii. If remainingElementsCount.[[Value]] = 0, then
+ *             1. Let error be a newly created AggregateError object.
+ *             2. Perform ! DefinePropertyOrThrow(error, "errors",
+ *                PropertyDescriptor { [[Configurable]]: true,
+ *                [[Enumerable]]: false, [[Writable]]: true, [[Value]]:
+ *                CreateArrayFromList(errors) }).
+ *             3. Return ThrowCompletion(error).
+ *         iv. Return resultCapability.[[Promise]].
+ *     e. Let nextValue be Completion(IteratorValue(next)).
+ *     f. If nextValue is an abrupt completion, set iteratorRecord.[[Done]] to true.
+ *     g. ReturnIfAbrupt(nextValue).
+ *     h. Append undefined to errors.
+ *     i. Let nextPromise be ? Call(promiseResolve, constructor, « nextValue »).
+ *     j. Let stepsRejected be the algorithm steps defined in Promise.any Reject Element Functions.
+ *     k. Let lengthRejected be the number of non-optional parameters
+ *        of the function definition in Promise.any Reject Element Functions.
+ *     l. Let onRejected be CreateBuiltinFunction(stepsRejected,
+ *        lengthRejected, "", « [[AlreadyCalled]], [[Index]], [[Errors]],
+ *        [[Capability]], [[RemainingElements]] »).
+ *     m. Set onRejected.[[AlreadyCalled]] to false.
+ *     n. Set onRejected.[[Index]] to index.
+ *     o. Set onRejected.[[Errors]] to errors.
+ *     p. Set onRejected.[[Capability]] to resultCapability.
+ *     q. Set onRejected.[[RemainingElements]] to remainingElementsCount.
+ *     r. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] + 1.
+ *     s. Perform ? Invoke(nextPromise, "then", « resultCapability.[[Resolve]], onRejected »).
+ *     t. Set index to index + 1.
+ */
+export function* PerformPromiseAny(
+  $: VM,
+  iteratorRecord: IteratorRecord,
+  constructor: Val,
+  resultCapability: PromiseCapability,
+  promiseResolve: Val,
+): ECR<Val> {
+  const errors: Val[] = [];
+  const remainingElementsCount = {Value: 1};
+  for (let index = 0;; index++) {
+    // 4.a
+    const next = yield* IteratorStep($, iteratorRecord);
+    if (IsAbrupt(next)) return (iteratorRecord.Done = true, next);
+    if (!next) {
+      iteratorRecord.Done = true;
+      remainingElementsCount.Value--;
+      if (remainingElementsCount.Value === 0) {
+        // TODO - aggregate error
+        const error = $.makeError('TypeError');
+        // new AggregateError();
+        // DefinePropertyOrThrow(error, 'errors', {
+        //   Configurable: true,
+        //   Enumerable: false,
+        //   Writable: true,
+        //   Value: CreateArrayFromList($, errors),
+        // });
+        return ThrowCompletion(error);
+      }
+      return resultCapability.Promise;
+    }
+    const nextValue = yield* IteratorValue($, next);
+    if (IsAbrupt(nextValue)) return (iteratorRecord.Done = true, nextValue);
+    // 4.h
+    errors.push(undefined);
+    const nextPromise = yield* Call($, promiseResolve, constructor, [nextValue]);
+    if (IsAbrupt(nextPromise)) return nextPromise;
+    const onRejected = CreateBuiltinFunction(
+      {Call: PromiseAnyRejectElement}, 1, '', {
+        $,
+        AlreadyCalled: false,
+        Index: index,
+        Errors: errors,
+        Capability: resultCapability,
+        RemainingElements: remainingElementsCount,
+      });
+    remainingElementsCount.Value++;
+    const invokeStatus = yield* Invoke(
+      $, nextPromise, 'then', [resultCapability.Resolve, onRejected]);
+    if (IsAbrupt(invokeStatus)) return invokeStatus;
+  }
+}
+
+interface PromiseAnyElementSlots {
+  AlreadyCalled: boolean;
+  Index: number;
+  Errors: Val[];
+  Capability: PromiseCapability;
+  RemainingElements: {Value: number};
+}
+declare global {
+  interface ObjectSlots extends Partial<PromiseAnyElementSlots> {}
+}
+
+/**
+ * 27.2.4.3.2 Promise.any Reject Element Functions
+ * 
+ * A Promise.any reject element function is an anonymous built-in
+ * function that is used to reject a specific Promise.any
+ * element. Each Promise.any reject element function has [[Index]],
+ * [[Errors]], [[Capability]], [[RemainingElements]], and
+ * [[AlreadyCalled]] internal slots.
+ * 
+ * When a Promise.any reject element function is called with argument
+ * x, the following steps are taken:
+ * 
+ * 1. Let F be the active function object.
+ * 2. If F.[[AlreadyCalled]] is true, return undefined.
+ * 3. Set F.[[AlreadyCalled]] to true.
+ * 4. Let index be F.[[Index]].
+ * 5. Let errors be F.[[Errors]].
+ * 6. Let promiseCapability be F.[[Capability]].
+ * 7. Let remainingElementsCount be F.[[RemainingElements]].
+ * 8. Set errors[index] to x.
+ * 9. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
+ * 10. If remainingElementsCount.[[Value]] = 0, then
+ *     a. Let error be a newly created AggregateError object.
+ *     b. Perform ! DefinePropertyOrThrow(error, "errors",
+ *        PropertyDescriptor { [[Configurable]]: true, [[Enumerable]]:
+ *        false, [[Writable]]: true, [[Value]]:
+ *        CreateArrayFromList(errors) }).
+ *     c. Return ? Call(promiseCapability.[[Reject]], undefined, « error »).
+ * 11. Return undefined.
+ * 
+ * The "length" property of a Promise.any reject element function is 1𝔽.
+ */
+export function* PromiseAnyRejectElement($: VM, _: Val, [x]: Val[]): ECR<undefined> {
+  const F = $.getActiveFunctionObject()! as PromiseAnyElementSlots;
+  if (F.AlreadyCalled) return;
+  F.AlreadyCalled = true;
+  F.Errors[F.Index] = x;
+  F.RemainingElements.Value--;
+  if (F.RemainingElements.Value === 0) {
+    // TODO - aggregate error
+    const error = $.makeError('TypeError');
+    // new AggregateError();
+    // DefinePropertyOrThrow(error, 'errors', {
+    //   Configurable: true,
+    //   Enumerable: false,
+    //   Writable: true,
+    //   Value: CreateArrayFromList($, F.Errors),
+    // });
+    const status = yield* Call($, F.Capability.Reject, undefined, [error]);
+    if (IsAbrupt(status)) return status;
+  }
+  return;
+}
+
+/**
+ * 27.2.4.5 Promise.race ( iterable )
+ * 
+ * This function returns a new promise which is settled in the same
+ * way as the first passed promise to settle. It resolves all elements
+ * of the passed iterable to promises as it runs this algorithm.
+ * 
+ * 1. Let C be the this value.
+ * 2. Let promiseCapability be ? NewPromiseCapability(C).
+ * 3. Let promiseResolve be Completion(GetPromiseResolve(C)).
+ * 4. IfAbruptRejectPromise(promiseResolve, promiseCapability).
+ * 5. Let iteratorRecord be Completion(GetIterator(iterable, sync)).
+ * 6. IfAbruptRejectPromise(iteratorRecord, promiseCapability).
+ * 7. Let result be Completion(PerformPromiseRace(iteratorRecord, C,
+ *    promiseCapability, promiseResolve)).
+ * 8. If result is an abrupt completion, then
+ *     a. If iteratorRecord.[[Done]] is false, set result to
+ *        Completion(IteratorClose(iteratorRecord, result)).
+ *     b. IfAbruptRejectPromise(result, promiseCapability).
+ * 9. Return ? result.
+ * 
+ * NOTE 1: If the iterable argument yields no values or if none of the
+ * promises yielded by iterable ever settle, then the pending promise
+ * returned by this method will never be settled.
+ * 
+ * NOTE 2: This function expects its this value to be a constructor
+ * function that supports the parameter conventions of the Promise
+ * constructor. It also expects that its this value provides a resolve
+ * method.
+ */
+export function* PromiseCtorRace($: VM, C: Val, iterable: Val): ECR<Val> {
+  const promiseCapability = yield* NewPromiseCapability($, C);
+  if (IsAbrupt(promiseCapability)) return promiseCapability;
+  Assert(C instanceof Obj);
+  const promiseResolve = yield* GetPromiseResolve($, C);
+  if (IsAbrupt(promiseResolve)) {
+    return yield* RejectAndReturnPromise($, promiseResolve, promiseCapability);
+  }
+  const iteratorRecord = yield* GetIterator($, iterable, SYNC);
+  if (IsAbrupt(iteratorRecord)) {
+    return yield* RejectAndReturnPromise($, iteratorRecord, promiseCapability);
+  }
+  let result = yield* PerformPromiseRace($, iteratorRecord, C, promiseCapability, promiseResolve);
+  if (IsAbrupt(result)) {
+    if (!iteratorRecord.Done) {
+      result = yield* IteratorClose($, iteratorRecord, result);
+    }
+    if (IsAbrupt(result)) return yield* RejectAndReturnPromise($, result, promiseCapability);
+  }
+  return result;
+}
+
+/**
+ * 27.2.4.5.1 PerformPromiseRace ( iteratorRecord, constructor,
+ *                                 resultCapability, promiseResolve )
+ * 
+ * The abstract operation PerformPromiseRace takes arguments
+ * iteratorRecord (an Iterator Record), constructor (a constructor),
+ * resultCapability (a PromiseCapability Record), and promiseResolve
+ * (a function object) and returns either a normal completion
+ * containing an ECMAScript language value or a throw completion. It
+ * performs the following steps when called:
+ * 
+ * 1. Repeat,
+ *     a. Let next be Completion(IteratorStep(iteratorRecord)).
+ *     b. If next is an abrupt completion, set iteratorRecord.[[Done]] to true.
+ *     c. ReturnIfAbrupt(next).
+ *     d. If next is false, then
+ *         i. Set iteratorRecord.[[Done]] to true.
+ *         ii. Return resultCapability.[[Promise]].
+ *     e. Let nextValue be Completion(IteratorValue(next)).
+ *     f. If nextValue is an abrupt completion, set iteratorRecord.[[Done]] to true.
+ *     g. ReturnIfAbrupt(nextValue).
+ *     h. Let nextPromise be ? Call(promiseResolve, constructor, « nextValue »).
+ *     i. Perform ? Invoke(nextPromise, "then", «
+ *        resultCapability.[[Resolve]], resultCapability.[[Reject]] »).
+ */
+export function* PerformPromiseRace(
+  $: VM,
+  iteratorRecord: IteratorRecord,
+  constructor: Val,
+  resultCapability: PromiseCapability,
+  promiseResolve: Val,
+): ECR<Val> {
+  for (;;) {
+    // 1.a
+    const next = yield* IteratorStep($, iteratorRecord);
+    if (IsAbrupt(next)) return (iteratorRecord.Done = true, next);
+    if (!next) return (iteratorRecord.Done = true, resultCapability.Promise);
+    const nextValue = yield* IteratorValue($, next);
+    if (IsAbrupt(nextValue)) return (iteratorRecord.Done = true, nextValue);
+    const nextPromise = yield* Call($, promiseResolve, constructor, [nextValue]);
+    if (IsAbrupt(nextPromise)) return nextPromise;
+    const invokeStatus = yield* Invoke(
+      $, nextPromise, 'then', [resultCapability.Resolve, resultCapability.Reject]);
+    if (IsAbrupt(invokeStatus)) return invokeStatus;
+  }
+}
+
+/**
+ * 27.2.4.6 Promise.reject ( r )
+ * 
+ * This function returns a new promise rejected with the passed argument.
+ * 
+ * 1. Let C be the this value.
+ * 2. Let promiseCapability be ? NewPromiseCapability(C).
+ * 3. Perform ? Call(promiseCapability.[[Reject]], undefined, « r »).
+ * 4. Return promiseCapability.[[Promise]].
+ * 
+ * NOTE: This function expects its this value to be a constructor
+ * function that supports the parameter conventions of the Promise constructor.
+ */
+export function* PromiseCtorReject($: VM, C: Val, r: Val): ECR<Val> {
+  const promiseCapability = yield* NewPromiseCapability($, C);
+  if (IsAbrupt(promiseCapability)) return promiseCapability;
+  const status = yield* Call($, promiseCapability.Reject, undefined, [r]);
+  if (IsAbrupt(status)) return status;
+  return promiseCapability.Promise;
+}
 
 /**
  * 27.2.4.7 Promise.resolve ( x )
@@ -1028,9 +1659,6 @@ export function* PromiseResolve($: VM, C: Val, x: Val): ECR<Prom> {
   if (IsAbrupt(status)) return status;
   return promiseCapability.Promise;
 }
-
-// TODO - more other Promise ctor methods, starting at
-// 27.2.4.8 get Promise [ @@species ]
 
 /**
  * 27.2.5 Properties of the Promise Prototype Object

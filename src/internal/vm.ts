@@ -403,12 +403,12 @@ export class VM {
     const scriptOrModule = this.getRunningContext().ScriptOrModule;
     const $ = this;
     this.microtaskQueue.push(function*(): EvalGen<void> {
-      $.enterContext(realm.RootContext);
+      if (realm) $.enterContext(realm.RootContext);
       const status = yield* job();
       if (IsAbrupt(status)) {
         // TODO - report uncaught error
       }
-      $.popContext();
+      if (realm) $.popContext();
     });
   }
 
