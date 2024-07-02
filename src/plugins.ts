@@ -13,6 +13,7 @@ import { classes } from './internal/class';
 import { taggedTemplateLiterals, templateLiterals } from './internal/template';
 import { Plugin } from './internal/vm';
 import { regexp } from './internal/regexp';
+import { promises } from './internal/promise';
 
 export const full: Plugin = {
   id: 'full',
@@ -32,6 +33,7 @@ export const full: Plugin = {
     templateLiterals,
     taggedTemplateLiterals,
     regexp,
+    promises,
   ],
 };
 
@@ -51,4 +53,5 @@ export {
   templateLiterals,
   taggedTemplateLiterals,
   regexp,
+  promises,
 };

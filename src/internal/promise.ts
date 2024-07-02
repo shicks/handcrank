@@ -60,6 +60,7 @@ export const promises: Plugin = {
       defineProperties(realm, promiseCtor, {
         'all': method(PromiseCtorAll, 1),
         'prototype': prop0(promisePrototype),
+        'resolve': method(PromiseCtorResolve, 1),
       });
 
       defineProperties(realm, promisePrototype, {
@@ -372,9 +373,7 @@ export function* FulfillPromise($: VM, promise: Prom, value: Val): ECR<undefined
  * subclass.
  */
 export function* NewPromiseCapability($: VM, C: Val): ECR<PromiseCapability> {
-  if (!IsCallable(C)) {
-    return $.throw('TypeError', 'NewPromiseCapability: C is not a constructor');
-  }
+  if (!IsConstructor(C)) return $.throw('TypeError', 'not a constructor');
   const resolvingFunctions: ResolvingFunctions = {Resolve: undefined, Reject: undefined};
   const executor = CreateBuiltinFunction({
     * Call($, _, [resolve, reject]) {
@@ -469,7 +468,7 @@ export function* RejectPromise($: VM, promise: Prom, reason: Val): ECR<undefined
  */
 export function TriggerPromiseReactions($: VM, reactions: PromiseReaction[], argument: Val) {
   for (const reaction of reactions) {
-    const job = NewPromiseReactionJob(reaction, argument);
+    const job = NewPromiseReactionJob($, reaction, argument);
     HostEnqueuePromiseJob($, job.Job, job.Realm);
   }
   return;
@@ -559,8 +558,8 @@ export function* HostPromiseRejectionTracker(_$: VM, _promise: Prom, _operation:
  *        objects.
  * 4. Return the Record { [[Job]]: job, [[Realm]]: handlerRealm }.
  */
-export function NewPromiseReactionJob(reaction: PromiseReaction, argument: Val): JobRecord {
-  function* job($: VM): ECR<void> {
+export function NewPromiseReactionJob($: VM, reaction: PromiseReaction, argument: Val): JobRecord {
+  function* job(): ECR<void> {
     const promiseCapability = reaction.Capability;
     const type = reaction.Type;
     const handler = reaction.Handler;
@@ -584,10 +583,17 @@ export function NewPromiseReactionJob(reaction: PromiseReaction, argument: Val):
     } else {
       status = yield* Call($, promiseCapability.Resolve, undefined, [handlerResult]);
     }
+    // NOTE: status should never be abrupt, except under weird circumstances,
+    // such as `class P extends Promise { constructor(cb) { super(() => cb(() => null.x)); } }`
     if (IsAbrupt(status)) return status;
     return;
   }
-  return {Job: job, Realm: null};
+  let handlerRealm = null;
+  if (!EMPTY.is(reaction.Handler)) {
+    const getHandlerRealmResult = GetFunctionRealm($, reaction.Handler.Callback);
+    handlerRealm = IsAbrupt(getHandlerRealmResult) ? $.getRealm() : getHandlerRealmResult;
+  }
+  return {Job: job, Realm: handlerRealm};
 }
 
 interface JobRecord {
@@ -987,7 +993,7 @@ export function* PromiseAllResolveElement($: VM, _: Val, [x]: Val[]): ECR<undefi
  * function that supports the parameter conventions of the Promise
  * constructor.
  */
-export function* PromiseCtorResolve($: VM, C: Val, [x]: Val[]): ECR<Val> {
+export function* PromiseCtorResolve($: VM, C: Val, x: Val): ECR<Val> {
   if (!(C instanceof Obj)) {
     return $.throw('TypeError', 'Promise.resolve must be called with a constructor');
   }
@@ -1146,7 +1152,7 @@ export function* PerformPromiseThen(
     promise.PromiseRejectReactions.push(rejectReaction);
   } else if (promise.PromiseState === 'fulfilled') {
     const value = promise.PromiseResult;
-    const fulfillJob = NewPromiseReactionJob(fulfillReaction, value);
+    const fulfillJob = NewPromiseReactionJob($, fulfillReaction, value);
     HostEnqueuePromiseJob($, fulfillJob.Job, fulfillJob.Realm);
   } else {
     Assert(promise.PromiseState === 'rejected');
@@ -1154,7 +1160,7 @@ export function* PerformPromiseThen(
     if (!promise.PromiseIsHandled) {
       yield* HostPromiseRejectionTracker($, promise, 'handle');
     }
-    const rejectJob = NewPromiseReactionJob(rejectReaction, reason);
+    const rejectJob = NewPromiseReactionJob($, rejectReaction, reason);
     HostEnqueuePromiseJob($, rejectJob.Job, rejectJob.Realm);
   }
   // 12.
