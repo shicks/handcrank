@@ -4,15 +4,15 @@ import { Call, Construct, CreateArrayFromList, Get, GetFunctionRealm, Invoke, Sp
 import { Assert } from './assert';
 import { Abrupt, CR, IsAbrupt, ThrowCompletion } from './completion_record';
 import { EMPTY, SYNC } from './enums';
-import { CreateBuiltinFunction, Func, method } from './func';
+import { CreateBuiltinFunction, Func, MakeInternalClosure, method } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
 import { iterators } from './iterators';
 import { HostCallJobCallback, HostEnqueuePromiseJob, HostMakeJobCallback, JobCallback } from './job';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
-import { prop0, propWC, propWEC } from './property_descriptor';
+import { prop0, propC, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
-import { DebugString, ECR, Plugin, VM } from './vm';
+import { DebugString, ECR, Plugin, VM, just } from './vm';
 
 /**
  * 27.2 Promise Objects
@@ -48,6 +48,16 @@ export const promises: Plugin = {
       const promiseCtor = CreateBuiltinFunction(
         {Construct: PromiseConstructor}, 1, 'Promise', {Realm: realm});
 
+      /**
+       * 27.2.5 Properties of the Promise Prototype Object
+       * 
+       * The Promise prototype object:
+       *   - is %Promise.prototype%.
+       *   - has a [[Prototype]] internal slot whose value is %Object.prototype%.
+       *   - is an ordinary object.
+       *   - does not have a [[PromiseState]] internal slot or any of the
+       *     other internal slots of Promise instances.
+       */
       const promisePrototype =
         OrdinaryObjectCreate({
           Prototype: realm.Intrinsics.get('%Object.prototype%')!,
@@ -95,8 +105,27 @@ export const promises: Plugin = {
       });
 
       defineProperties(realm, promisePrototype, {
+        /**
+         * 27.2.5.2 Promise.prototype.constructor
+         * 
+         * The initial value of Promise.prototype.constructor is %Promise%.
+         */
         'constructor': propWC(promiseCtor),
+
+        'catch': method(PromisePrototypeCatch),
+        'finally': method(PromisePrototypeFinally),
         'then': method(PromisePrototypeThen),
+
+        /**
+         * 27.2.5.5 Promise.prototype [ @@toStringTag ]
+         * 
+         * The initial value of the @@toStringTag property is the
+         * String value "Promise".
+         * 
+         * This property has the attributes { [[Writable]]: false,
+         * [[Enumerable]]: false, [[Configurable]]: true }.
+         */
+        [Symbol.toStringTag]: propC('Promise'),
       });
     },
   },
@@ -628,7 +657,7 @@ export function NewPromiseReactionJob($: VM, reaction: PromiseReaction, argument
 }
 
 interface JobRecord {
-  Job: ($: VM) => ECR<void>;
+  Job: () => ECR<void>;
   Realm: RealmRecord|null;
 }
 
@@ -669,7 +698,7 @@ interface JobRecord {
 export function NewPromiseResolveThenableJob(
   $: VM, promiseToResolve: Prom, thenable: Obj, then: JobCallback,
 ): JobRecord {
-  function* job($: VM): ECR<void> {
+  function* job(): ECR<void> {
     const resolvingFunctions = yield* CreateResolvingFunctions($, promiseToResolve);
     const thenCallResult = yield* HostCallJobCallback(
       $, then, thenable, [resolvingFunctions.Resolve, resolvingFunctions.Reject]);
@@ -1661,15 +1690,96 @@ export function* PromiseResolve($: VM, C: Val, x: Val): ECR<Prom> {
 }
 
 /**
- * 27.2.5 Properties of the Promise Prototype Object
+ * 27.2.5.1 Promise.prototype.catch ( onRejected )
  * 
- * The Promise prototype object:
- *   - is %Promise.prototype%.
- *   - has a [[Prototype]] internal slot whose value is %Object.prototype%.
- *   - is an ordinary object.
- *   - does not have a [[PromiseState]] internal slot or any of the
- *     other internal slots of Promise instances.
+ * This method performs the following steps when called:
+ * 
+ * 1. Let promise be the this value.
+ * 2. Return ? Invoke(promise, "then", « undefined, onRejected »).
  */
+export function* PromisePrototypeCatch($: VM, thisArg: Val, onRejected: Val): ECR<Val> {
+  return yield* Invoke($, thisArg, 'then', [undefined, onRejected]);
+}
+
+/**
+ * 27.2.5.3 Promise.prototype.finally ( onFinally )
+ * 
+ * This method performs the following steps when called:
+ * 
+ * 1. Let promise be the this value.
+ * 2. If promise is not an Object, throw a TypeError exception.
+ * 3. Let C be ? SpeciesConstructor(promise, %Promise%).
+ * 4. Assert: IsConstructor(C) is true.
+ * 5. If IsCallable(onFinally) is false, then
+ *     a. Let thenFinally be onFinally.
+ *     b. Let catchFinally be onFinally.
+ * 6. Else,
+ *     a. Let thenFinallyClosure be a new Abstract Closure with
+ *        parameters (value) that captures onFinally and C and performs
+ *        the following steps when called:
+ *         i. Let result be ? Call(onFinally, undefined).
+ *         ii. Let p be ? PromiseResolve(C, result).
+ *         iii. Let returnValue be a new Abstract Closure with no
+ *              parameters that captures value and performs the following
+ *              steps when called:
+ *             1. Return value.
+ *         iv. Let valueThunk be CreateBuiltinFunction(returnValue, 0, "", « »).
+ *         v. Return ? Invoke(p, "then", « valueThunk »).
+ *     b. Let thenFinally be CreateBuiltinFunction(thenFinallyClosure, 1, "", « »).
+ *     c. Let catchFinallyClosure be a new Abstract Closure with
+ *        parameters (reason) that captures onFinally and C and performs
+ *        the following steps when called:
+ *         i. Let result be ? Call(onFinally, undefined).
+ *         ii. Let p be ? PromiseResolve(C, result).
+ *         iii. Let throwReason be a new Abstract Closure with no
+ *              parameters that captures reason and performs the following
+ *              steps when called:
+ *             1. Return ThrowCompletion(reason).
+ *         iv. Let thrower be CreateBuiltinFunction(throwReason, 0, "", « »).
+ *         v. Return ? Invoke(p, "then", « thrower »).
+ *     d. Let catchFinally be CreateBuiltinFunction(catchFinallyClosure, 1, "", « »).
+ * 7. Return ? Invoke(promise, "then", « thenFinally, catchFinally »).
+ */
+export function* PromisePrototypeFinally(
+  $: VM,
+  thisArg: Val,
+  onFinally: Val,
+): ECR<Val> {
+  if (!(thisArg instanceof Obj)) return $.throw('TypeError', 'not an object');
+  const C = yield* SpeciesConstructor($, thisArg, $.getIntrinsic('%Promise%') as Func);
+  if (IsAbrupt(C)) return C;
+  Assert(IsConstructor(C));
+  let thenFinally: Val;
+  let catchFinally: Val;
+  if (!IsCallable(onFinally)) {
+    thenFinally = onFinally;
+    catchFinally = onFinally;
+  } else {
+    thenFinally = CreateBuiltinFunction({
+      * Call($: VM, value: Val): ECR<Val> {
+        const result = yield* Call($, onFinally, undefined);
+        if (IsAbrupt(result)) return result;
+        const p = yield* PromiseResolve($, C, result);
+        if (IsAbrupt(p)) return p;
+        const valueThunk = CreateBuiltinFunction(
+          {Call: () => just(value)}, 0, '', {$});
+        return yield* Invoke($, p, 'then', [valueThunk]);
+      },
+    }, 1, '', {$});
+    catchFinally = CreateBuiltinFunction({
+      * Call($: VM, reason: Val): ECR<Val> {
+        const result = yield* Call($, onFinally, undefined);
+        if (IsAbrupt(result)) return result;
+        const p = yield* PromiseResolve($, C, result);
+        if (IsAbrupt(p)) return p;
+        const throwReason = CreateBuiltinFunction(
+          {Call: () => just(ThrowCompletion(reason))}, 0, '', {$});
+        return yield* Invoke($, p, 'then', [throwReason]);
+      },
+    }, 1, '', {$});
+  }
+  return yield* Invoke($, thisArg, 'then', [thenFinally, catchFinally]);
+}
 
 /**
  * 27.2.5.4 Promise.prototype.then ( onFulfilled, onRejected )

@@ -1851,7 +1851,6 @@ export function MakeInternalClosure(fn: ($: VM, ...args: Val[]) => ECR<Val>): Fu
       return fn($, ...args);
     }
   } as any, {});
-  
 }
 
 /**
