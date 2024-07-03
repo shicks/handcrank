@@ -1658,7 +1658,13 @@ export const BuiltinFunction = memoize(() => class BuiltinFunction extends Ordin
   constructor(slots: BuiltinFunctionSlots, props: PropertyRecord) {
     super(slots, props);
 
-    if (this.CallBehavior) this.Call = wrapBehavior(this, this.CallBehavior);
+    if (this.CallBehavior) {
+      this.Call = wrapBehavior(this, this.CallBehavior);
+    } else {
+      this.Call = wrapBehavior(this, function*($: VM) {
+        return $.throw('TypeError', 'cannot be called without `new`');
+      });
+    }
     if (this.ConstructBehavior) this.Construct = wrapBehavior(this, this.ConstructBehavior);
   }
 

@@ -449,11 +449,10 @@ export function* NewPromiseCapability($: VM, C: Val): ECR<PromiseCapability> {
   }, 2, '', {$});
   const promise = yield* Construct($, C, [executor]);
   if (IsAbrupt(promise)) return promise;
-  Assert(IsPromise(promise));
   if (!IsCallable(resolvingFunctions.Resolve) || !IsCallable(resolvingFunctions.Reject)) {
     return $.throw('TypeError', 'not a function');
   }
-  return new PromiseCapability(promise, resolvingFunctions.Resolve, resolvingFunctions.Reject);
+  return new PromiseCapability(promise as Prom, resolvingFunctions.Resolve, resolvingFunctions.Reject);
 }
 
 interface ResolvingFunctions {
