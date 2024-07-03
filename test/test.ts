@@ -6,8 +6,12 @@ import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promi
 import { test262 } from './262';
 import { DebugString, VM, runAsync } from '../src/internal/vm';
 import { full } from '../src/plugins';
-import { IsThrowCompletion } from '../src/internal/completion_record';
+import { CR, IsThrowCompletion } from '../src/internal/completion_record';
 import { Obj } from '../src/internal/obj';
+import { EMPTY } from '../src/internal/enums';
+import { Val } from '../src/internal/val';
+import { CreateBuiltinFunction } from '../src/internal/func';
+import { prop0 } from '../src/internal/property_descriptor';
 
 class File {
   constructor(
@@ -129,8 +133,35 @@ class TestCase {
         throw new Error(msg);
       }
     }
-    const result =
-      yield* vm.evaluateScript(this.file.content, realm, {filename: this.file.path, strict});
+
+    let doneResult: Val|EMPTY = EMPTY;
+    if (this.file.metadata.flags?.includes('async')) {
+      const done = CreateBuiltinFunction({
+        *Call($, _, [arg]) {
+          doneResult = arg;
+          return undefined;
+        },
+      }, 1, '$DONE', {Realm: realm});
+      realm.GlobalObject!.OwnProps.set('$DONE', prop0(done));
+    }
+
+    const iter = vm.evaluateScript(this.file.content, realm, {filename: this.file.path, strict});
+    let result: CR<Val>;
+    while (true) {
+      const {done, value} = iter.next();
+      if (done) {
+        result = value;
+        break;
+      } else if (!EMPTY.is(doneResult)) {
+        if (typeof doneResult === 'string') {
+          result = vm.throw('Error', doneResult);
+        } else if (doneResult !== undefined) {
+          result = vm.throw('Error', DebugString(doneResult));
+        }
+        break;
+      }
+      yield value;
+    }
 
     // TODO - pass in a reporter?
 
