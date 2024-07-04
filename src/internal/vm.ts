@@ -17,9 +17,11 @@ import { IsConstructor } from './abstract_compare';
 import { IsStrictMode } from './static/scope';
 import * as ESTree from 'estree';
 import { ModuleRecord } from './module_record';
+import { Prom } from './promise';
 
 export type Yield = {yield: Val};
-export type EvalGen<T> = Generator<Yield|undefined, T, CR<Val>|undefined>;
+export type Await = {await: Prom};
+export type EvalGen<T> = Generator<Yield|Await|undefined, T, CR<Val>|undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
 export type Job = () => EvalGen<void>;
 

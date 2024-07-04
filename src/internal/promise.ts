@@ -3,8 +3,8 @@ import { GetIterator, IteratorClose, IteratorRecord, IteratorStep, IteratorValue
 import { Call, Construct, CreateArrayFromList, Get, GetFunctionRealm, Invoke, SpeciesConstructor } from './abstract_object';
 import { Assert } from './assert';
 import { Abrupt, CR, IsAbrupt, ThrowCompletion } from './completion_record';
-import { EMPTY, SYNC } from './enums';
-import { CreateBuiltinFunction, Func, MakeInternalClosure, method } from './func';
+import { EMPTY, SYNC, UNUSED } from './enums';
+import { CreateBuiltinFunction, Func, method } from './func';
 import { objectAndFunctionPrototype } from './fundamental';
 import { iterators } from './iterators';
 import { HostCallJobCallback, HostEnqueuePromiseJob, HostMakeJobCallback, JobCallback } from './job';
@@ -45,6 +45,13 @@ export const promises: Plugin = {
   deps: () => [objectAndFunctionPrototype, iterators],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
+      /**
+       * 27.2.4 Properties of the Promise Constructor
+       * 
+       * The Promise constructor:
+       *   - has a [[Prototype]] internal slot whose value is %Function.prototype%.
+       *   - has the following properties:
+       */
       const promiseCtor = CreateBuiltinFunction(
         {Construct: PromiseConstructor}, 1, 'Promise', {Realm: realm});
 
@@ -285,7 +292,7 @@ export function* PromiseRejectSteps($: VM, _: Val, [reason]: Val[]): ECR<undefin
   const alreadyResolved = F.AlreadyResolved!;
   if (alreadyResolved.Value) return;
   alreadyResolved.Value = true;
-  yield* RejectPromise($, promise, reason);
+  RejectPromise($, promise, reason);
   return;
 }
 
@@ -339,7 +346,7 @@ export function* PromiseResolveSteps(
   if (alreadyResolved.Value) return;
   alreadyResolved.Value = true;
   if (SameValue(resolution, promise)) {
-    yield* RejectPromise(
+    RejectPromise(
       $, promise, $.makeError('TypeError', 'Chaining cycle detected for promise'));
     return;
   } else if (!(resolution instanceof Obj)) {
@@ -349,7 +356,7 @@ export function* PromiseResolveSteps(
   const then = yield* Get($, resolution, 'then');
   if (IsAbrupt(then)) {
     Assert(!EMPTY.is(then.Value));
-    yield* RejectPromise($, promise, then.Value);
+    RejectPromise($, promise, then.Value);
     return;
   } else if (!IsCallable(then)) {
     yield* FulfillPromise($, promise, resolution);
@@ -474,7 +481,7 @@ interface ResolvingFunctions {
 export function IsPromise(x: Val): x is Prom {
   return Boolean(x instanceof Obj && x.PromiseState);
 }
-type Prom = Obj & PromiseSlots;
+export type Prom = Obj & PromiseSlots;
 
 /**
  * 27.2.1.7 RejectPromise ( promise, reason )
@@ -494,7 +501,7 @@ type Prom = Obj & PromiseSlots;
  * 8. Perform TriggerPromiseReactions(reactions, reason).
  * 9. Return unused.
  */
-export function* RejectPromise($: VM, promise: Prom, reason: Val): ECR<undefined> {
+export function RejectPromise($: VM, promise: Prom, reason: Val): UNUSED {
   Assert(promise.PromiseState === 'pending');
   const reactions = promise.PromiseRejectReactions;
   promise.PromiseResult = reason;
@@ -502,10 +509,10 @@ export function* RejectPromise($: VM, promise: Prom, reason: Val): ECR<undefined
   promise.PromiseRejectReactions = undefined!;
   promise.PromiseState = 'rejected';
   if (!promise.PromiseIsHandled) {
-    yield* HostPromiseRejectionTracker($, promise, 'reject');
+    HostPromiseRejectionTracker($, promise, 'reject');
   }
   TriggerPromiseReactions($, reactions, reason);
-  return;
+  return UNUSED;
 }
 
 /**
@@ -566,7 +573,7 @@ export function TriggerPromiseReactions($: VM, reactions: PromiseReaction[], arg
  * operation is "reject", since it is expected that rejections will 
  * be rare and not on hot code paths.
  */
-export function* HostPromiseRejectionTracker(_$: VM, _promise: Prom, _operation: 'reject'|'handle') {
+export function HostPromiseRejectionTracker(_$: VM, _promise: Prom, _operation: 'reject'|'handle') {
   // TODO - track unhandled rejections
 }
 
@@ -809,14 +816,6 @@ export function* PromiseConstructor($: VM, [executor]: Val[], NewTarget: Val): E
   }
   return promise;
 }
-
-/**
- * 27.2.4 Properties of the Promise Constructor
- * 
- * The Promise constructor:
- *   - has a [[Prototype]] internal slot whose value is %Function.prototype%.
- *   - has the following properties:
- */
 
 /**
  * 27.2.4.1 Promise.all ( iterable )
@@ -1806,7 +1805,7 @@ export function* PromisePrototypeThen(
   if (IsAbrupt(C)) return C;
   const resultCapability = yield* NewPromiseCapability($, C);
   if (IsAbrupt(resultCapability)) return resultCapability;
-  return yield* PerformPromiseThen($, thisArg, onFulfilled, onRejected, resultCapability);
+  return PerformPromiseThen($, thisArg, onFulfilled, onRejected, resultCapability);
 }
 
 /**
@@ -1861,13 +1860,13 @@ export function* PromisePrototypeThen(
  * 14. Else,
  *     a. Return resultCapability.[[Promise]].
  */
-export function* PerformPromiseThen(
+export function PerformPromiseThen(
   $: VM,
   promise: Val,
   onFulfilled: Val,
   onRejected: Val,
   resultCapability?: PromiseCapability,
-): ECR<Val> {
+): Prom|undefined {
   Assert(IsPromise(promise));
   const onFulfilledJobCallback =
     IsCallable(onFulfilled) ? HostMakeJobCallback(onFulfilled) : EMPTY;
@@ -1895,7 +1894,7 @@ export function* PerformPromiseThen(
     Assert(promise.PromiseState === 'rejected');
     const reason = promise.PromiseResult;
     if (!promise.PromiseIsHandled) {
-      yield* HostPromiseRejectionTracker($, promise, 'handle');
+      HostPromiseRejectionTracker($, promise, 'handle');
     }
     const rejectJob = NewPromiseReactionJob($, rejectReaction, reason);
     HostEnqueuePromiseJob($, rejectJob.Job, rejectJob.Realm);

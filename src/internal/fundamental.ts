@@ -1099,7 +1099,7 @@ export const functionConstructor: Plugin = {
  * new Function("a,b", "c", "return a+b+c")
  */
 export function* FunctionConstructor($: VM, NewTarget: Val, ...args: Val[]): ECR<Obj> {
-  Assert(NewTarget instanceof Obj);
+  Assert(NewTarget === undefined || NewTarget instanceof Obj);
   const C = $.getActiveFunctionObject()!;
   const bodyArg = args.pop() ?? '';
   return yield* CreateDynamicFunction($, C, NewTarget, 'normal', args, bodyArg);
@@ -1207,7 +1207,7 @@ export function* FunctionConstructor($: VM, NewTarget: Val, ...args: Val[]): ECR
 export function* CreateDynamicFunction(
   $: VM,
   constructor: Obj,
-  newTarget: Obj,
+  newTarget: Obj|undefined,
   kind: FunctionKind,
   parameterArgs: Val[],
   bodyArg: Val,

@@ -170,6 +170,19 @@ export class CodeExecutionContext extends ExecutionContext {
     readonly LexicalEnvironment: EnvironmentRecord,
     readonly VariableEnvironment: EnvironmentRecord,
   ) { super(ScriptOrModule, Function, Realm, PrivateEnvironment); }
+
+  // Used by AsyncFunctionStart.
+  clone(): CodeExecutionContext {
+    const ec =
+      new CodeExecutionContext(this.ScriptOrModule, this.Function, this.Realm,
+                               this.PrivateEnvironment, this.LexicalEnvironment,
+                                this.VariableEnvironment);
+    ec.currentNode = this.currentNode;
+    ec.isRunning = false;
+    ec.CodeEvaluationState = this.CodeEvaluationState;
+    ec.Generator = this.Generator;
+    return ec;
+  }
 }
 
 export class BuiltinExecutionContext extends ExecutionContext {

@@ -1,9 +1,9 @@
 import * as ESTree from 'estree';
 import { GetSourceText } from './static/functions';
-import { CreateBuiltinFunction, Func, FunctionDeclarationInstantiation, OrdinaryFunction, OrdinaryFunctionCreate, SetFunctionName, callOrConstruct, functions, methodO } from './func';
+import { CreateBuiltinFunction, Func, FunctionDeclarationInstantiation, InstantiateFunctionExpression, InstantiateOrdinaryFunctionExpression, OrdinaryFunction, OrdinaryFunctionCreate, SetFunctionName, callOrConstruct, functions, methodO } from './func';
 import { prop0, propC, propW } from './property_descriptor';
 import { ECR, Plugin, VM, mapJust, runImmediate, when } from './vm';
-import { functionConstructor } from './fundamental';
+import { CreateDynamicFunction, functionConstructor } from './fundamental';
 import { ASYNC, EMPTY, NON_LEXICAL_THIS, SYNC, UNUSED } from './enums';
 import { Abrupt, CR, CastNotAbrupt, IsAbrupt, IsReturnCompletion, IsThrowCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord } from './environment_record';
@@ -16,9 +16,8 @@ import { RealmRecord, defineProperties } from './realm_record';
 import { AsyncIteratorClose, CreateIterResultObject, GetIterator, IteratorClose, IteratorComplete, IteratorValue } from './abstract_iterator';
 import { CodeExecutionContext, ExecutionContext } from './execution_context';
 import { Call, GetMethod } from './abstract_object';
+import { Await } from './asyncfunction';
 
-declare const CreateDynamicFunction: any;
-declare const Await: any;
 declare const AsyncGeneratorYield: any;
 
 export const generators: Plugin = {
@@ -246,45 +245,12 @@ export function InstantiateGeneratorFunctionExpression(
   node: ESTree.FunctionExpression,
   name?: PropertyKey|PrivateName,
 ): Func {
-  const sourceText = GetSourceText(node);
-  const privateEnv = $.getRunningContext().PrivateEnvironment!;
-  
-  let env: EnvironmentRecord;
-  if (node.id == null) {
-    // GeneratorExpression : function * ( FormalParameters ) { GeneratorBody }
-    if (name == null) name = '';
-    env = $.getRunningContext().LexicalEnvironment!;
-  } else {
-    // GeneratorExpression : function * BindingIdentifier ( FormalParameters ) { GeneratorBody }
-    Assert(name == null);
-    name = node.id.name;
-    const outerEnv = $.getRunningContext().LexicalEnvironment!;
-    const funcEnv = new DeclarativeEnvironmentRecord(outerEnv);
-    CastNotAbrupt(funcEnv.CreateImmutableBinding($, name, false));
-    env = funcEnv;
-  }
-
-  const closure = OrdinaryFunctionCreate(
-    $,
-    $.getIntrinsic('%GeneratorFunction.prototype%'),
-    sourceText,
-    node.params,
-    node.body,
-    NON_LEXICAL_THIS,
-    env,
-    privateEnv,
-  );
-  SetFunctionName(closure, name);
+  const closure =
+    InstantiateOrdinaryFunctionExpression(
+      $, node, name, '%GeneratorFunction.prototype%');
   const prototype = OrdinaryObjectCreate(
     $.getIntrinsic('%GeneratorFunction.prototype.prototype%'));
   closure.OwnProps.set('prototype', propW(prototype));
-  if (node.id != null) {
-    // NOTE: we've already checked that the name is declarable in this scope
-    // and should have given an early error - therefore, we shouldn't be
-    // running into any setters that might need to execute.
-    Assert(typeof name === 'string');
-    CastNotAbrupt(runImmediate(env.InitializeBinding($, name, closure)));
-  }
   closure.EvaluateBody = EvaluateGeneratorBody;
   return closure;
 }
@@ -343,7 +309,7 @@ function CreateIntrinsics(realm: RealmRecord) {
     callOrConstruct(($, NewTarget, ...args) => {
       const bodyArg = args.pop() || '';
       const parameterArgs = args;
-      const C = $.getActiveFunctionObject();
+      const C = $.getActiveFunctionObject()!;
       return CreateDynamicFunction($, C, NewTarget, 'generator', parameterArgs, bodyArg);
     }), 1, 'GeneratorFunction', {
       Realm: realm,
@@ -1069,8 +1035,9 @@ export function* Evaluation_YieldDelegateExpression($: VM, n: ESTree.YieldExpres
       const returnMethod = yield* GetMethod($, iterator, 'return'); // ii
       if (IsAbrupt(returnMethod)) return returnMethod;
       if (returnMethod === undefined) { // iii
-        return ReturnCompletion( // 1-3
-          generatorKind === ASYNC ? yield* Await($, received.Value) : received.Value);
+        // 1-3
+        const result = generatorKind === ASYNC ? yield* Await($, received.Value) : received.Value;
+        return IsAbrupt(result) ? result : ReturnCompletion(result);
       }
       let innerReturnResult = yield* Call($, returnMethod, iterator, [received.Value]); // iv
       if (IsAbrupt(innerReturnResult)) return innerReturnResult;

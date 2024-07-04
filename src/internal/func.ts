@@ -1,5 +1,5 @@
-import { Abrupt, CR, CastNotAbrupt, CompletionType, IsAbrupt, IsReturnCompletion, ThrowCompletion } from './completion_record';
-import { DebugString, ECR, EvalGen, Plugin, VM, just, mapJust, when } from './vm';
+import { Abrupt, CR, CastNotAbrupt, CompletionType, IsAbrupt, IsReturnCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';
+import { DebugString, ECR, EvalGen, Plugin, VM, just, mapJust, runImmediate, when } from './vm';
 import { ACCESSOR, BASE, DERIVED, EMPTY, GLOBAL, LEXICAL, LEXICAL_THIS, METHOD, NON_LEXICAL_THIS, STRICT, SYNC, UNINITIALIZED, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord } from './environment_record';
 import { PropertyDescriptor, PropertyRecord, propC, propW, propWC } from './property_descriptor';
@@ -42,9 +42,10 @@ export const functions: Plugin = {
   syntax: {
     NamedEvaluation(on) {
       on('ArrowFunctionExpression',
-         when(n => !n.async, mapJust(InstantiateArrowFunctionExpression)));
+         when(n => !n.async, mapJust(InstantiateOrdinaryFunctionExpression)));
       on('FunctionExpression',
-         when(n => !n.async && !n.generator, InstantiateOrdinaryFunctionExpression));
+         when(n => !n.async && !n.generator,
+              mapJust(InstantiateOrdinaryFunctionExpression)));
     },
     InstantiateFunctionObject(on) {
       on('FunctionDeclaration',
@@ -55,10 +56,10 @@ export const functions: Plugin = {
       on('FunctionDeclaration', () => just(EMPTY));
       on('FunctionExpression',
          when(n => !n.async && !n.generator,
-              InstantiateOrdinaryFunctionExpression));
+              mapJust(InstantiateOrdinaryFunctionExpression)));
       on('ArrowFunctionExpression',
          when(n => !n.async,
-              mapJust(InstantiateArrowFunctionExpression)));
+              mapJust(InstantiateOrdinaryFunctionExpression)));
       on('ReturnStatement', function*($, n) {
         // 14.10.1 Runtime Semantics: Evaluation
         //
@@ -488,16 +489,18 @@ export function InstantiateOrdinaryFunctionObject(
  * cannot be referenced from and does not affect the scope enclosing
  * the FunctionExpression.
  */
-export function* InstantiateOrdinaryFunctionExpression(
+export function InstantiateOrdinaryFunctionExpression(
   $: VM,
-  node: ESTree.FunctionExpression,
+  node: ESTree.FunctionExpression|ESTree.ArrowFunctionExpression,
   name?: PropertyKey|PrivateName,
-): EvalGen<Func> {
+  prototypeIntrinsicName = '%Function.prototype%',
+): OrdinaryFunction {
   const sourceText = GetSourceText(node);
   const privateEnv = $.getRunningContext().PrivateEnvironment!;
   
   let env: EnvironmentRecord;
-  if (node.id == null) {
+  const isAnonymous = node.type === 'ArrowFunctionExpression' || node.id == null;
+  if (isAnonymous) {
     // FunctionExpression : function ( FormalParameters ) { FunctionBody }
     if (!name) name = '';
     env = $.getRunningContext().LexicalEnvironment!;
@@ -505,7 +508,7 @@ export function* InstantiateOrdinaryFunctionExpression(
     // FunctionExpression :
     //     function BindingIdentifier ( FormalParameters ) { FunctionBody }
     Assert(name == null);
-    name = node.id.name;
+    name = (node as ESTree.FunctionExpression).id!.name;
     const outerEnv = $.getRunningContext().LexicalEnvironment!;
     const funcEnv = new DeclarativeEnvironmentRecord(outerEnv);
     CastNotAbrupt(funcEnv.CreateImmutableBinding($, name, false));
@@ -515,7 +518,7 @@ export function* InstantiateOrdinaryFunctionExpression(
   // TODO - handle these functions better...!!!
   const closure = OrdinaryFunctionCreate(
     $,
-    $.getIntrinsic('%Function.prototype%'),
+    $.getIntrinsic(prototypeIntrinsicName),
     sourceText,
     node.params,
     node.body,
@@ -525,11 +528,12 @@ export function* InstantiateOrdinaryFunctionExpression(
   );
   SetFunctionName(closure, name);
   MakeConstructor($, closure);
-  if (node.id != null) {
+  if (!isAnonymous) {
     // NOTE: we've already checked that the name is declarable in this scope
     // and should have given an early error - therefore, we shouldn't be
     // running into any setters that might need to execute.
-    CastNotAbrupt(yield* env.InitializeBinding($, name as string, closure));
+    Assert(typeof name === 'string');
+    CastNotAbrupt(runImmediate(env.InitializeBinding($, name as string, closure)));
   }
   return closure;
 }
@@ -539,60 +543,6 @@ function sourceText(node: Node): string {
   if (!source) return '';
   const range = node.range || [(node as any).start, (node as any).end];
   return source.sourceText?.substring(range[0], range[1]) || '';
-}
-
-/**
- * 15.3.4 Runtime Semantics: InstantiateArrowFunctionExpression
- * 
- * The syntax-directed operation InstantiateArrowFunctionExpression
- * takes optional argument name (a property key or a Private Name) and
- * returns a function object. It is defined piecewise over the
- * following productions:
- * 
- * ArrowFunction : ArrowParameters => ConciseBody
- * 1. If name is not present, set name to "".
- * 2. Let env be the LexicalEnvironment of the running execution context.
- * 3. Let privateEnv be the running execution context's PrivateEnvironment.
- * 4. Let sourceText be the source text matched by ArrowFunction.
- * 5. Let closure be OrdinaryFunctionCreate(%Function.prototype%,
- *    sourceText, ArrowParameters, ConciseBody, lexical-this, env,
- *    privateEnv).
- * 6. Perform SetFunctionName(closure, name).
- * 7. Return closure.
- * 
- * NOTE: An ArrowFunction does not define local bindings for
- * arguments, super, this, or new.target. Any reference to arguments,
- * super, this, or new.target within an ArrowFunction must resolve to
- * a binding in a lexically enclosing environment. Typically this will
- * be the Function Environment of an immediately enclosing
- * function. Even though an ArrowFunction may contain references to
- * super, the function object created in step 5 is not made into a
- * method by performing MakeMethod. An ArrowFunction that references
- * super is always contained within a non-ArrowFunction and the
- * necessary state to implement super is accessible via the env that
- * is captured by the function object of the ArrowFunction.
- */
-export function InstantiateArrowFunctionExpression(
-  $: VM,
-  node: ESTree.ArrowFunctionExpression,
-  name?: PropertyKey|PrivateName,
-): Func {
-  const sourceText = GetSourceText(node);
-  const privateEnv = $.getRunningContext().PrivateEnvironment!;
-  const env = $.getRunningContext().LexicalEnvironment!;
-  if (!name) name = '';
-  const closure = OrdinaryFunctionCreate(
-    $,
-    $.getIntrinsic('%Function.prototype%'),
-    sourceText,
-    node.params,
-    node.body,
-    LEXICAL_THIS,
-    env,
-    privateEnv,
-  );
-  SetFunctionName(closure, name);
-  return closure;
 }
 
 /**
@@ -927,32 +877,32 @@ export function OrdinaryCallBindThis($: VM, F: Func, calleeContext: ExecutionCon
  * 2. Return ? EvaluateClassStaticBlockBody of ClassStaticBlockBody
  *    with argument functionObject.
  */
-export function* EvaluateBody(
-  $: VM, functionObject: Func, argumentsList: Val[],
-  node: BlockLike|ESTree.Expression
+
+
+/**
+ * 15.2.3 Runtime Semantics: EvaluateFunctionBody
+ *
+ * The syntax-directed operation EvaluateFunctionBody takes
+ * arguments functionObject (a function object) and argumentsList
+ * (a List of ECMAScript language values) and returns either a
+ * normal completion containing an ECMAScript language value or an
+ * abrupt completion. It is defined piecewise over the following
+ * productions:
+ *
+ * FunctionBody : FunctionStatementList
+ * 1. Perform ? FunctionDeclarationInstantiation(functionObject, argumentsList).
+ * 2. Return ? Evaluation of FunctionStatementList.
+ */
+export function* EvaluateFunctionBody(
+  $: VM,
+  node: BlockLike|ESTree.Expression,
+  functionObject: Func,
+  argumentsList: Val[],
 ): ECR<Val> {
-  // TODO - check for generator and/or async, which will probably be different
-  // subtypes of Function.
-  if (functionObject.ECMAScriptCode) {
-    //return EvaluateFunctionBody(functionObject, argumentsList, node);
-    // 15.2.3 Runtime Semantics: EvaluateFunctionBody
-    //
-    // The syntax-directed operation EvaluateFunctionBody takes
-    // arguments functionObject (a function object) and argumentsList
-    // (a List of ECMAScript language values) and returns either a
-    // normal completion containing an ECMAScript language value or an
-    // abrupt completion. It is defined piecewise over the following
-    // productions:
-    //
-    // FunctionBody : FunctionStatementList
-    // 1. Perform ? FunctionDeclarationInstantiation(functionObject, argumentsList).
-    // 2. Return ? Evaluation of FunctionStatementList.
-    const err = yield* FunctionDeclarationInstantiation($, functionObject, argumentsList);
-    if (IsAbrupt(err)) return err;
-    return yield* $.evaluateValue(node);
-  }
-  // TODO - other types?
-  throw new Error(`Unknown function type`);
+  Assert(functionObject.ECMAScriptCode);
+  const err = yield* FunctionDeclarationInstantiation($, functionObject, argumentsList);
+  if (IsAbrupt(err)) return err;
+  return yield* $.evaluateValue(node);
 }
 
 /**
@@ -970,10 +920,10 @@ export function* EvaluateBody(
 export function* OrdinaryCallEvaluateBody($: VM, F: Func, argumentsList: Val[]): ECR<Val> {
   Assert(F.ECMAScriptCode);
   yield;  // pause before executing a function to avoid infinite recursion
-  const result = yield* EvaluateBody($, F, argumentsList, F.ECMAScriptCode);
+  const result = yield* EvaluateFunctionBody($, F.ECMAScriptCode, F, argumentsList);
   if (!IsAbrupt(result) && !isBlockLike(F.ECMAScriptCode)) {
     // Handle concise bodies
-    return new Abrupt(CompletionType.Return, result, EMPTY);
+    return ReturnCompletion(result);
   }
   return result;
 }
@@ -1561,6 +1511,7 @@ export function* FunctionDeclarationInstantiation($: VM, func: Func, argumentsLi
   const privateEnv = calleeContext.PrivateEnvironment;
   // 36. For each Parse Node f of functionsToInitialize, do
   //     a. Let fn be the sole element of the BoundNames of f.
+
   //     b. Let fo be InstantiateFunctionObject of f with arguments
   //        lexEnv and privateEnv.
   //     c. Perform ! varEnv.SetMutableBinding(fn, fo, false).
@@ -1839,6 +1790,18 @@ export function CreateBuiltinFunction(
       length: propC(length),
       name: propC(fnName),
     });
+}
+
+export function CreateBuiltinFunctionFromClosure(
+  closure: (...args: Val[]) => ECR<Val>,
+  length: number,
+  name: string,
+  slots: BuiltinFunctionSlotsParam,
+  prefix?: string,
+): BuiltinFunction {
+  return CreateBuiltinFunction(
+    {Call: (_$, _thisArg, args) => closure(...args)},
+    length, name, slots, prefix);
 }
 
 type BuiltinFunctionSlotsParam =
