@@ -188,17 +188,18 @@ export function ContainsExpression(n: Node|null): boolean {
  *    CoverCallExpressionAndAsyncArrowHead.
  * 2. Return IsSimpleParameterList of head.
  */
-export function IsSimpleParameterList(params: Node[]): boolean {
+export function IsSimpleParameterList(params: ESTree.Pattern[]): boolean {
   for (const n of params) {
     switch (n.type) {
       case 'Identifier':
         break;
-      case 'AssignmentExpression':
+      case 'AssignmentPattern':
       case 'RestElement':
       case 'ObjectPattern':
       case 'ArrayPattern':
         return false;
       default:
+        // NOTE: MemberExpression ?
         throw new Error(`unexpected node type in formals: ${n.type}`);
     }
   }

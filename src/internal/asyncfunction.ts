@@ -30,9 +30,7 @@ export const asyncFunctions: Plugin = {
   deps: () => [objectAndFunctionPrototype, functions, promises],
   syntax: {
     NamedEvaluation(on) {
-      on('ArrowFunctionExpression',
-         when(n => n.async, mapJust(InstantiateAsyncFunctionExpression)));
-      on('FunctionExpression',
+      on(['ArrowFunctionExpression', 'FunctionExpression'],
          when(n => n.async && !n.generator,
               mapJust(InstantiateAsyncFunctionExpression)));
     },
@@ -41,11 +39,8 @@ export const asyncFunctions: Plugin = {
          when(n => n.async && !n.generator, InstantiateAsyncFunctionObject));
     },
     Evaluation(on) {
-      on('FunctionExpression',
+      on(['ArrowFunctionExpression', 'FunctionExpression'],
          when(n => n.async && !n.generator,
-              mapJust(InstantiateAsyncFunctionExpression)));
-      on('ArrowFunctionExpression',
-         when(n => !n.async,
               mapJust(InstantiateAsyncFunctionExpression)));
       on('AwaitExpression', function*($, n) {
         return yield* Evaluation_AwaitExpression($, n);
@@ -394,25 +389,6 @@ export function* Await($: VM, value: Val): ECR<Val> {
   const promise = yield* PromiseResolve($, $.getIntrinsic('%Promise%'), value);
   if (IsAbrupt(promise)) return promise;
   return yield {await: promise};
-
-  // const promise = yield* PromiseResolve($, $.getIntrinsic('%Promise%'), value);
-  // if (IsAbrupt(promise)) return promise;
-  // const asyncContext = $.getRunningContext();
-  // const onFulfilled = CreateBuiltinFunctionFromClosure(function*(v) {
-  //   const prevContext = $.getRunningContext();
-  //   prevContext.suspend();
-  //   $.enterContext(asyncContext);
-  //   asyncContext.CodeEvaluationState!.next(v);
-  //   return undefined;
-  // }, 1, '', {$});
-  // const onRejected = CreateBuiltinFunctionFromClosure(function*(reason) {
-  //   const prevContext = $.getRunningContext();
-  //   prevContext.suspend();
-  //   $.enterContext(asyncContext);
-  //   asyncContext.CodeEvaluationState!.next(ThrowCompletion(reason));
-  //   return undefined;
-  // }, 1, '', {$});
-  // return yield* PerformPromiseThen($, promise, onFulfilled, onRejected);
 }
 
 /**
