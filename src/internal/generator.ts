@@ -1,12 +1,12 @@
 import * as ESTree from 'estree';
 import { GetSourceText } from './static/functions';
-import { CreateBuiltinFunction, Func, FunctionDeclarationInstantiation, InstantiateFunctionExpression, InstantiateOrdinaryFunctionExpression, OrdinaryFunction, OrdinaryFunctionCreate, SetFunctionName, callOrConstruct, functions, methodO } from './func';
+import { CreateBuiltinFunction, Func, FunctionDeclarationInstantiation, InstantiateOrdinaryFunctionExpression, OrdinaryFunction, OrdinaryFunctionCreate, SetFunctionName, callOrConstruct, functions, methodO } from './func';
 import { prop0, propC, propW } from './property_descriptor';
-import { ECR, Plugin, VM, mapJust, runImmediate, when } from './vm';
+import { ECR, Plugin, VM, mapJust, when } from './vm';
 import { CreateDynamicFunction, functionConstructor } from './fundamental';
 import { ASYNC, EMPTY, NON_LEXICAL_THIS, SYNC, UNUSED } from './enums';
-import { Abrupt, CR, CastNotAbrupt, IsAbrupt, IsReturnCompletion, IsThrowCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';
-import { DeclarativeEnvironmentRecord, EnvironmentRecord } from './environment_record';
+import { Abrupt, CR, IsAbrupt, IsReturnCompletion, IsThrowCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';
+import { EnvironmentRecord } from './environment_record';
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
 import { Assert } from './assert';
@@ -16,7 +16,7 @@ import { RealmRecord, defineProperties } from './realm_record';
 import { AsyncIteratorClose, CreateIterResultObject, GetIterator, IteratorClose, IteratorComplete, IteratorValue } from './abstract_iterator';
 import { CodeExecutionContext, ExecutionContext } from './execution_context';
 import { Call, GetMethod } from './abstract_object';
-import { Await } from './asyncfunction';
+import { Await } from './async_function';
 
 declare const AsyncGeneratorYield: any;
 
@@ -652,13 +652,13 @@ export function* GeneratorResume(
     yield;
     iterResult = iter.next();
   }
-  const result = iterResult.done ? iterResult.value : iterResult.value!.yield;
-
   // const result = yield* $.resume(value);
   // Assert: genContext has been removed already
   Assert(generator.GeneratorState !== GeneratorState.executing);
   Assert($.getRunningContext() == methodContext);
-  return result;
+  if (iterResult.done) return iterResult.value;
+  Assert(iterResult.value!.type === 'yield');
+  return iterResult.value!.yield;
 }
 
 /**
@@ -735,12 +735,13 @@ export function* GeneratorResumeAbrupt(
     // yield;
     iterResult = iter.next();
   }
-  const result = iterResult.done ? iterResult.value : iterResult.value!.yield;
+  Assert($.getRunningContext() == methodContext);
+  if (iterResult.done) return iterResult.value;
+  Assert(iterResult.value!.type === 'yield');
+  return iterResult.value!.yield;
   
   //const result = yield* $.resume(abruptCompletion);
   // Assert: genContext has been removed already
-  Assert($.getRunningContext() == methodContext);
-  return result;
 }
 
 /**
@@ -804,7 +805,7 @@ export function* GeneratorYield(
   // If genContext is ever resumed again, let resumptionValue be the
   // Completion Record with which it is resumed.
 
-  const resumptionValue = yield {yield: iterNextObj};
+  const resumptionValue = yield {yield: iterNextObj, type: 'yield'};
 
   // Assert: If control reaches here, then genContext is the running
   // execution context again.

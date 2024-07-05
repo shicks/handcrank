@@ -6,7 +6,6 @@ import { Obj, OrdinaryObjectCreate } from '../src/internal/obj';
 import { Val } from '../src/internal/val';
 import { IsAbrupt, IsThrowCompletion, ThrowCompletion } from '../src/internal/completion_record';
 import { ToString } from '../src/internal/abstract_conversion';
-import { InitializeHostDefinedRealm } from '../src/internal/realm_record';
 import { RootExecutionContext } from '../src/internal/execution_context';
 
 /** See https://github.com/tc39/test262/blob/main/INTERPRETING.md */
@@ -34,11 +33,8 @@ export const test262: Plugin = {
 
       def($262, 'createRealm', function*($): ECR<Val> {
         // TODO - what about the previous realm???
-        const status = InitializeHostDefinedRealm($);
-        if (IsAbrupt(status)) return status;
-        const result = $.getRealm()!.GlobalObject!.OwnProps.get('$262')!.Value!;
-        $.popContext();
-        return result;
+        const realm = $.createRealm();
+        return realm.GlobalObject!.OwnProps.get('$262')!.Value!;
       });
 
       def($262, 'detachArrayBuffer', function*($, buffer): ECR<Val> {
@@ -73,7 +69,7 @@ export const test262: Plugin = {
           const newContext = new RootExecutionContext(realm);
           $.enterContext(newContext);
 
-          let result = yield* $.evaluateScript(sourceText, {filename: 'script'});
+          let result = yield* $.evaluateScript(sourceText, realm, {filename: 'script'});
           if (IsThrowCompletion(result)) {
             const props = (result.Value as Obj).OwnProps || new Map();
             if (props.get('name')?.Value === 'SyntaxError') {

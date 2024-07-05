@@ -19,8 +19,8 @@ import * as ESTree from 'estree';
 import { ModuleRecord } from './module_record';
 import { Prom } from './promise';
 
-export type Yield = {yield: Val};
-export type Await = {await: Prom};
+export type Yield = {yield: Val, type: 'yield'};
+export type Await = {await: Prom, type: 'await'};
 export type EvalGen<T> = Generator<Yield|Await|undefined, T, CR<Val>|undefined>;
 export type ECR<T> = EvalGen<CR<T>>;
 export type Job = () => EvalGen<void>;
@@ -379,8 +379,8 @@ export class VM {
   * flushMicrotasks(): EvalGen<void> {
     if (this.executionStack.some((e) => e.ScriptOrModule)) return;
     while (this.hasPendingMicrotask()) {
-      yield;
-      const job = this.microtaskQueue.shift() ?? this.macrotaskQueue.shift();
+      const job = this.microtaskQueue.shift()!;
+      yield; // yield after shifting to avoid it maybe disappearing?
       yield* job();
     }
   }
@@ -402,7 +402,6 @@ export class VM {
     // TODO - should we create an ExecutionContext right here?  When we actually
     // run the queue, we'll need to verify the SUSPENDED ---> RUNNING transition.
 
-    const scriptOrModule = this.getRunningContext().ScriptOrModule;
     const $ = this;
     this.microtaskQueue.push(function*(): EvalGen<void> {
       if (realm) $.enterContext(realm.RootContext);

@@ -10,7 +10,7 @@ import { Assert } from './assert';
 import { PropertyKey, Val } from './val';
 import { CodeExecutionContext, ExecutionContext } from './execution_context';
 import { Call } from './abstract_object';
-import { IsPromise, NewPromiseCapability, PerformPromiseThen, PromiseCapability, PromiseResolve, promises } from './promise';
+import { NewPromiseCapability, PerformPromiseThen, PromiseCapability, PromiseResolve, promises } from './promise';
 import { BlockLike, isBlockLike } from './tree';
 import { RealmRecord, defineProperties } from './realm_record';
 import { EnvironmentRecord } from './environment_record';
@@ -358,8 +358,8 @@ export function* AsyncBlockStart(
     }
 
     // an await has happened
-    Assert(IsAwait(iterResult.value));
-    const promise = iterResult.value.await;
+    Assert(iterResult.value!.type === 'await');
+    const promise = iterResult.value!.await;
     Assert($.getRunningContext() === asyncContext);
     //const asyncContext = $.getRunningContext();
     const onFulfilled = CreateBuiltinFunctionFromClosure(function*(v) {
@@ -381,14 +381,10 @@ export function* AsyncBlockStart(
   return UNUSED;
 }
 
-function IsAwait(value: unknown): value is Await {
-  return IsPromise((value as Await).await);
-}
-
 export function* Await($: VM, value: Val): ECR<Val> {
   const promise = yield* PromiseResolve($, $.getIntrinsic('%Promise%'), value);
   if (IsAbrupt(promise)) return promise;
-  return yield {await: promise};
+  return yield {await: promise, type: 'await'};
 }
 
 /**
