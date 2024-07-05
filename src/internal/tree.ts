@@ -174,6 +174,12 @@ export function preprocess(n: Node|null|undefined, source: Source, strict = fals
         nested = !bodies.has(n);
         if (isStrict(n.body)) strict = true;
         break;
+      case 'Literal':
+        if ((n as any).regex && !n.value) {
+          const {pattern, flags} = (n as any).regex;
+          // we expect this to probably throw a SyntaxError.
+          n.value = new RegExp(pattern, flags);
+        }
       // TODO - look for 'use strict' in other bodies?
     }
     (n as StrictNode).strict = strict;

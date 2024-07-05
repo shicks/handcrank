@@ -7,7 +7,7 @@ import { test262 } from './262';
 import { DebugString, VM, runAsync } from '../src/internal/vm';
 import { full } from '../src/plugins';
 import { CR, IsThrowCompletion } from '../src/internal/completion_record';
-import { Obj } from '../src/internal/obj';
+import { Obj, peekProp } from '../src/internal/obj';
 import { EMPTY } from '../src/internal/enums';
 import { Val } from '../src/internal/val';
 import { CreateBuiltinFunction } from '../src/internal/func';
@@ -177,9 +177,9 @@ class TestCase {
           throw new Error(`Expected a thrown Error but got ${DebugString(err)}`);
         }
         const expectedType = this.file.metadata.negative.type;
-        const gotType = err.OwnProps.get('name');
+        const gotType = peekProp(err, 'name')?.Value;
         if (gotType !== expectedType) {
-          throw new Error(`Expected ${expectedType} but got ${DebugString(err)}`);
+          throw new Error(`Expected error of type '${expectedType}' but got ${DebugString(err)}`);
         }
       } else {
         let msg = `Unexpected failure: ${DebugString(err, 2)}`;

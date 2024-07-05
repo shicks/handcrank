@@ -321,13 +321,13 @@ export class VM {
       if (!this.esprima) throw new Error(`no parser`);
       try {
         script = this.esprima.parseScript(source) as ESTree.Program;
+        preprocess(script, {sourceFile: filename, sourceText: source}, strict);
       } catch (err) {
         this.enterContext(realm.RootContext);
         const abrupt = this.throw('SyntaxError', err.message);
         this.popContext(realm.RootContext);
         return abrupt;
       }
-      preprocess(script, {sourceFile: filename, sourceText: source}, strict);
 
       // script = this.esprima.parseScript(source, {loc: true}, (n: Node, meta: Metadata) => {
       //   // TODO - we want the following:

@@ -29,6 +29,8 @@ export const classes: Plugin = {
       on(['ClassDeclaration', 'ClassExpression'], Evaluation_ClassExpression);
       on('MemberExpression', when(n => n.object.type === 'Super', Evaluation_SuperProperty));
       on('CallExpression', when(n => n.callee.type === 'Super', Evaluation_SuperCall));
+      on('MetaProperty', when(n => n.meta.name === 'new' && n.property.name === 'target',
+                              Evaluation_NewTarget));
     },
     NamedEvaluation(on) {
       /**
@@ -864,4 +866,14 @@ export function* Evaluation_ClassExpression(
   if (IsAbrupt(value)) return value;
   value.SourceText = GetSourceText(node);
   return value;
+}
+
+/**
+ * 13.3.12.1 Runtime Semantics: Evaluation
+ * 
+ * NewTarget : new . target
+ * 1. Return GetNewTarget().
+ */
+export function* Evaluation_NewTarget($: VM): ECR<Val> {
+  return GetNewTarget($);
 }
