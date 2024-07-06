@@ -10,7 +10,8 @@ import { RealmRecord } from './realm_record';
 import { ReferenceRecord } from './reference_record';
 import { ScriptRecord } from './script_record';
 import { Val } from './val';
-import { ECR, VM } from './vm';
+import { DebugString, ECR, VM } from './vm';
+import { UNUSED } from './enums';
 
 /**
  * 9.4 Execution Contexts
@@ -81,7 +82,7 @@ export abstract class ExecutionContext {
 
   isRunning: boolean = false;
 
-  CodeEvaluationState: ECR<Val>|undefined = undefined;
+  CodeEvaluationState: ECR<Val|UNUSED>|undefined = undefined;
   Generator: Obj|undefined = undefined;
   // TODO - CodeEvaluationState is a generator object {next, throw, return}
   //      - if we're suspended, resumption is calling next.
@@ -93,7 +94,7 @@ export abstract class ExecutionContext {
   constructor(
     readonly ScriptOrModule: ScriptRecord|ModuleRecord|null,
     readonly Function: Func|null,
-    readonly Realm: RealmRecord,
+    public Realm: RealmRecord,
     public PrivateEnvironment: PrivateEnvironmentRecord|null,
   ) { }
 

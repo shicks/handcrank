@@ -4,7 +4,7 @@ import { prop0, propC } from './property_descriptor';
 import { Await, ECR, Plugin, VM, mapJust, when } from './vm';
 import { CreateDynamicFunction, objectAndFunctionPrototype } from './fundamental';
 import { EMPTY, NON_LEXICAL_THIS, UNUSED } from './enums';
-import { CR, CastNotAbrupt, IsAbrupt, IsReturnCompletion, IsThrowCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';
+import { CR, CastNotAbrupt, IsAbrupt, IsNormalCompletion, IsReturnCompletion, IsThrowCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { Assert } from './assert';
 import { PropertyKey, Val } from './val';
@@ -329,7 +329,7 @@ export function* AsyncBlockStart(
     // exception or performed an implicit or explicit return; all
     // awaiting is done.  ... ?
     $.popContext(acAsyncContext);
-    if (!IsAbrupt(result)) {
+    if (IsNormalCompletion(result)) {
       // NOTE: Handle concise body here
       CastNotAbrupt(
         yield* Call($, promiseCapability.Resolve, undefined,

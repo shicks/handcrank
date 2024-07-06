@@ -15,6 +15,7 @@ import { Plugin, when } from './internal/vm';
 import { regexp } from './internal/regexp';
 import { promises } from './internal/promise';
 import { asyncFunctions } from './internal/async_function';
+import { asyncGenerators } from './internal/async_generator';
 
 export const full: Plugin = {
   id: 'full',
@@ -36,20 +37,8 @@ export const full: Plugin = {
     regexp,
     promises,
     asyncFunctions,
+    asyncGenerators,
   ],
-
-  // TODO - remove this once we implement async generators
-  syntax: {
-    InstantiateFunctionObject(on) {
-      on('FunctionDeclaration',
-         when(n => n.async && n.generator, function($) { return CreateBuiltinFunctionFromClosure(function*() { return undefined; }, 0, '', {$}); }));
-    },
-    Evaluation(on) {
-      on(['ArrowFunctionExpression', 'FunctionExpression'],
-         when(n => n.async && n.generator, function*($) { return CreateBuiltinFunctionFromClosure(function*() { return undefined; }, 0, '', {$}); }));
-    },
-  },
-
 };
 
 export {
@@ -70,4 +59,5 @@ export {
   regexp,
   promises,
   asyncFunctions,
+  asyncGenerators,
 };

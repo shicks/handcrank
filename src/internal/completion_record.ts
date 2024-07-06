@@ -94,6 +94,13 @@ export function NormalCompletion<T>(value: T): CR<T> {
   return value;
 }
 
+export function IsNormalCompletion<T>(
+  completion: CR<T>,
+  ...rest: NotGen<T>
+): completion is T {
+  return !IsAbrupt(completion, ...rest);
+}
+
 /**
  * 6.2.4.2 ThrowCompletion ( value )
  *

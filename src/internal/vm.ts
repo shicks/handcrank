@@ -147,21 +147,24 @@ export class VM {
 
   enterContext(context: ExecutionContext) {
     // TODO - resume? suspend previous?
+    //console.log(`enter ${this.executionStack.length}: ${context}`);
     this.executionStack.push(context);
     context.resume();
   }
 
   popContext(context?: ExecutionContext) {
     //Assert(this.executionStack.length > 1, 'Cannot pop last context');
+    //console.log(`pop   ${this.executionStack.length - 1}: ${this.executionStack.at(-1)}`);
     if (context) Assert(this.executionStack.at(-1) === context, `Wrong context to pop`);
     this.executionStack.pop()!.suspend();
     this.executionStack.at(-1)?.resume();
   }
 
-  getRunningContext(): ExecutionContext {
+  getRunningContext(index = -1): ExecutionContext {
     // TODO - what if stack empty?!?
-    Assert(this.executionStack.length > 0, 'Not running');
-    return this.executionStack.at(-1)!;
+    const ctx = this.executionStack.at(index)!;
+    Assert(ctx, 'Not running');
+    return ctx;
   }
 
   * withEmptyStack<T>(fn: () => EvalGen<T>): EvalGen<T> {
@@ -404,12 +407,12 @@ export class VM {
 
     const $ = this;
     this.microtaskQueue.push(function*(): EvalGen<void> {
+      if (realm) $.popContext();
       if (realm) $.enterContext(realm.RootContext);
       const status = yield* job();
       if (IsAbrupt(status)) {
         // TODO - report uncaught error
       }
-      if (realm) $.popContext();
     });
   }
 
