@@ -16,6 +16,7 @@ import { regexp } from './internal/regexp';
 import { promises } from './internal/promise';
 import { asyncFunctions } from './internal/async_function';
 import { asyncGenerators } from './internal/async_generator';
+import { reflect } from './internal/reflect';
 
 export const full: Plugin = {
   id: 'full',
@@ -38,6 +39,7 @@ export const full: Plugin = {
     promises,
     asyncFunctions,
     asyncGenerators,
+    reflect,
   ],
 };
 
@@ -60,4 +62,5 @@ export {
   promises,
   asyncFunctions,
   asyncGenerators,
+  reflect,
 };
