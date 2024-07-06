@@ -5,6 +5,7 @@ import { ToBoolean, ToObject } from './abstract_conversion';
 import { AsyncIteratorClose, CreateIterResultObject, GetIterator, IteratorClose, IteratorComplete, IteratorRecord, IteratorValue } from './abstract_iterator';
 import { Call, GetV } from './abstract_object';
 import { Assert } from './assert';
+import { Await } from './async_function';
 import { Abrupt, CR, CastNotAbrupt, CompletionType, CompletionValue, IsAbrupt, IsThrowCompletion, UpdateEmpty } from './completion_record';
 import { ASYNC, ASYNC_ITERATE, EMPTY, ENUMERATE, ITERATE, SYNC, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, ObjectEnvironmentRecord } from './environment_record';
@@ -18,8 +19,6 @@ import { NodeMap, NodeType } from './tree';
 import { Val } from './val';
 import { DebugString, ECR, Plugin, VM, just } from './vm';
 import * as ESTree from 'estree';
-
-declare function Await(...args: unknown[]): ECR<Val>;
 
 export const controlFlow: Plugin = {
   id: 'controlFlow',
@@ -879,6 +878,7 @@ function* ForInOfBodyEvaluation(
     let nextResult = yield* Call($, iteratorRecord.NextMethod, iteratorRecord.Iterator)
     if (IsAbrupt(nextResult)) return nextResult;
     if (iteratorKind === ASYNC) {
+      // TODO - can we pull this out to a separate dep??? maybe inject the difference?
       nextResult = yield* Await($, nextResult);
       if (IsAbrupt(nextResult)) return nextResult;
     }

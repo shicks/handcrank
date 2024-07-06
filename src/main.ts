@@ -7,6 +7,9 @@ import { IsAbrupt, IsThrowCompletion } from './internal/completion_record';
 import * as fs from 'node:fs';
 import { full } from './plugins';
 
+// TODO - try acorn with {ecmaVersion: latest}
+//      - benchmark code size, performance, and test262 accuracy
+
 export const vm = new VM({
   parseScript(source) { return esprima.parseScript(source, {loc: true, range: true}); },
   parseModule(source) { return esprima.parseModule(source, {loc: true, range: true}); },

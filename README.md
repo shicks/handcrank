@@ -49,12 +49,12 @@ browser or on the server.
     - [x] Arguments
     - [x] Iterators
     - [x] RegExp
-    - [ ] Reflect
-    - [ ] Date
+    - [x] Reflect
     - [ ] Map
     - [ ] Set
     - [ ] WeakMap / WeakSet
     - [ ] Proxy
+    - [ ] Date
 - [x] Functions
     - [x] function calls
     - [x] constructor calls
