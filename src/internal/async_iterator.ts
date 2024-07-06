@@ -72,6 +72,7 @@ export const asyncIterators: Plugin = {
       });
     },
   },
+  abstract: {CreateAsyncFromSyncIterator},
 };
 
 /**

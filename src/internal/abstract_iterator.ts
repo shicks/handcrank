@@ -10,9 +10,6 @@ import { propWEC } from './property_descriptor';
 import { Val } from './val';
 import { ECR, VM } from './vm';
 
-declare const Await: any;
-declare const CreateAsyncFromSyncIterator: any;
-
 /**
  * 7.4.1 Iterator Records
  *
@@ -104,7 +101,7 @@ export function* GetIterator(
       }
       const syncIteratorRecord = yield* GetIteratorFromMethod($, obj, syncMethod);
       if (IsAbrupt(syncIteratorRecord)) return syncIteratorRecord;
-      return CreateAsyncFromSyncIterator($, syncIteratorRecord);
+      return yield* $.abstractOperations.CreateAsyncFromSyncIterator!($, syncIteratorRecord);
     }
   } else {
     method = yield* GetMethod($, obj, Symbol.iterator);
@@ -306,7 +303,7 @@ export function* AsyncIteratorClose(
     if (innerResult === undefined) return completion;
     innerResult = yield* Call($, innerResult, iterator);
     if (!IsAbrupt(innerResult)) {
-      innerResult = yield* Await($, innerResult);
+      innerResult = yield* $.abstractOperations.Await!($, innerResult);
     }
   }
   if (IsThrowCompletion(completion)) return completion;

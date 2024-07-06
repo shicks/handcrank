@@ -18,6 +18,7 @@ import { IsStrictMode } from './static/scope';
 import * as ESTree from 'estree';
 import { ModuleRecord } from './module_record';
 import { Prom } from './promise';
+import { IteratorRecord } from './abstract_iterator';
 
 export type Yield = {yield: Val, type: 'yield'};
 export type Await = {await: Prom, type: 'await'};
@@ -47,9 +48,12 @@ export interface Plugin {
   abstract?: AbstractOps;
 }
 
+/** For forward-referencing things without strong deps. */
 interface AbstractOps {
   Await?: ($: VM, value: Val) => ECR<Val>;
   AsyncGeneratorYield?: ($: VM, value: Val) => ECR<Val>;
+  CreateAsyncFromSyncIterator?:
+    ($: VM, syncIteratorRcord: IteratorRecord) => ECR<IteratorRecord>;
 }
 
 export function run<T>(gen: EvalGen<T>) {
