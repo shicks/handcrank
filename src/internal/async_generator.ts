@@ -1350,6 +1350,29 @@ export function* AsyncGeneratorDrainQueue(
  *     restore callerContext as the running execution context.
  * 15. Return generator.
  */
-export function CreateAsyncIteratorFromClosure() {
-  TODO;
+export function CreateAsyncIteratorFromClosure(
+  $: VM,
+  closure: () => ECR<Val>,
+  generatorBrand: string|EMPTY,
+  generatorPrototype: Obj,
+): AsyncGen {
+  const generator = OrdinaryObjectCreate({
+    Prototype: generatorPrototype,
+    AsyncGeneratorState: undefined,
+    AsyncGeneratorContext: undefined,
+    AsyncGeneratorQueue: [],
+    GeneratorBrand: generatorBrand,
+  });
+  const callerContext = $.getRunningContext();
+  const calleeContext =
+    new AsyncIteratorExecutionContext(
+      callerContext.ScriptOrModule, null, callerContext.Realm, null);
+  callerContext.suspend();
+  $.enterContext(calleeContext);
+  AsyncGeneratorStart($, generator, closure);
+  $.popContext(calleeContext);
+  Assert(IsAsyncGen(generator));
+  return generator;
 }
+
+class AsyncIteratorExecutionContext extends ExecutionContext {}

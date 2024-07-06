@@ -10,7 +10,7 @@ import { RealmRecord } from './realm_record';
 import { ReferenceRecord } from './reference_record';
 import { ScriptRecord } from './script_record';
 import { Val } from './val';
-import { DebugString, ECR, VM } from './vm';
+import { ECR, VM } from './vm';
 import { UNUSED } from './enums';
 
 /**
