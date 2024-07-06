@@ -293,12 +293,12 @@ Harness.load('test/test262').then(async harness => {
           new Promise((_, reject) => setTimeout(
             () => reject(new Error('timeout')), 10_000)),
         ]);
-        if (!verbose) process.stdout.write('.');
+        if (!verbose) process.stdout.write('\x1b[32m.\x1b[m');
         ++passed;
         unlink(filename).catch(() => {});
       } catch (err) {
         ++failed;
-        if (!verbose) process.stdout.write('F');
+        if (!verbose) process.stdout.write('\x1b[31mF\x1b[m');
         await mkdir(thisDir, {recursive: true});
         writeFile(filename, err.message);
         if (verbose) {

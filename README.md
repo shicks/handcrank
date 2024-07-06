@@ -49,21 +49,22 @@ browser or on the server.
     - [x] Arguments
     - [x] Iterators
     - [x] RegExp
+    - [ ] Reflect
     - [ ] Date
     - [ ] Map
     - [ ] Set
     - [ ] WeakMap / WeakSet
-    - [ ] Reflect
     - [ ] Proxy
 - [x] Functions
+    - [x] function calls
+    - [x] constructor calls
     - [x] vanilla declarations
     - [x] vanilla expressions
     - [x] arrow functions
     - [x] generators
-    - [ ] async
-    - [ ] async arrows
-    - [x] function calls
-    - [x] constructor calls
+    - [x] async
+    - [x] async arrows
+    - [x] async generators
 - [x] Syntax
     - [x] object literals
     - [x] array literals
