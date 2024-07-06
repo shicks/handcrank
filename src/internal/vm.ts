@@ -44,6 +44,12 @@ export interface Plugin {
   deps?: () => Plugin[];
   syntax?: SyntaxOpMap;
   realm?: RealmAdvice;
+  abstract?: AbstractOps;
+}
+
+interface AbstractOps {
+  Await?: ($: VM, value: Val) => ECR<Val>;
+  AsyncGeneratorYield?: ($: VM, value: Val) => ECR<Val>;
 }
 
 export function run<T>(gen: EvalGen<T>) {
@@ -122,6 +128,7 @@ export class VM {
     InstantiateFunctionObject: {},
     BindingInitialization: {},
   };
+  abstractOperations: AbstractOps = {};
 
   isStrict = false;
   microtaskQueue: Job[] = [];
@@ -517,12 +524,14 @@ export class VM {
   }
 
   install(plugin: Plugin): void {
+    // TODO - fix up how we handle deps and replacement
     for (const dep of plugin.deps?.() ?? []) {
       const id = dep.id ?? dep;
       if (!this.plugins.has(id)) this.install(dep);
     }
     const id = plugin.id ?? plugin;
     this.plugins.set(id, plugin);
+    Object.assign(this.abstractOperations, plugin.abstract || {});
 
     if (!plugin.syntax) return;
     for (const key in this.syntaxOperations) {

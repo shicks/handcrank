@@ -4,7 +4,7 @@ import { CreateBuiltinFunction, Func, FunctionDeclarationInstantiation, Instanti
 import { prop0, propC, propW } from './property_descriptor';
 import { ECR, Plugin, VM, mapJust, when } from './vm';
 import { CreateDynamicFunction, functionConstructor } from './fundamental';
-import { ASYNC, EMPTY, NON_LEXICAL_THIS, NOT_APPLICABLE, SYNC, UNUSED } from './enums';
+import { ASYNC, EMPTY, NON_LEXICAL_THIS, SYNC, UNUSED } from './enums';
 import { Abrupt, CR, IsAbrupt, IsReturnCompletion, IsThrowCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';
 import { EnvironmentRecord } from './environment_record';
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
@@ -13,7 +13,7 @@ import { Assert } from './assert';
 import { PropertyKey, Val } from './val';
 import { iterators } from './iterators';
 import { RealmRecord, defineProperties } from './realm_record';
-import { CreateIterResultObject, GetIterator, IteratorClose, IteratorComplete, IteratorValue } from './abstract_iterator';
+import { AsyncIteratorClose, CreateIterResultObject, GetIterator, IteratorClose, IteratorComplete, IteratorValue } from './abstract_iterator';
 import { CodeExecutionContext, ExecutionContext } from './execution_context';
 import { Call, GetMethod } from './abstract_object';
 
@@ -35,12 +35,11 @@ export const generators: Plugin = {
       on('FunctionExpression',
          when(n => !n.async && n.generator,
               mapJust(InstantiateGeneratorFunctionExpression)));
-      on('YieldExpression', function($, n) {
-        if (GetGeneratorKind($) !== SYNC) return NOT_APPLICABLE;
+      on('YieldExpression', function*($, n) {
         if (n.delegate) {
-          return Evaluation_YieldDelegateExpression($, n);
+          return yield* Evaluation_YieldDelegateExpression($, n);
         } else {
-          return Evaluation_YieldExpression($, n);
+          return yield* Evaluation_YieldExpression($, n);
         }
       });
     },
@@ -841,15 +840,17 @@ export function* GeneratorYield(
  * 1. Let generatorKind be GetGeneratorKind().
  * 2. If generatorKind is async, return ? AsyncGeneratorYield(? Await(value)).
  * 3. Otherwise, return ? GeneratorYield(CreateIterResultObject(value, false)).
- *
- * NOTE: We only implement the sync part of this here, and leave the async
- * part to async_generator.ts
  */
 export function* Yield(
   $: VM,
   value: Val,
 ): ECR<Val> {
-  Assert(GetGeneratorKind($) === SYNC);
+  const generatorKind = GetGeneratorKind($);
+  if (generatorKind === ASYNC) {
+    const awaited = yield* $.abstractOperations.Await!($, value);
+    if (IsAbrupt(awaited)) return awaited;
+    return yield* $.abstractOperations.AsyncGeneratorYield!($, awaited);
+  }
   return yield* GeneratorYield($, CreateIterResultObject($, value, false));
 }
 
@@ -983,32 +984,44 @@ export function CreateIteratorFromClosure(
  *             Completion(AsyncGeneratorYield(? IteratorValue(innerReturnResult))).
  *         x. Else, set received to Completion(GeneratorYield(innerReturnResult)).
  */
-export function* Evaluation_YieldDelegateExpression(
-  $: VM,
-  n: ESTree.YieldExpression,
-): ECR<Val> {
+export function* Evaluation_YieldDelegateExpression($: VM, n: ESTree.YieldExpression): ECR<Val> {
   Assert(n.argument);
+  const generatorKind = GetGeneratorKind($);
+  Assert(generatorKind !== false);
   const value = yield* $.evaluateValue(n.argument);
   if (IsAbrupt(value)) return value;
-  const iteratorRecord = yield* GetIterator($, value, SYNC);
+  const iteratorRecord = yield* GetIterator($, value, generatorKind);
   if (IsAbrupt(iteratorRecord)) return iteratorRecord;
   const iterator = iteratorRecord.Iterator;
   let received: CR<Val> = undefined;
   while (true) {
     if (!IsAbrupt(received)) {
-      const innerResult: CR<Val> = yield* Call($, iteratorRecord.NextMethod, iterator, [received]);
+      let innerResult: CR<Val> = yield* Call($, iteratorRecord.NextMethod, iterator, [received]);
       if (IsAbrupt(innerResult)) return innerResult;
+      if (generatorKind === ASYNC) {
+        innerResult = yield* $.abstractOperations.Await!($, innerResult);
+        if (IsAbrupt(innerResult)) return innerResult;
+      }
       if (!(innerResult instanceof Obj)) return $.throw('TypeError', 'not an object');
       const done = yield* IteratorComplete($, innerResult);
       if (IsAbrupt(done)) return done;
       if (done) return yield* IteratorValue($, innerResult);
-      received = yield* GeneratorYield($, innerResult);
+      if (generatorKind === ASYNC) {
+        const innerResultValue: CR<Val> = yield* IteratorValue($, innerResult);
+        if (IsAbrupt(innerResultValue)) return innerResultValue;
+        received = yield* $.abstractOperations.AsyncGeneratorYield!($, innerResultValue);
+      } else {
+        received = yield* GeneratorYield($, innerResult);
+      }
     } else if (IsThrowCompletion(received)) {
       const throwMethod = yield* GetMethod($, iterator, 'throw');
       if (IsAbrupt(throwMethod)) return throwMethod;
       if (throwMethod != null) {
-        const innerResult = yield* Call($, throwMethod, iterator, [received.Value]);
+        let innerResult = yield* Call($, throwMethod, iterator, [received.Value]);
         if (IsAbrupt(innerResult)) return innerResult;
+        if (generatorKind === ASYNC) {
+          innerResult = yield* $.abstractOperations.Await!($, innerResult);
+        }
         // NOTE: Exceptions from the inner iterator throw method are
         // propagated. Normal completions from an inner throw method are
         // processed similarly to an inner next.
@@ -1016,12 +1029,20 @@ export function* Evaluation_YieldDelegateExpression(
         const done = yield* IteratorComplete($, innerResult);
         if (IsAbrupt(done)) return done;
         if (done) return yield* IteratorValue($, innerResult);
-        received = yield* GeneratorYield($, innerResult);
+        if (generatorKind === ASYNC) {
+          const innerValue = yield* IteratorValue($, innerResult);
+          if (IsAbrupt(innerValue)) return innerValue;
+          received = yield* $.abstractOperations.AsyncGeneratorYield!($, innerValue);
+        } else {
+          received = yield* GeneratorYield($, innerResult);
+        }
       } else {
         // NOTE: If iterator does not have a throw method, this throw
         // is going to terminate the yield* loop. But first we need to
         // give iterator a chance to clean up.
-        const closeStatus = yield* IteratorClose($, iteratorRecord, EMPTY);
+        const closeStatus = generatorKind === ASYNC ?
+          yield* AsyncIteratorClose($, iteratorRecord, EMPTY) :
+          yield* IteratorClose($, iteratorRecord, EMPTY);
         if (IsAbrupt(closeStatus)) return closeStatus;
         // NOTE: The next step throws a TypeError to indicate that
         // there was a yield* protocol violation: iterator does not
@@ -1034,11 +1055,17 @@ export function* Evaluation_YieldDelegateExpression(
       if (IsAbrupt(returnMethod)) return returnMethod;
       if (returnMethod === undefined) { // iii
         // 1-3
-        const result = received.Value;
+        const result = generatorKind === ASYNC ?
+          yield* $.abstractOperations.Await!($, received.Value) :
+          received.Value;
         return IsAbrupt(result) ? result : ReturnCompletion(result);
       }
       let innerReturnResult = yield* Call($, returnMethod, iterator, [received.Value]); // iv
       if (IsAbrupt(innerReturnResult)) return innerReturnResult;
+      if (ASYNC.is(generatorKind)) {
+        innerReturnResult = yield* $.abstractOperations.Await!($, innerReturnResult); // v
+        if (IsAbrupt(innerReturnResult)) return innerReturnResult;
+      }
       if (!(innerReturnResult instanceof Obj)) return $.throw('TypeError', 'not an object'); // vi
       const done = yield* IteratorComplete($, innerReturnResult); // vii
       if (IsAbrupt(done)) return done;
@@ -1047,7 +1074,13 @@ export function* Evaluation_YieldDelegateExpression(
         if (IsAbrupt(value)) return value;
         return ReturnCompletion(value); // 2
       }
-      received = yield* GeneratorYield($, innerReturnResult); // x
+      if (ASYNC.is(generatorKind)) { // ix
+        const value = yield* IteratorValue($, innerReturnResult);
+        if (IsAbrupt(value)) return value;
+        received = yield* $.abstractOperations.AsyncGeneratorYield!($, value);
+      } else {
+        received = yield* GeneratorYield($, innerReturnResult); // x
+      }
       // Loop uses recevived
     }
   }

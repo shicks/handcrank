@@ -48,6 +48,7 @@ export const asyncFunctions: Plugin = {
     },
   },
   realm: {CreateIntrinsics},
+  abstract: {Await},
 };
 
 function CreateIntrinsics(realm: RealmRecord) {

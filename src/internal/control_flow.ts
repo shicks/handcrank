@@ -5,7 +5,6 @@ import { ToBoolean, ToObject } from './abstract_conversion';
 import { AsyncIteratorClose, CreateIterResultObject, GetIterator, IteratorClose, IteratorComplete, IteratorRecord, IteratorValue } from './abstract_iterator';
 import { Call, GetV } from './abstract_object';
 import { Assert } from './assert';
-import { Await } from './async_function';
 import { Abrupt, CR, CastNotAbrupt, CompletionType, CompletionValue, IsAbrupt, IsThrowCompletion, UpdateEmpty } from './completion_record';
 import { ASYNC, ASYNC_ITERATE, EMPTY, ENUMERATE, ITERATE, SYNC, UNUSED } from './enums';
 import { DeclarativeEnvironmentRecord, ObjectEnvironmentRecord } from './environment_record';
@@ -879,7 +878,7 @@ function* ForInOfBodyEvaluation(
     if (IsAbrupt(nextResult)) return nextResult;
     if (iteratorKind === ASYNC) {
       // TODO - can we pull this out to a separate dep??? maybe inject the difference?
-      nextResult = yield* Await($, nextResult);
+      nextResult = yield* $.abstractOperations.Await!($, nextResult);
       if (IsAbrupt(nextResult)) return nextResult;
     }
     if (!(nextResult instanceof Obj)) {
