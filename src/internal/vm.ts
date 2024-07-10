@@ -6,7 +6,7 @@ import { NodeType, NodeMap, Node, Esprima, preprocess, Source } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
 import { InitializeHostDefinedRealm, RealmAdvice, RealmRecord, getIntrinsicName } from './realm_record';
 import { ParseScript, ScriptEvaluation, ScriptRecord } from './script_record';
-import { Obj, OrdinaryObjectCreate } from './obj';
+import { Obj, OrdinaryObjectCreate, peekProp } from './obj';
 import { EnvironmentRecord, FunctionEnvironmentRecord } from './environment_record';
 import { HasValueField, propWC } from './property_descriptor';
 import { Assert } from './assert';
@@ -245,41 +245,45 @@ export class VM {
 
   captureStackTrace(O: Obj) {
     const frames: string[] = [];
-    for (let i = this.executionStack.length - 1; i >= 0; i--) {
-      const frame = this.executionStack[i];
-      if (frame instanceof BuiltinExecutionContext) {
-        frames.push(`\n    at ${frame.Function!.InitialName} (builtin)`);
-      } else if (frame instanceof CodeExecutionContext) {
-        const currentNode = frame.currentNode;
-        if (!currentNode) continue;
-        const file = (currentNode.loc?.source as Source)?.sourceFile;
-        let func = frame.Function?.OwnProps.get('name')?.Value;
-        if (!func) func = frame.Function?.InternalName;
-        if (func) {
-          const thisEnv = frame.GetThisEnvironment();
-          if (IsConstructor(frame.Function)) {
-            func = `new ${String(func)}`;
-          } else if (
-            thisEnv instanceof FunctionEnvironmentRecord &&
-              thisEnv.ThisBindingStatus === UNINITIALIZED
-          ) {
-            func = `UNINITIALIZED_THIS.${String(func)}`;
-          } else {
-            const thisValue = ResolveThisBinding(this);
-            if (!IsAbrupt(thisValue) && thisValue instanceof Obj) {
-              // TODO - read internal name from `this`?
-              const className =
-                (thisValue!.OwnProps?.get('constructor') as unknown as Obj)
-                ?.OwnProps?.get('name')?.Value;
-              if (className) func = `${String(className)}.${String(func)}`;
+    try {
+      for (let i = this.executionStack.length - 1; i >= 0; i--) {
+        const frame = this.executionStack[i];
+        if (frame instanceof BuiltinExecutionContext) {
+          frames.push(`\n    at ${frame.Function!.InitialName} (builtin)`);
+        } else if (frame instanceof CodeExecutionContext) {
+          const currentNode = frame.currentNode;
+          if (!currentNode) continue;
+          const file = (currentNode.loc?.source as Source)?.sourceFile;
+          let func = frame.Function?.OwnProps.get('name')?.Value;
+          if (!func) func = frame.Function?.InternalName;
+          if (func) {
+            const thisEnv = frame.GetThisEnvironment();
+            if (IsConstructor(frame.Function)) {
+              func = `new ${String(func)}`;
+            } else if (
+              thisEnv instanceof FunctionEnvironmentRecord &&
+                thisEnv.ThisBindingStatus === UNINITIALIZED
+            ) {
+              func = `UNINITIALIZED_THIS.${String(func)}`;
+            } else {
+              const thisValue = thisEnv.GetThisBinding(this);
+              if (!IsAbrupt(thisValue) && thisValue instanceof Obj) {
+                // TODO - read internal name from `this`?
+                const className =
+                  peekProp(peekProp(thisValue, 'constructor')?.Value as unknown as Obj,
+                           'name')?.Value;
+                if (className) func = `${String(className)}.${String(func)}`;
+              }
             }
           }
+          const lineCol = currentNode.loc?.start ?
+            ` (${file}:${currentNode.loc.start.line}:${
+               currentNode.loc.start.column})` : '';
+          frames.push(`\n    at ${func ? String(func) : '<anonymous>'}${lineCol}`);
         }
-        const lineCol = currentNode.loc?.start ?
-          ` (${file}:${currentNode.loc.start.line}:${
-             currentNode.loc.start.column})` : '';
-        frames.push(`\n    at ${func ? String(func) : '<anonymous>'}${lineCol}`);
       }
+    } catch (err: unknown) {
+      frames.push(`\nError computing stack trace: ${String((err as any)?.stack ?? err)}`);
     }
     const name = findValueProp(O, 'name');
     const msg = findValueProp(O, 'message');
