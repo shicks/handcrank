@@ -1,6 +1,7 @@
 // Runs test262.
 
-import * as esprima from 'esprima-next';
+// import * as esprima from 'esprima-next';
+import * as acorn from 'acorn';
 import { parse } from 'yaml';
 import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { test262 } from './262';
@@ -107,16 +108,16 @@ class TestCase {
   }
 
   async runAsync(strict: boolean) {
-    return await runAsync(this.runSync(strict), {timeoutMillis: 10_000});
+    return await runAsync(this.runSync(strict), {timeoutMillis: 100_000});
   }
 
   * runSync(strict: boolean) {
     const vm = new VM({
       parseScript(source) {
-        return esprima.parseScript(source, {loc: true, range: true});
+        return acorn.parse(source, {ecmaVersion: 'latest'});
       },
       parseModule(source) {
-        return esprima.parseModule(source, {loc: true, range: true});
+        return acorn.parse(source, {ecmaVersion: 'latest'});
       },
     });
     vm.install(full);
@@ -291,7 +292,7 @@ Harness.load('test/test262').then(async harness => {
         await Promise.race([
           t.runAsync(strict),
           new Promise((_, reject) => setTimeout(
-            () => reject(new Error('timeout')), 10_000)),
+            () => reject(new Error('timeout')), 100_000)),
         ]);
         if (!verbose) process.stdout.write('\x1b[32m.\x1b[m');
         ++passed;

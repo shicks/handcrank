@@ -14,14 +14,12 @@ browser or on the server.
 
 ## TODO
 
-- Figure out promise scheduling
-- RootExecutionContext??? - [9.5 Jobs] expects the stack to be empty...?
-
 - consider exposing bindings a little more, lazy-initialized binding
   for arguments objects, etc
 - we should probably make a subtype of PropertyMap that stores array
   indices separately in an array, which would allow delegating a lot
   more to the underlying VM.
+- optimize "ordinary" functions w/ `new Function`? need thorough analysis
 
 ## Features
 

@@ -31,6 +31,7 @@ export const syntax: Plugin = {
         }
         return result;
       });
+      on('EmptyStatement', () => just(EMPTY));
       on(['ExpressionStatement', 'ChainExpression'], ($, n) => $.Evaluation(n.expression));
       // Primary elements
       on('Literal', (_$, n) => {

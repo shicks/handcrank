@@ -18,7 +18,7 @@ import { PropertyKey, Val } from './val';
 import { BlockLike, Source, isBlockLike } from './tree';
 import { ToObject } from './abstract_conversion';
 import { GetThisValue, GetValue, IsPropertyReference, ReferenceRecord } from './reference_record';
-import { IsCallable, IsConstructor } from './abstract_compare';
+import { IsCallable, IsConstructor, SameValue } from './abstract_compare';
 import { memoize } from './slots';
 import { CreateListIteratorRecord, GetIterator, IteratorStep, IteratorValue } from './abstract_iterator';
 import { functionConstructor } from './fundamental';
@@ -1914,9 +1914,22 @@ export function* Evaluation_CallExpression(
   Assert(!EMPTY.is(ref)); // ??? does this break stuff?
   const func = yield* GetValue($, ref);
   if (IsAbrupt(func)) return func;
+  // 6.
+  if (
+    ref instanceof ReferenceRecord &&
+      !IsPropertyReference(ref) &&
+      ref.ReferencedName === 'eval' &&
+      func instanceof Obj &&
+      SameValue(func, $.getRealm()?.Intrinsics.get('%eval%'))
+  ) {
+    const argList = yield* $.ArgumentListEvaluation(node);
+    if (IsAbrupt(argList)) return argList;
+    if (argList.length === 0) return undefined;
+    const evalArg = argList[0];
+    const strictCaller = IsStrictMode(node);
+    return yield* $.abstractOperations.PerformEval!($, evalArg, strictCaller, true);
+  }
 
-  // if (ref instanceof ReferenceRecord)  && !IsPropertyReference(ref)
-  //   && ref.ReferencedName === 'eval') {
   // const thisCall = n;
   const tailCall = false; // IsInTailPosition(thisCall);
   return yield* EvaluateCall($, func, ref, node, tailCall);

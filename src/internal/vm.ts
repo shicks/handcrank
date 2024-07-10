@@ -54,6 +54,7 @@ interface AbstractOps {
   AsyncGeneratorYield?: ($: VM, value: Val) => ECR<Val>;
   CreateAsyncFromSyncIterator?:
     ($: VM, syncIteratorRcord: IteratorRecord) => ECR<IteratorRecord>;
+  PerformEval?: ($: VM, x: Val, strictCaller: boolean, direct: boolean) => ECR<Val>;
 }
 
 export function run<T>(gen: EvalGen<T>) {

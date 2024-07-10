@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { DebugString, VM, run } from './internal/vm';
-import * as esprima from 'esprima-next';
+import * as acorn from 'acorn';
 import * as readline from 'readline';
 import { IsAbrupt, IsThrowCompletion } from './internal/completion_record';
 import * as fs from 'node:fs';
@@ -11,8 +11,8 @@ import { full } from './plugins';
 //      - benchmark code size, performance, and test262 accuracy
 
 export const vm = new VM({
-  parseScript(source) { return esprima.parseScript(source, {loc: true, range: true}); },
-  parseModule(source) { return esprima.parseModule(source, {loc: true, range: true}); },
+  parseScript(source) { return acorn.parse(source, {ecmaVersion: 'latest'}); },
+  parseModule(source) { return acorn.parse(source, {ecmaVersion: 'latest'}); },
 });
 
 // TODO - reasonable fallback when missing intrinsics?

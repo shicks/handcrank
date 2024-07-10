@@ -57,16 +57,9 @@ class NodeWalker<T> {
   ) {}
   walk(n: Node, state: T, child = '') {
     this.visit(n, state, child, (state: T) => {
-      for (const k in n) {
-        if (!childProps[k]) continue;
-        const v = n[k as keyof Node];
-        const vs = Array.isArray(v) ? v : [v];
-        for (const c of vs) {
-          if (c && typeof c === 'object' && (c as any).type) {
-            this.walk(c as any, state, k);
-          }
-        }
-      }
+      visitChildren(n, (c, k) => {
+        this.walk(c, state, k);
+      });
     });
   }
 }
@@ -84,7 +77,7 @@ export function traversePostorder(n: Node, fn: (n: Node) => void): void {
   }).walk(n, undefined, '');
 }
 
-const childProps: Record<string, boolean> = {
+const childProps = {
   body: true,
   params: true,
   expression: true,
@@ -125,7 +118,20 @@ const childProps: Record<string, boolean> = {
   local: true,
   quasi: true,
   quasis: true,
-};
+} as const;
+
+export function visitChildren(n: Node, fn: (n: Node, k: keyof typeof childProps) => void) {
+  for (const k in n) {
+    if (!childProps[k as keyof typeof childProps]) continue;
+    const v = n[k as keyof Node];
+    const vs = Array.isArray(v) ? v : [v];
+    for (const c of vs) {
+      if (c && typeof c === 'object' && (c as any).type) {
+        fn(c as any, k as keyof typeof childProps);
+      }
+    }
+  }
+}
 
 /**
  * Adds various disambiguating annotations to nodes as required for
@@ -139,7 +145,9 @@ export function preprocess(n: Node|null|undefined, source: Source, strict = fals
   if (!n) return;
   // function body BlockStatement nodes, which do not start a new block
   const bodies = new Set<Node>();
-  type State = {strict: boolean, nested: boolean};
+  // nested - tracks whether function is var or let
+  // init - tracks whether we're in a class static block
+  type State = {strict: boolean, nested: boolean, init: boolean};
   function isStrict(nodes: Node[]): boolean {
     for (const child of nodes) {
       if ((child as any).directive === 'use strict') return true;
@@ -147,30 +155,33 @@ export function preprocess(n: Node|null|undefined, source: Source, strict = fals
     }
     return false;
   }
-  traversePreorder<State>(n, {strict, nested: false}, (n, {strict, nested}) => {
+  traversePreorder<State>(n, {strict, nested: false, init: false}, (n, {strict, nested, init}) => {
     ((n.loc || ((n as any).loc = {})) as SourceLocation).source = source;
     switch (n.type) {
       case 'ClassDeclaration':
       case 'ClassExpression':
         strict = true;
+        init = false;
         break;
       case 'StaticBlock':
         nested = false;
+        init = true;
         break;          
       case 'FunctionDeclaration':
         (n as TopLevelNode).topLevel = !nested;
       case 'FunctionExpression':
         bodies.add(n.body);
+        init = false;
         nested = false;
         // Strict if it has a "use strict"
         if (isStrict(n.body.body)) strict = true;
         break;
       case 'Program':
         nested = false;
+        init = false;
         if (isStrict(n.body)) strict = true;
         break;
       case 'BlockStatement':
-      case 'StaticBlock':
         nested = !bodies.has(n);
         if (isStrict(n.body)) strict = true;
         break;
@@ -180,13 +191,27 @@ export function preprocess(n: Node|null|undefined, source: Source, strict = fals
           // we expect this to probably throw a SyntaxError.
           n.value = new RegExp(pattern, flags);
         }
+        break;
+      case 'Identifier':
+        if (init && n.name === 'arguments') {
+          throw new SyntaxError(`'arguments' not allowed in class initializers`);
+        }
+        break;
+      case 'Property':
+        // NOTE: Esprima uses Property instead of PropertyDefinition for the type
+        if (typeof (n as unknown as PropertyDefinition).static === 'boolean') {
+          init = true;
+        }
+        break;
+      case 'PropertyDefinition':
+        init = true;
+        break;
       // TODO - look for 'use strict' in other bodies?
     }
     (n as StrictNode).strict = strict;
-    return {strict, nested};
+    return {strict, nested, init};
   });
 }
-
 
 // /**
 //  * Adds various disambiguating annotations to nodes as required for

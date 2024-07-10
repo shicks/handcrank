@@ -17,6 +17,7 @@ import { promises } from './internal/promise';
 import { asyncFunctions } from './internal/async_function';
 import { asyncGenerators } from './internal/async_generator';
 import { reflect } from './internal/reflect';
+import { globalEval } from './internal/eval';
 
 export const full: Plugin = {
   id: 'full',
@@ -40,6 +41,7 @@ export const full: Plugin = {
     asyncFunctions,
     asyncGenerators,
     reflect,
+    globalEval,
   ],
 };
 
@@ -63,4 +65,5 @@ export {
   asyncFunctions,
   asyncGenerators,
   reflect,
+  globalEval,
 };
