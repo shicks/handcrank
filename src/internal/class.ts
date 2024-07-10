@@ -1,7 +1,7 @@
 /** @fileoverview 15.7 Class Definitions */
 
 import { IsConstructor } from './abstract_compare';
-import { Call, Construct, DefineField, Get, InitializeInstanceElements, PrivateMethodOrAccessorAdd } from './abstract_object';
+import { Call, Construct, CreateMethodProperty, DefineField, Get, InitializeInstanceElements, PrivateMethodOrAccessorAdd } from './abstract_object';
 import { Assert } from './assert';
 import { InitializeBoundName } from './binding';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
@@ -693,6 +693,7 @@ export function* ClassDefinitionEvaluation(
   }
   MakeConstructor($, F, false, proto);
   F.ConstructorKind = heritage ? DERIVED : BASE;
+  CreateMethodProperty($, proto, 'constructor', F);
   // 19.
   const instancePrivateMethods = new Map<PrivateName, PrivateElement>();
   const staticPrivateMethods = new Map<PrivateName, PrivateElement>();
