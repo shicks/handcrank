@@ -252,7 +252,8 @@ export const OrdinaryObject = memoize(() => class OrdinaryObject extends Obj {
     for (const [k, v] of Object.entries(slots)) {
       (this as any)[k] = v;
     }
-    for (const [k, v] of Object.entries(props)) {
+    for (const k of Reflect.ownKeys(props)) {
+      const v = props[k];
       this.OwnProps.set(k as PropertyKey, v);
     }
     this.Extensible ??= true;

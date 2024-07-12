@@ -31,7 +31,7 @@ browser or on the server.
 - [x] Standard globals
 - [x] Basic primitive types and wrappers
     - [x] Number
-        - [ ] Math
+        - [x] Math
     - [x] String
     - [x] Symbol
     - [x] Boolean

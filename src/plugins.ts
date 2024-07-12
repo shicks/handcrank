@@ -18,6 +18,7 @@ import { asyncFunctions } from './internal/async_function';
 import { asyncGenerators } from './internal/async_generator';
 import { reflect } from './internal/reflect';
 import { globalEval } from './internal/eval';
+import { math } from './internal/math';
 
 export const full: Plugin = {
   id: 'full',
@@ -25,6 +26,7 @@ export const full: Plugin = {
     syntax,
     arithmetic,
     fundamental,
+    math,
     arrayObject,
     stringObject,
     errorObject,
@@ -49,6 +51,7 @@ export {
   syntax,
   arithmetic,
   fundamental,
+  math,
   arrayObject,
   stringObject,
   errorObject,

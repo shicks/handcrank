@@ -54,6 +54,7 @@ interface AbstractOps {
   AsyncGeneratorYield?: ($: VM, value: Val) => ECR<Val>;
   CreateAsyncFromSyncIterator?:
     ($: VM, syncIteratorRcord: IteratorRecord) => ECR<IteratorRecord>;
+  MathRandom?: ($: VM) => ECR<number>;
   PerformEval?: ($: VM, x: Val, strictCaller: boolean, direct: boolean) => ECR<Val>;
 }
 

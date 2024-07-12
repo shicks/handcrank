@@ -22,7 +22,7 @@ import { NUMBER, STRING } from './enums';
 import { StringCreate } from './exotic_string';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { PropertyKey, Val } from './val';
-import { ECR, VM } from './vm';
+import { DebugString, ECR, VM } from './vm';
 
 /**
  * 7.1.1 ToPrimitive ( input [ , preferredType ] )
@@ -64,7 +64,7 @@ export function* ToPrimitive($: VM, input: Val, preferredType?: STRING|NUMBER): 
       //     v. If result is not an Object, return result.
       if (!(result instanceof Obj)) return result;
       //     vi. Throw a TypeError exception.
-      return $.throw('TypeError');
+      return $.throw('TypeError', 'Cannot convert object to primitive value');
     }
     //   c. If preferredType is not present, let preferredType be number.
     //   d. Return ? OrdinaryToPrimitive(input, preferredType).
@@ -103,7 +103,7 @@ function* OrdinaryToPrimitive($: VM, O: Obj, hint: STRING|NUMBER): ECR<Val> {
     }
   }
   // 4. Throw a TypeError exception.
-  return $.throw('TypeError');
+  return $.throw('TypeError', `Cannot convert ${DebugString(O)} to primitive value`);
 }
 
 /**
@@ -432,9 +432,9 @@ export function* ToBigInt($: VM, argument: Val): ECR<bigint> {
     case 'object': // null
     case 'undefined':
     case 'number':
-      return $.throw('TypeError'); // TODO - message?
+      return $.throw('TypeError', `Cannot convert ${DebugString(argument)} to a BigInt`);
     case 'symbol':
-      return $.throw('TypeError'); // TODO - message?
+      return $.throw('TypeError', `Cannot convert ${DebugString(argument)} to a BigInt`);
     case 'boolean':
       return prim ? 1n : 0n;
     case 'string': {
@@ -498,7 +498,7 @@ export function* ToString($: VM, argument: Val): ECR<string> {
     Assert(!(primValue instanceof Obj));
     return yield* ToString($, primValue);
   } else if (typeof argument === 'symbol') {
-    return $.throw('TypeError');
+    return $.throw('TypeError', 'Cannot convert a Symbol value to a string');
   }
   return String(argument);  
 }

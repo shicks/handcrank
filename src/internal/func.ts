@@ -2067,7 +2067,7 @@ export function* ArgumentListEvaluation_CallExpression(
  */
 export function method(
   fn: ($: VM, thisValue: Val, ...params: Val[]) => ECR<Val>,
-  length = fn.length - 2,
+  length = Math.max(fn.length - 2, 0),
   specifiedName?: string,
 ): (realm: RealmRecord, name: string) => PropertyDescriptor {
   return (realm, name) => propWC(CreateBuiltinFunction(
