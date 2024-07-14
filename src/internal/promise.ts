@@ -5,10 +5,10 @@ import { Assert } from './assert';
 import { Abrupt, CR, IsAbrupt, ThrowCompletion } from './completion_record';
 import { EMPTY, SYNC, UNUSED } from './enums';
 import { CreateBuiltinFunction, Func, method } from './func';
-import { objectAndFunctionPrototype } from './fundamental';
 import { iterators } from './iterators';
 import { HostCallJobCallback, HostEnqueuePromiseJob, HostMakeJobCallback, JobCallback } from './job';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
+import { prelude } from './prelude';
 import { prop0, propC, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
@@ -42,7 +42,7 @@ import { DebugString, ECR, Plugin, VM, just } from './vm';
 export const promises: Plugin = {
   id: 'promises',
   // TODO - make the iterators dep optional (and remove Promise.all, etc?)
-  deps: () => [objectAndFunctionPrototype, iterators],
+  deps: () => [prelude, iterators],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       /**
@@ -75,13 +75,13 @@ export const promises: Plugin = {
       stagedGlobals.set('Promise', propWC(promiseCtor));
 
       defineProperties(realm, promiseCtor, {
-        'all': method(PromiseCtorAll, 1),
-        'allSettled': method(PromiseCtorAllSettled, 1),
-        'any': method(PromiseCtorAny, 1),
+        'all': method(PromiseCtorAll, {length: 1}),
+        'allSettled': method(PromiseCtorAllSettled, {length: 1}),
+        'any': method(PromiseCtorAny, {length: 1}),
         'prototype': prop0(promisePrototype),
-        'race': method(PromiseCtorRace, 1),
-        'reject': method(PromiseCtorReject, 1),
-        'resolve': method(PromiseCtorResolve, 1),
+        'race': method(PromiseCtorRace, {length: 1}),
+        'reject': method(PromiseCtorReject, {length: 1}),
+        'resolve': method(PromiseCtorResolve, {length: 1}),
 
         /**
          * 27.2.4.8 get Promise [ @@species ]

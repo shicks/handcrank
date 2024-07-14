@@ -1,6 +1,6 @@
 import { CR, CastNotAbrupt, IsAbrupt, ThrowCompletion } from './completion_record';
 import { Val } from './val';
-import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext, ResolveThisBinding } from './execution_context';
+import { BuiltinExecutionContext, CodeExecutionContext, ExecutionContext } from './execution_context';
 import { EMPTY, NOT_APPLICABLE, UNINITIALIZED, UNRESOLVABLE, UNUSED } from './enums';
 import { NodeType, NodeMap, Node, Esprima, preprocess, Source } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';

@@ -3,7 +3,6 @@ import { GetSourceText } from './static/functions';
 import { CreateBuiltinFunction, Func, FunctionDeclarationInstantiation, InstantiateOrdinaryFunctionExpression, OrdinaryFunction, OrdinaryFunctionCreate, SetFunctionName, callOrConstruct, functions, methodO } from './func';
 import { prop0, propC, propW } from './property_descriptor';
 import { ECR, Plugin, VM, mapJust, when } from './vm';
-import { CreateDynamicFunction, functionConstructor } from './fundamental';
 import { ASYNC, EMPTY, NON_LEXICAL_THIS, SYNC, UNUSED } from './enums';
 import { Abrupt, CR, IsAbrupt, IsReturnCompletion, IsThrowCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';
 import { EnvironmentRecord } from './environment_record';
@@ -16,10 +15,11 @@ import { RealmRecord, defineProperties } from './realm_record';
 import { AsyncIteratorClose, CreateIterResultObject, GetIterator, IteratorClose, IteratorComplete, IteratorValue } from './abstract_iterator';
 import { CodeExecutionContext, ExecutionContext } from './execution_context';
 import { Call, GetMethod } from './abstract_object';
+import { CreateDynamicFunction, prelude } from './prelude';
 
 export const generators: Plugin = {
   id: 'generators',
-  deps: () => [functionConstructor, iterators, functions],
+  deps: () => [prelude, iterators, functions],
 
   syntax: {
     NamedEvaluation(on) {

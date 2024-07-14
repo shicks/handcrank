@@ -3,8 +3,8 @@ import { ToPropertyKey } from './abstract_conversion';
 import { Call, Construct, CreateArrayFromList, CreateListFromArrayLike } from './abstract_object';
 import { IsAbrupt } from './completion_record';
 import { method } from './func';
-import { objectAndFunctionPrototype } from './fundamental';
 import { Obj, OrdinaryObjectCreate } from './obj';
+import { prelude } from './prelude';
 import { FromPropertyDescriptor, PropertyDescriptor, ToPropertyDescriptor, propC, propWC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
@@ -14,7 +14,7 @@ function PrepareForTailCall($: VM) {};
 
 export const reflect: Plugin = {
   id: 'reflect',
-  deps: () => [objectAndFunctionPrototype],
+  deps: () => [prelude],
   realm: {CreateIntrinsics},
 };
 

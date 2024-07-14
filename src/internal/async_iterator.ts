@@ -1,6 +1,5 @@
 import { CreateBuiltinFunctionFromClosure, IsFunc, method, methodO } from './func';
 import { ECR, Plugin, VM, just } from './vm';
-import { objectAndFunctionPrototype } from './fundamental';
 import { defineProperties } from './realm_record';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { CreateIterResultObject, IteratorComplete, IteratorNext, IteratorRecord, IteratorValue } from './abstract_iterator';
@@ -9,10 +8,11 @@ import { Call, Get, GetMethod } from './abstract_object';
 import { Assert } from './assert';
 import { Val } from './val';
 import { NewPromiseCapability, PerformPromiseThen, PromiseCapability, PromiseResolve, RejectAndReturnPromise } from './promise';
+import { prelude } from './prelude';
 
 export const asyncIterators: Plugin = {
   id: 'asyncIterators',
-  deps: () => [objectAndFunctionPrototype],
+  deps: () => [prelude],
   realm: {
     CreateIntrinsics(realm) {
       /**

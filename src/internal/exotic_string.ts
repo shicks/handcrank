@@ -5,10 +5,11 @@ import { Call, CreateArrayFromList, Get, GetMethod, Invoke, LengthOfArrayLike } 
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, Func, callOrConstruct, method } from './func';
-import { SymbolDescriptiveString, objectAndFunctionPrototype } from './fundamental';
+import { SymbolDescriptiveString } from './fundamental';
 import { CreateIteratorFromClosure, GeneratorYield } from './generator';
 import { createBrandedIteratorPrototype, iterators } from './iterators';
 import { GetPrototypeFromConstructor, IsCompatiblePropertyDescriptor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject } from './obj';
+import { prelude } from './prelude';
 import { PropertyDescriptor, PropertyRecord, prop0, propE, propWC } from './property_descriptor';
 import { defineProperties } from './realm_record';
 import { CodePointAt, GetSubstitution, RegExpCreate } from './regexp';
@@ -57,7 +58,7 @@ const {} = {DebugString};
 export const stringObject: Plugin = {
   id: 'stringObject',
   // TODO - make the iterators dep optional (and remove String.prototype[@@iterator])
-  deps: () => [objectAndFunctionPrototype, iterators],
+  deps: () => [prelude, iterators],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       /** 22.1.1.1 String ( value ) */
@@ -75,10 +76,10 @@ export const stringObject: Plugin = {
       /** 22.1.2 Properties of the String Constructor */
       defineProperties(realm, stringCtor, {
         /** 22.1.2.1 String.fromCharCode ( ...codeUnits ) */
-        'fromCharCode': method(StringFromCharCode, 1),
+        'fromCharCode': method(StringFromCharCode, {length: 1}),
 
         /** 22.1.2.2 String.fromCodePoint ( ...codePoints ) */
-        'fromCodePoint': method(StringFromCodePoint, 1),
+        'fromCodePoint': method(StringFromCodePoint, {length: 1}),
 
         /** 22.1.2.4 String.raw ( template, ...substitutions ) */
         'raw': method(StringRaw),
@@ -99,7 +100,7 @@ export const stringObject: Plugin = {
         'codePointAt': method(StringPrototypeCodePointAt),
 
         /** 22.1.3.5 String.prototype.concat ( ...args ) */
-        'concat': method(StringPrototypeConcat, 1),
+        'concat': method(StringPrototypeConcat, {length: 1}),
 
         /** 22.1.3.6 String.prototype.constructor */
         'constructor': propWC(stringCtor),

@@ -2,7 +2,6 @@ import * as ESTree from 'estree';
 import { CreateBuiltinFunction, CreateBuiltinFunctionFromClosure, Func, FunctionDeclarationInstantiation, InstantiateOrdinaryFunctionExpression, OrdinaryFunction, OrdinaryFunctionCreate, SetFunctionName, callOrConstruct, functions } from './func';
 import { prop0, propC } from './property_descriptor';
 import { Await, ECR, Plugin, VM, mapJust, when } from './vm';
-import { CreateDynamicFunction, objectAndFunctionPrototype } from './fundamental';
 import { EMPTY, NON_LEXICAL_THIS, UNUSED } from './enums';
 import { CR, CastNotAbrupt, IsAbrupt, IsNormalCompletion, IsReturnCompletion, IsThrowCompletion, ReturnCompletion, ThrowCompletion } from './completion_record';
 import { Obj, OrdinaryObjectCreate } from './obj';
@@ -16,6 +15,7 @@ import { RealmRecord, defineProperties } from './realm_record';
 import { EnvironmentRecord } from './environment_record';
 import { PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 import { GetSourceText } from './static/functions';
+import { CreateDynamicFunction, prelude } from './prelude';
 
 /**
  * 27.7 AsyncFunction Objects
@@ -27,7 +27,7 @@ import { GetSourceText } from './static/functions';
  */
 export const asyncFunctions: Plugin = {
   id: 'asyncFunctions',
-  deps: () => [objectAndFunctionPrototype, functions, promises],
+  deps: () => [prelude, functions, promises],
   syntax: {
     NamedEvaluation(on) {
       on(['ArrowFunctionExpression', 'FunctionExpression'],

@@ -1,14 +1,14 @@
 import { method, methodO } from './func';
 import { Plugin } from './vm';
-import { objectAndFunctionPrototype } from './fundamental';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { GeneratorResume } from './generator';
 import { propC } from './property_descriptor';
+import { prelude } from './prelude';
 
 export const iterators: Plugin = {
   id: 'iterators',
-  deps: () => [objectAndFunctionPrototype],
+  deps: () => [prelude],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       /**

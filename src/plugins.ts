@@ -19,13 +19,15 @@ import { asyncGenerators } from './internal/async_generator';
 import { reflect } from './internal/reflect';
 import { globalEval } from './internal/eval';
 import { math } from './internal/math';
+import { prelude } from './internal/prelude';
 
 export const full: Plugin = {
   id: 'full',
   deps: () => [
     syntax,
     arithmetic,
-    fundamental,
+    prelude,
+    fundamental, // TODO - split this out
     math,
     arrayObject,
     stringObject,
@@ -50,6 +52,7 @@ export const full: Plugin = {
 export {
   syntax,
   arithmetic,
+  prelude,
   fundamental,
   math,
   arrayObject,

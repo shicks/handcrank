@@ -1,13 +1,13 @@
 import { DebugString, Plugin } from './vm';
-import { objectAndFunctionPrototype } from './fundamental';
 import { method } from './func';
 import { propWC } from './property_descriptor';
 import { Obj, OrdinaryObjectCreate } from './obj';
 import { defineProperties } from './realm_record';
+import { prelude } from './prelude';
 
 export const consoleObject: Plugin = {
   id: 'consoleObject',
-  deps: () => [objectAndFunctionPrototype],
+  deps: () => [prelude],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       const ns = OrdinaryObjectCreate({

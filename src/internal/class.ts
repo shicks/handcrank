@@ -9,8 +9,8 @@ import { ACCESSOR, BASE, DERIVED, EMPTY, METHOD, NON_LEXICAL_THIS, UNUSED } from
 import { DeclarativeEnvironmentRecord, FunctionEnvironmentRecord } from './environment_record';
 import { GetNewTarget, GetThisEnvironment } from './execution_context';
 import { CreateBuiltinFunction, DefineMethod, Func, FunctionDeclarationInstantiation, IsFunc, MakeClassConstructor, MakeConstructor, MakeMethod, MethodDefinitionEvaluation, OrdinaryFunctionCreate, SetFunctionName } from './func';
-import { objectAndFunctionPrototype } from './fundamental';
 import { EvaluatePropertyKey, Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
+import { prelude } from './prelude';
 import { IsPrivateElement, IsPrivateElementAccessor, PrivateElement, PrivateEnvironmentRecord, PrivateName } from './private_environment_record';
 import { GetValue, ReferenceRecord } from './reference_record';
 import { Evaluation_BlockLike } from './statements';
@@ -23,7 +23,7 @@ import * as ESTree from 'estree';
 
 export const classes: Plugin = {
   id: 'classes',
-  deps: () => [objectAndFunctionPrototype],
+  deps: () => [prelude],
   syntax: {
     Evaluation(on) {
       on(['ClassDeclaration', 'ClassExpression'], Evaluation_ClassExpression);

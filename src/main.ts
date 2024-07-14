@@ -95,7 +95,7 @@ function repl() {
       return;
     } else {
       try {
-        esprima.parseScript(script);
+        acorn.parse(script, {ecmaVersion: 'latest'});
       } catch (err) {
         if (err.description === 'Unexpected end of input') {
           rl.question('... ', (s) => loop(script + '\n' + s));

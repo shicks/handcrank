@@ -1,5 +1,4 @@
 import { DebugString, ECR, Plugin, VM } from './vm';
-import { objectAndFunctionPrototype } from './fundamental';
 import { CreateBuiltinFunction, IsFunc, callOrConstruct, method } from './func';
 import { prop0, propWC } from './property_descriptor';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
@@ -10,6 +9,14 @@ import { ToString } from './abstract_conversion';
 import { defineProperties } from './realm_record';
 import { Get, HasProperty } from './abstract_object';
 import { UNUSED } from './enums';
+import { prelude } from './prelude';
+
+interface ErrorSlots {
+  ErrorData: string; // NOTE: spec just has undefined but we repurpose
+}
+declare global {
+  interface ObjectSlots extends Partial<ErrorSlots> {}
+}
 
 /**
  * 20.5 Error Objects
@@ -30,7 +37,7 @@ import { UNUSED } from './enums';
  */
 export const errorObject: Plugin = {
   id: 'errorObject',
-  deps: () => [objectAndFunctionPrototype],
+  deps: () => [prelude],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
       /**

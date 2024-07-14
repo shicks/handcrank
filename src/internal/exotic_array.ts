@@ -5,7 +5,6 @@ import { Call, Construct, CreateArrayFromList, CreateDataPropertyOrThrow, Delete
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, callOrConstruct, method, methodO } from './func';
-import { objectAndFunctionPrototype } from './fundamental';
 import { GetPrototypeFromConstructor, Obj, OrdinaryDefineOwnProperty, OrdinaryGetOwnProperty, OrdinaryObject, OrdinaryObjectCreate } from './obj';
 import { HasValueField, IsDataDescriptor, PropertyDescriptor, prop0, propC, propW, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
@@ -16,6 +15,7 @@ import { CreateIteratorFromClosure, GeneratorResume, GeneratorYield } from './ge
 import { CreateIterResultObject, GetIterator, GetIteratorFromMethod, IteratorClose, IteratorStep, IteratorValue } from './abstract_iterator';
 import { iterators } from './iterators';
 import { EMPTY, SYNC } from './enums';
+import { prelude } from './prelude';
 
 declare const IsDetachedBuffer: any;
 
@@ -318,7 +318,7 @@ function ArraySetLength($: VM, A: ArrayExoticObject, Desc: PropertyDescriptor): 
  */
 export const arrayObject: Plugin = {
   id: 'arrayObject',
-  deps: () => [objectAndFunctionPrototype, iterators],
+  deps: () => [prelude, iterators],
   realm: {
     CreateIntrinsics(realm: RealmRecord, stagedGlobals: Map<string, PropertyDescriptor>) {
       
@@ -762,7 +762,7 @@ export const arrayObject: Plugin = {
           }
           const setStatus = yield* Set($, A, 'length', n, true);
           return IsAbrupt(setStatus) ? setStatus : A;
-        }, 1),
+        }, {length: 1}),
 
         /**
          * 23.1.3.4 Array.prototype.copyWithin ( target, start [ , end ] )
@@ -2901,7 +2901,7 @@ export const arrayObject: Plugin = {
           const setStatus = yield* Set($, O, 'length', len + argCount, true);
           if (IsAbrupt(setStatus)) return setStatus;
           return len + argCount;
-        }, 1),
+        }, {length: 1}),
 
         /**
          * 23.1.3.38 Array.prototype.values ( )

@@ -1,8 +1,8 @@
 import { ToNumber, ToUint32 } from './abstract_conversion';
 import { Abrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, method } from './func';
-import { objectAndFunctionPrototype } from './fundamental';
 import { OrdinaryObjectCreate } from './obj';
+import { prelude } from './prelude';
 import { PropertyDescriptor, prop0, propC, propWC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
@@ -10,7 +10,7 @@ import { ECR, Plugin, VM, just } from './vm';
 
 export const math: Plugin = {
   id: 'math',
-  deps: () => [objectAndFunctionPrototype],
+  deps: () => [prelude],
   realm: {CreateIntrinsics},
 };
 

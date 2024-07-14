@@ -9,10 +9,10 @@ import { Call, Construct, CreateArrayFromList, DefinePropertyOrThrow, Get, Lengt
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
 import { CreateBuiltinFunction, Func, callOrConstruct, getter, method } from './func';
-import { objectAndFunctionPrototype } from './fundamental';
 import { CreateIteratorFromClosure, GeneratorYield } from './generator';
 import { createBrandedIteratorPrototype, iterators } from './iterators';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate, peekProp } from './obj';
+import { prelude } from './prelude';
 import { PropertyDescriptor, prop0, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
@@ -22,7 +22,7 @@ export const regexp: Plugin = {
   id: 'regexp',
   // NOTE: iterators is optional, but we should omit @@matchAll if it's not present
   // (or else have it return an array).
-  deps: () => [objectAndFunctionPrototype, iterators],
+  deps: () => [prelude, iterators],
   syntax: {
     Evaluation(on) {
       on('Literal', when(n => n.value instanceof RegExp, ($, n) => {

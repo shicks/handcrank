@@ -1,5 +1,4 @@
 import { ECR, Plugin, VM } from '../src/internal/vm';
-import { objectAndFunctionPrototype } from '../src/internal/fundamental';
 import { CreateBuiltinFunction } from '../src/internal/func';
 import { prop0 } from '../src/internal/property_descriptor';
 import { Obj, OrdinaryObjectCreate } from '../src/internal/obj';
@@ -7,11 +6,12 @@ import { Val } from '../src/internal/val';
 import { IsAbrupt, IsThrowCompletion, ThrowCompletion } from '../src/internal/completion_record';
 import { ToString } from '../src/internal/abstract_conversion';
 import { RootExecutionContext } from '../src/internal/execution_context';
+import { prelude } from '../src/internal/prelude';
 
 /** See https://github.com/tc39/test262/blob/main/INTERPRETING.md */
 export const test262: Plugin = {
   id: 'test262',
-  deps: () => [objectAndFunctionPrototype],
+  deps: () => [prelude],
   realm: {
     SetDefaultGlobalBindings(realm) {
 

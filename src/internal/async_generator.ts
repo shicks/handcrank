@@ -18,7 +18,7 @@ import { RealmRecord, defineProperties } from './realm_record';
 import { CreateIterResultObject } from './abstract_iterator';
 import { GetGeneratorKind, generators } from './generator';
 import { Await, asyncFunctions } from './async_function';
-import { CreateDynamicFunction } from './fundamental';
+import { CreateDynamicFunction } from './prelude';
 
 
 /**

@@ -21,7 +21,7 @@ import { GetThisValue, GetValue, IsPropertyReference, ReferenceRecord } from './
 import { IsCallable, IsConstructor, SameValue } from './abstract_compare';
 import { memoize } from './slots';
 import { CreateListIteratorRecord, GetIterator, IteratorStep, IteratorValue } from './abstract_iterator';
-import { functionConstructor } from './fundamental';
+import { functionConstructor } from './prelude';
 import type { ClassFieldDefinitionRecord } from './class';
 import { CreateMappedArgumentsObject, CreateUnmappedArgumentsObject } from './exotic_arguments';
 import { IteratorBindingInitialization } from './binding';
@@ -2061,18 +2061,27 @@ export function* ArgumentListEvaluation_CallExpression(
   return list;
 }
 
+interface MethodOpts {
+  length?: number;
+  name?: string;
+  desc?: (v: Val) => PropertyDescriptor;
+}
+
 /**
  * Defines a property descriptor for a builtin method.  For use with
  * `defineProperties`, which allows passing lazy descriptors.
  */
 export function method(
   fn: ($: VM, thisValue: Val, ...params: Val[]) => ECR<Val>,
-  length = Math.max(fn.length - 2, 0),
-  specifiedName?: string,
+  {
+    length = Math.max(0, fn.length - 2),
+    desc = propWC,
+    name,
+  }: MethodOpts = {}
 ): (realm: RealmRecord, name: string) => PropertyDescriptor {
-  return (realm, name) => propWC(CreateBuiltinFunction(
+  return (realm, propName) => desc(CreateBuiltinFunction(
     {Call($, thisObj, argumentsList) { return fn($, thisObj, ...argumentsList); }},
-    length, specifiedName ?? name, {Realm: realm}));
+    length, name ?? propName, {Realm: realm}));
 }
 
 /**
@@ -2080,15 +2089,26 @@ export function method(
  */
 export function methodO(
   fn: ($: VM, thisValue: Obj, ...params: Val[]) => ECR<Val>,
-  length = fn.length - 2,
-  specifiedName?: string,
+  opts?: MethodOpts,
 ): (realm: RealmRecord, name: string) => PropertyDescriptor {
   return method(
-    ($, thisObj, argumentsList) =>
+    ($, thisObj, ...argumentsList) =>
       thisObj instanceof Obj ?
-      fn($, thisObj, argumentsList) :
+      fn($, thisObj, ...argumentsList) :
       just($.throw('TypeError', 'invalid receiver')),
-    length, specifiedName);
+    {length: Math.max(0, fn.length - 2), ...opts});
+}
+
+/**
+ * Same as `method` but skips the `thisValue` arg.
+ */
+export function methodS(
+  fn: ($: VM, ...params: Val[]) => ECR<Val>,
+  opts?: MethodOpts,
+): (realm: RealmRecord, name: string) => PropertyDescriptor {
+  return method(
+    ($, thisObj, ...argumentsList) => fn($, ...argumentsList),
+    {length: Math.max(0, fn.length - 1), ...opts});
 }
 
 /**

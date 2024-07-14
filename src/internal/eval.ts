@@ -4,7 +4,8 @@ import { DERIVED, EMPTY } from './enums';
 import { DeclarativeEnvironmentRecord, EnvironmentRecord, FunctionEnvironmentRecord, GlobalEnvironmentRecord, ObjectEnvironmentRecord } from './environment_record';
 import { CodeExecutionContext, GetThisEnvironment } from './execution_context';
 import { CreateBuiltinFunction, functions } from './func';
-import { HostEnsureCanCompileStrings, objectAndFunctionPrototype } from './fundamental';
+import { HostEnsureCanCompileStrings } from './fundamental';
+import { prelude } from './prelude';
 import { PrivateEnvironmentRecord } from './private_environment_record';
 import { PropertyDescriptor, propWC } from './property_descriptor';
 import { RealmRecord } from './realm_record';
@@ -17,7 +18,7 @@ import * as ESTree from 'estree';
 
 export const globalEval: Plugin = {
   id: 'globalEval',
-  deps: () => [objectAndFunctionPrototype, functions],
+  deps: () => [prelude, functions],
   realm: {CreateIntrinsics},
   abstract: {PerformEval},
 };
