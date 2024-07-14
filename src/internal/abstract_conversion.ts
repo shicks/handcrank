@@ -203,9 +203,9 @@ export function* ToIntegerOrInfinity($: VM, argument: Val): ECR<number> {
   return ToIntegerOrInfinityInternal(number);
 }
 export function ToIntegerOrInfinityInternal(number: number): number {
-  if (Number.isNaN(number) || number === 0) return 0;
-  if (number === Infinity || number === -Infinity) return number;
-  return Math.trunc(number);
+  if (Number.isNaN(number)) return 0;
+  const result = Math.trunc(number);
+  return result === 0 ? 0 : result;
 }
 
 /**
@@ -656,11 +656,11 @@ export function CanonicalNumericIndexString(argument: string): number|undefined 
  *     e. Return integer.
  */
 export function* ToIndex($: VM, value: Val): ECR<number> {
-  if (value == null) return 0;
+  if (value === undefined) return 0;
   const integer = yield* ToIntegerOrInfinity($, value);
   if (IsAbrupt(integer)) return integer;
   const clamped = CastNotAbrupt(yield* ToLength($, integer));
-  if (!SameValue(clamped, integer)) return $.throw('RangeError');
+  if (!SameValue(clamped, integer)) return $.throw('RangeError', `not convertible to an index`);
   Assert(0 <= integer && integer <= 2**53 - 1);
   return integer;
 }

@@ -4,15 +4,15 @@
  *   - 21 Numbers and Dates
  */
 
-import { ToBigInt, ToBoolean, ToInt32, ToIntegerOrInfinity, ToNumeric, ToPrimitive, ToString } from './abstract_conversion';
+import { ToBigInt, ToBoolean, ToIndex, ToInt32, ToIntegerOrInfinity, ToNumeric, ToPrimitive, ToString } from './abstract_conversion';
 import { Assert } from './assert';
 import { CR, IsAbrupt } from './completion_record';
-import { BuiltinFunction, BuiltinFunctionBehavior, CreateBuiltinFunction, Func, callOrConstruct, getter, method } from './func';
+import { BuiltinFunction, BuiltinFunctionBehavior, CreateBuiltinFunction, Func, callOrConstruct, getter, method, methodS } from './func';
 import { Obj, OrdinaryCreateFromConstructor, OrdinaryObject, OrdinaryObjectCreate } from './obj';
 import { prop0, propC, propWC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
-import { DebugString, Plugin, VM } from './vm';
+import { DebugString, ECR, Plugin, VM } from './vm';
 import { prelude } from './prelude';
 import { NUMBER } from './enums';
 
@@ -34,6 +34,7 @@ function makeWrapper(
   behavior: BuiltinFunctionBehavior,
 ): [BuiltinFunction, OrdinaryObject] {
   const ctor = CreateBuiltinFunction(behavior, 1, name, {Realm: realm});
+  Assert(!superClass || realm.Intrinsics.has(superClass));
   const prototype = OrdinaryObjectCreate({
     Prototype: superClass != null ? realm.Intrinsics.get(superClass) : null,
   }, {
@@ -80,7 +81,7 @@ export const booleanObject: Plugin = {
        */
       const [booleanCtor, booleanPrototype] =
         makeWrapper(
-          realm, 'Boolean', '%Object.prototype',
+          realm, 'Boolean', '%Object.prototype%',
           callOrConstruct(function*($, NewTarget, value) {
             const b = ToBoolean(value);
             if (NewTarget == null) return b;
@@ -202,7 +203,7 @@ export const symbolObject: Plugin = {
        */
       const [symbolCtor, symbolPrototype] =
         makeWrapper(
-          realm, 'Symbol', '%Object.prototype',
+          realm, 'Symbol', '%Object.prototype%',
           callOrConstruct(function*($, NewTarget, description) {
             if (NewTarget != null) {
               return $.throw('TypeError', 'Symbol is not a constructor');
@@ -583,7 +584,7 @@ export const numberObject: Plugin = {
        */
       const [numberCtor, numberPrototype] =
         makeWrapper(
-          realm, 'Number', '%Object.prototype',
+          realm, 'Number', '%Object.prototype%',
           callOrConstruct(function*($, NewTarget, value) {
             let n = 0;
             if (value != null) {
@@ -846,11 +847,11 @@ export const numberObject: Plugin = {
          *
          * The "length" property of this method is 1𝔽.
          */
-        'toString': method(function*($, thisValue, radix) {
+        'toString': method(function*($, thisValue, radix = undefined) {
           const x = thisNumberValue($, thisValue, '.toString');
           if (IsAbrupt(x)) return x;
           let radixMV = 10;
-          if (radix != null) {
+          if (radix !== undefined) {
             const r = yield* ToIntegerOrInfinity($, radix);
             if (IsAbrupt(r)) return r;
             radixMV = r;
@@ -889,8 +890,8 @@ export const numberObject: Plugin = {
  *     a class definition but a super call to the BigInt constructor
  *     will cause an exception.
  */
-export const bigintObject: Plugin = {
-  id: 'bigintObject',
+export const bigIntObject: Plugin = {
+  id: 'bigIntObject',
   deps: () => [prelude],
   realm: {
     CreateIntrinsics(realm, stagedGlobals) {
@@ -912,17 +913,17 @@ export const bigintObject: Plugin = {
        */
       const [bigintCtor, bigintPrototype] =
         makeWrapper(
-          realm, 'BigInt', '%Object.prototype',
-          callOrConstruct(function*($: VM, NewTarget: Func|undefined, value: Val) {
+          realm, 'BigInt', '%Object.prototype%',
+          callOrConstruct(function*($: VM, NewTarget: Func|undefined, value: Val): ECR<Val> {
             if (NewTarget != null) return $.throw('TypeError', 'not a constructor');
             const prim = yield* ToPrimitive($, value, NUMBER);
             if (IsAbrupt(prim)) return prim;
             if (typeof prim === 'number') {
-              return BigInt(prim);
+              return NumberToBigInt($, prim);
             }
-            return ToBigInt($, prim);
+            return yield* ToBigInt($, prim);
           }));
-
+      stagedGlobals.set('BigInt', propWC(bigintCtor));
 
       /**
        * 21.2.1.1.1 NumberToBigInt ( number )
@@ -934,6 +935,13 @@ export const bigintObject: Plugin = {
        * 1. If IsIntegralNumber(number) is false, throw a RangeError exception.
        * 2. Return the BigInt value that represents ℝ(number).
        */
+      function NumberToBigInt($: VM, number: number): CR<bigint> {
+        if (!Number.isInteger(number)) {
+          return $.throw('RangeError',
+                         `The number ${number} cannot be converted to a BigInt because it is not an integer`);
+        }
+        return BigInt(number);
+      }
 
       /**
        * 21.2.2 Properties of the BigInt Constructor
@@ -943,36 +951,52 @@ export const bigintObject: Plugin = {
        * has a [[Prototype]] internal slot whose value is %Function.prototype%.
        * has the following properties:
        */
+      defineProperties(realm, bigintCtor, {
+        /**
+         * 21.2.2.1 BigInt.asIntN ( bits, bigint )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Set bits to ? ToIndex(bits).
+         * 2. Set bigint to ? ToBigInt(bigint).
+         * 3. Let mod be ℝ(bigint) modulo 2bits.
+         * 4. If mod ≥ 2bits - 1, return ℤ(mod - 2bits); otherwise, return ℤ(mod).
+         */
+        'asIntN': methodS(function*($, bits, bigint) {
+          // TODO - wrap(BigInt.asIntN, fixed(ToIndex, ToBigInt))
+          const b = yield* ToIndex($, bits);
+          if (IsAbrupt(b)) return b;
+          const n = yield* ToBigInt($, bigint);
+          if (IsAbrupt(n)) return n;
+          return BigInt.asIntN(b, n);
+        }),
 
-      /**
-       * 21.2.2.1 BigInt.asIntN ( bits, bigint )
-       * 
-       * This function performs the following steps when called:
-       * 
-       * 1. Set bits to ? ToIndex(bits).
-       * 2. Set bigint to ? ToBigInt(bigint).
-       * 3. Let mod be ℝ(bigint) modulo 2bits.
-       * 4. If mod ≥ 2bits - 1, return ℤ(mod - 2bits); otherwise, return ℤ(mod).
-       */
+        /**
+         * 21.2.2.2 BigInt.asUintN ( bits, bigint )
+         * 
+         * This function performs the following steps when called:
+         * 
+         * 1. Set bits to ? ToIndex(bits).
+         * 2. Set bigint to ? ToBigInt(bigint).
+         * 3. Return the BigInt value that represents ℝ(bigint) modulo 2bits.
+         */
+        'asUintN': methodS(function*($, bits, bigint) {
+          const b = yield* ToIndex($, bits);
+          if (IsAbrupt(b)) return b;
+          const n = yield* ToBigInt($, bigint);
+          if (IsAbrupt(n)) return n;
+          return BigInt.asUintN(b, n);
+        }),
 
-      /**
-       * 21.2.2.2 BigInt.asUintN ( bits, bigint )
-       * 
-       * This function performs the following steps when called:
-       * 
-       * 1. Set bits to ? ToIndex(bits).
-       * 2. Set bigint to ? ToBigInt(bigint).
-       * 3. Return the BigInt value that represents ℝ(bigint) modulo 2bits.
-       */
-
-      /**
-       * 21.2.2.3 BigInt.prototype
-       * 
-       * The initial value of BigInt.prototype is the BigInt prototype object.
-       * 
-       * This property has the attributes { [[Writable]]: false,
-       * [[Enumerable]]: false, [[Configurable]]: false }.
-       */
+        /**
+         * 21.2.2.3 BigInt.prototype
+         * 
+         * The initial value of BigInt.prototype is the BigInt prototype object.
+         * 
+         * This property has the attributes { [[Writable]]: false,
+         * [[Enumerable]]: false, [[Configurable]]: false }.
+         */
+      });
 
       /**
        * 21.2.3 Properties of the BigInt Prototype Object
@@ -997,72 +1021,103 @@ export const bigintObject: Plugin = {
        * thisBigIntValue with the this value of the method invocation passed
        * as the argument.
        */
+      function thisBigIntValue($: VM, value: Val, method: string): CR<bigint> {
+        if (typeof value === 'bigint') return value;
+        if (value instanceof Obj && value.BigIntData != null) {
+          Assert(typeof value.BigIntData === 'bigint');
+          return value.BigIntData;
+        }
+        return $.throw('TypeError', `BigInt.prototype${method} requires that 'this' be a BigInt`);
+      }
 
-      /**
-       * 21.2.3.1 BigInt.prototype.constructor
-       * 
-       * The initial value of BigInt.prototype.constructor is %BigInt%.
-       */
+      defineProperties(realm, bigintPrototype, {
 
-      /**
-       * 21.2.3.2 BigInt.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] )
-       * 
-       * An ECMAScript implementation that includes the ECMA-402
-       * Internationalization API must implement this method as specified in
-       * the ECMA-402 specification. If an ECMAScript implementation does
-       * not include the ECMA-402 API the following specification of this
-       * method is used:
-       * 
-       * This method produces a String value that represents this BigInt
-       * value formatted according to the conventions of the host
-       * environment's current locale. This method is
-       * implementation-defined, and it is permissible, but not encouraged,
-       * for it to return the same thing as toString.
-       * 
-       * The meanings of the optional parameters to this method are defined
-       * in the ECMA-402 specification; implementations that do not include
-       * ECMA-402 support must not use those parameter positions for
-       * anything else.
-       */
+        /**
+         * 21.2.3.1 BigInt.prototype.constructor
+         * 
+         * The initial value of BigInt.prototype.constructor is %BigInt%.
+         */
 
-      /**
-       * 21.2.3.3 BigInt.prototype.toString ( [ radix ] )
-       * 
-       * NOTE: The optional radix should be an integral Number value in the
-       * inclusive interval from 2𝔽 to 36𝔽. If radix is undefined then 10𝔽
-       * is used as the value of radix.
-       * 
-       * This method performs the following steps when called:
-       * 
-       * 1. Let x be ? thisBigIntValue(this value).
-       * 2. If radix is undefined, let radixMV be 10.
-       * 3. Else, let radixMV be ? ToIntegerOrInfinity(radix).
-       * 4. If radixMV is not in the inclusive interval from 2 to 36, throw a RangeError exception.
-       * 5. Return BigInt::toString(x, radixMV).
-       * 
-       * This method is not generic; it throws a TypeError exception if its
-       * this value is not a BigInt or a BigInt object. Therefore, it cannot
-       * be transferred to other kinds of objects for use as a method.
-       */
+        /**
+         * 21.2.3.2 BigInt.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] )
+         * 
+         * An ECMAScript implementation that includes the ECMA-402
+         * Internationalization API must implement this method as specified in
+         * the ECMA-402 specification. If an ECMAScript implementation does
+         * not include the ECMA-402 API the following specification of this
+         * method is used:
+         * 
+         * This method produces a String value that represents this BigInt
+         * value formatted according to the conventions of the host
+         * environment's current locale. This method is
+         * implementation-defined, and it is permissible, but not encouraged,
+         * for it to return the same thing as toString.
+         * 
+         * The meanings of the optional parameters to this method are defined
+         * in the ECMA-402 specification; implementations that do not include
+         * ECMA-402 support must not use those parameter positions for
+         * anything else.
+         */
+        'toLocaleString': method(function*($, thisValue) {
+          const b = thisBigIntValue($, thisValue, '.toLocaleString');
+          if (IsAbrupt(b)) return b;
+          return String(b);
+        }),
 
-      /**
-       * 21.2.3.4 BigInt.prototype.valueOf ( )
-       * 1. Return ? thisBigIntValue(this value).
-       */
+        /**
+         * 21.2.3.3 BigInt.prototype.toString ( [ radix ] )
+         * 
+         * NOTE: The optional radix should be an integral Number value in the
+         * inclusive interval from 2𝔽 to 36𝔽. If radix is undefined then 10𝔽
+         * is used as the value of radix.
+         * 
+         * This method performs the following steps when called:
+         * 
+         * 1. Let x be ? thisBigIntValue(this value).
+         * 2. If radix is undefined, let radixMV be 10.
+         * 3. Else, let radixMV be ? ToIntegerOrInfinity(radix).
+         * 4. If radixMV is not in the inclusive interval from 2 to 36, throw a RangeError exception.
+         * 5. Return BigInt::toString(x, radixMV).
+         * 
+         * This method is not generic; it throws a TypeError exception if its
+         * this value is not a BigInt or a BigInt object. Therefore, it cannot
+         * be transferred to other kinds of objects for use as a method.
+         */
+        'toString': method(function*($, thisValue, radix = undefined) {
+          const b = thisBigIntValue($, thisValue, '.toString');
+          if (IsAbrupt(b)) return b;
+          let radixMV: CR<number> = 10;
+          if (radix !== undefined) {
+            radixMV = yield* ToIntegerOrInfinity($, radix);
+            if (IsAbrupt(radixMV)) return radixMV;
+          }
+          if (radixMV < 2 || radixMV > 36) {
+            return $.throw('RangeError', 'toString() radix argument must be between 2 and 36');
+          }
+          return b.toString(radixMV);
+        }),
 
-      /**
-       * 21.2.3.5 BigInt.prototype [ @@toStringTag ]
-       * 
-       * The initial value of the @@toStringTag property is the String value "BigInt".
-       * 
-       * This property has the attributes { [[Writable]]: false,
-       * [[Enumerable]]: false, [[Configurable]]: true }.
-       */
+        /**
+         * 21.2.3.4 BigInt.prototype.valueOf ( )
+         * 1. Return ? thisBigIntValue(this value).
+         */
+        'valueOf': method(function*($, thisValue) {
+          return thisBigIntValue($, thisValue, '.valueOf');
+        }),
+
+        /**
+         * 21.2.3.5 BigInt.prototype [ @@toStringTag ]
+         * 
+         * The initial value of the @@toStringTag property is the String value "BigInt".
+         * 
+         * This property has the attributes { [[Writable]]: false,
+         * [[Enumerable]]: false, [[Configurable]]: true }.
+         */
+        [Symbol.toStringTag]: propC('BigInt'),
+      });
     }
   },
 };
-
-
 
 
 /**
@@ -1095,6 +1150,7 @@ export function HostEnsureCanCompileStrings(_$: VM, _calleeRealm: RealmRecord): 
 
 export const fundamental: Plugin = {
   deps: () => [
+    bigIntObject,
     booleanObject,
     symbolObject,
     numberObject,
