@@ -48,13 +48,58 @@ export interface Plugin {
   abstract?: AbstractOps;
 }
 
+interface LocalDate {
+  getDate(): number;
+  getDay(): number;
+  getFullYear(): number;
+  getHours(): number;
+  getMilliseconds(): number;
+  getMinutes(): number;
+  getMonth(): number;
+  getSeconds(): number;
+  getTimezoneOffset(): number;
+  setDate(date: number): number;
+  setFullYear(year: number, month?: number, date?: number): number;
+  setHours(hours: number, min?: number, sec?: number, ms?: number): number;
+  setMilliseconds(ms: number): number;
+  setMinutes(min: number, sec?: number, ms?: number): number;
+  setMonth(month: number, date?: number): number;
+  setSeconds(sec: number, ms?: number): number;
+  toDateString(): string;
+  toString(): string;
+  toTimeString(): string;
+}
+interface LocalDateCtor {
+  new(value: number): LocalDate;
+  new(value: string): LocalDate;
+  new(year: number, month: number, date?: number, hours?: number,
+      minutes?: number, seconds?: number, ms?: number): LocalDate;
+}
+
 /** For forward-referencing things without strong deps. */
 interface AbstractOps {
+  // Async-await operations, indirected so that non-async generators can
+  // call them optionally without a strong dep on async.
   Await?: ($: VM, value: Val) => ECR<Val>;
   AsyncGeneratorYield?: ($: VM, value: Val) => ECR<Val>;
   CreateAsyncFromSyncIterator?:
     ($: VM, syncIteratorRcord: IteratorRecord) => ECR<IteratorRecord>;
+
+  // Clock and date operations.  Allows making the current time deterministic,
+  // and overriding how the default time zone is handled.
+  DateNow?: ($: VM) => number;
+  LocalDate?: LocalDateCtor;
+  // DateParse?: ($: VM, dateString: string) => number;
+  // DateBuild?: ($: VM, year: number, month: number, day?: number, hour?: number,
+  //               minute?: number, second?: number, ms?: number) => number;
+  // LocalTime?: ($: VM, date: number) => CR<LocalDate>;
+
+  // Pseudorandom number generator, allowing for deterministic seeding.
   MathRandom?: ($: VM) => ECR<number>;
+
+  // Eval indirection, allowing the low-level Call operation to handle direct
+  // eval correctly without a strong dependency on eval itself.  TODO: we might
+  // actually prefer to do this with an extra slot on the %eval% intrinsic.
   PerformEval?: ($: VM, x: Val, strictCaller: boolean, direct: boolean) => ECR<Val>;
 }
 
