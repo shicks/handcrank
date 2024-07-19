@@ -20,6 +20,7 @@ import { reflect } from './internal/reflect';
 import { globalEval } from './internal/eval';
 import { math } from './internal/math';
 import { prelude } from './internal/prelude';
+import { date, utc } from './internal/date';
 
 export const full: Plugin = {
   id: 'full',
@@ -46,6 +47,7 @@ export const full: Plugin = {
     asyncGenerators,
     reflect,
     globalEval,
+    date,
   ],
 };
 
@@ -72,4 +74,6 @@ export {
   asyncGenerators,
   reflect,
   globalEval,
+  date,
+  utc,
 };

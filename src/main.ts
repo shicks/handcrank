@@ -5,7 +5,7 @@ import * as acorn from 'acorn';
 import * as readline from 'readline';
 import { IsAbrupt, IsThrowCompletion } from './internal/completion_record';
 import * as fs from 'node:fs';
-import { full } from './plugins';
+import { full, utc } from './plugins';
 
 // TODO - try acorn with {ecmaVersion: latest}
 //      - benchmark code size, performance, and test262 accuracy
@@ -66,6 +66,8 @@ function main(args: string[], exit: (arg: number) => void) {
       strict = true;
     } else if (arg === '--sloppy') {
       strict = false;
+    } else if (arg === '--utc') {
+      vm.install(utc);
     } else {
       const script = String(fs.readFileSync(arg, 'utf8'));
       status = runScript(script, arg);

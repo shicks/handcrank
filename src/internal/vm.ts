@@ -48,32 +48,11 @@ export interface Plugin {
   abstract?: AbstractOps;
 }
 
-interface LocalDate {
-  getDate(): number;
-  getDay(): number;
-  getFullYear(): number;
-  getHours(): number;
-  getMilliseconds(): number;
-  getMinutes(): number;
-  getMonth(): number;
-  getSeconds(): number;
-  getTimezoneOffset(): number;
-  setDate(date: number): number;
-  setFullYear(year: number, month?: number, date?: number): number;
-  setHours(hours: number, min?: number, sec?: number, ms?: number): number;
-  setMilliseconds(ms: number): number;
-  setMinutes(min: number, sec?: number, ms?: number): number;
-  setMonth(month: number, date?: number): number;
-  setSeconds(sec: number, ms?: number): number;
-  toDateString(): string;
-  toString(): string;
-  toTimeString(): string;
-}
 interface LocalDateCtor {
-  new(value: number): LocalDate;
-  new(value: string): LocalDate;
+  new(value: number): Date;
+  new(value: string): Date;
   new(year: number, month: number, date?: number, hours?: number,
-      minutes?: number, seconds?: number, ms?: number): LocalDate;
+      minutes?: number, seconds?: number, ms?: number): Date;
 }
 
 /** For forward-referencing things without strong deps. */
@@ -578,31 +557,33 @@ export class VM {
     return fallback();
   }
 
-  install(plugin: Plugin): void {
-    // TODO - fix up how we handle deps and replacement
-    for (const dep of plugin.deps?.() ?? []) {
-      const id = dep.id ?? dep;
-      if (!this.plugins.has(id)) this.install(dep);
-    }
-    const id = plugin.id ?? plugin;
-    this.plugins.set(id, plugin);
-    Object.assign(this.abstractOperations, plugin.abstract || {});
+  install(...plugins: Plugin[]): void {
+    for (const plugin of plugins) {
+      // TODO - fix up how we handle deps and replacement
+      for (const dep of plugin.deps?.() ?? []) {
+        const id = dep.id ?? dep;
+        if (!this.plugins.has(id)) this.install(dep);
+      }
+      const id = plugin.id ?? plugin;
+      this.plugins.set(id, plugin);
+      Object.assign(this.abstractOperations, plugin.abstract || {});
 
-    if (!plugin.syntax) return;
-    for (const key in this.syntaxOperations) {
-      const register = plugin.syntax[key as keyof SyntaxOp];
-      if (!Object.hasOwn(this.syntaxOperations, key) ||
-        !Object.hasOwn(plugin.syntax, key) ||
-        typeof register != 'function') continue;
-      const op: any = this.syntaxOperations[key as keyof SyntaxOp];
-      const on: SyntaxRegistration<any> =
-        (types: NodeType|NodeType[], handler: SyntaxHandler<any, any>) => {
-          if (!Array.isArray(types)) types = [types];
-          for (const type of types) {
-            (op[type] || (op[type] = [])).push(handler);
-          }
-        };
-      register(on);
+      if (!plugin.syntax) continue;
+      for (const key in this.syntaxOperations) {
+        const register = plugin.syntax[key as keyof SyntaxOp];
+        if (!Object.hasOwn(this.syntaxOperations, key) ||
+          !Object.hasOwn(plugin.syntax, key) ||
+          typeof register != 'function') continue;
+        const op: any = this.syntaxOperations[key as keyof SyntaxOp];
+        const on: SyntaxRegistration<any> =
+          (types: NodeType|NodeType[], handler: SyntaxHandler<any, any>) => {
+            if (!Array.isArray(types)) types = [types];
+            for (const type of types) {
+              (op[type] || (op[type] = [])).push(handler);
+            }
+          };
+        register(on);
+      }
     }
   }
 

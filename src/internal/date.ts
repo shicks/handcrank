@@ -1,13 +1,15 @@
-import { ToIntegerOrInfinity, ToNumber, ToPrimitive, ToString } from './abstract_conversion';
+import { OrdinaryToPrimitive, ToNumber, ToPrimitive, ToString } from './abstract_conversion';
+import { Invoke } from './abstract_object';
 import { Assert } from './assert';
 import { CR, CastNotAbrupt, IsAbrupt } from './completion_record';
-import { CreateBuiltinFunction, Func, callOrConstruct } from './func';
-import { Obj, OrdinaryCreateFromConstructor } from './obj';
+import { NUMBER, STRING } from './enums';
+import { CreateBuiltinFunction, Func, callOrConstruct, methodO, methodS } from './func';
+import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
 import { prelude } from './prelude';
-import { PropertyDescriptor, propWC } from './property_descriptor';
-import { RealmRecord } from './realm_record';
+import { PropertyDescriptor, prop0, propWC } from './property_descriptor';
+import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
-import { ECR, EvalGen, Plugin, VM } from './vm';
+import { ECR, Plugin, VM } from './vm';
 
 type DateCtorParams = [string|number]|[number, number, number?, number?, number?, number?, number?];
 
@@ -82,6 +84,20 @@ export class UTCDate extends Date {
   }
 }
 
+const dateStringFormat = new RegExp(
+  '^(YYYY(?:-MM(?:-DD)?)?)(?:(THH:mm(?::ss(?:\\.sss)?)?)(Z)?)?$'
+  .replace('sss', '\\d{1,3}')
+  .replace('ss', '[0-5]\\d')
+  .replace('mm', '[0-5]\\d')
+  .replace('HH', '(?:[01]\\d|2[01234])')
+  .replace('DD', '(?:0[1-9]|[12]\\d|3[01])')
+  .replace('MM', '(?:0[1-9]|1[012])')
+  .replace('YYYY', '(?:[-+]\\d{2})?\\d{4}')
+  // NOTE: The TZ format also allows \u2212 (−) for the sign,
+  // but Date.parse doesn't seem to accept it.
+  .replace('Z', 'Z|[-+]\\d\\d:\\d\\d')
+);
+
 /**
  * 21.4 Date Objects
  * 
@@ -97,21 +113,12 @@ export const date: Plugin = {
   realm: {CreateIntrinsics},
 };
 
-/**
- * 21.4.1.17 TimeClip ( time )
- * 
- * The abstract operation TimeClip takes argument time (a Number) and
- * returns a Number. It calculates a number of milliseconds. It
- * performs the following steps when called:
- * 
- * 1. If time is not finite, return NaN.
- * 2. If abs(ℝ(time)) > 8.64 × 1015, return NaN.
- * 3. Return 𝔽(! ToIntegerOrInfinity(time)).
- */
-export function* TimeClip($: VM, time: number): EvalGen<number> {
-  if (!isFinite(time)) return NaN;
-  if (Math.abs(time) > 8.64e15) return NaN;
-  return CastNotAbrupt(yield* ToIntegerOrInfinity($, time));
+export const utc: Plugin = {
+  id: 'utc',
+  deps: () => [date],
+  abstract: {
+    LocalDate: UTCDate,
+  },
 }
 
 export interface DateSlots {
@@ -155,6 +162,146 @@ export function CreateIntrinsics(
     callOrConstruct(DateConstructor), 7, 'Date', {Realm: realm});
   realm.Intrinsics.set('%Date%', dateCtor);
   stagedGlobals.set('Date', propWC(dateCtor));
+
+  /**
+   * 21.4.4 Properties of the Date Prototype Object
+   * 
+   * The Date prototype object:
+   *   - is %Date.prototype%.
+   *   - is itself an ordinary object.
+   *   - is not a Date instance and does not have a [[DateValue]] internal slot.
+   *   - has a [[Prototype]] internal slot whose value is %Object.prototype%.
+   * 
+   * Unless explicitly defined otherwise, the methods of the Date
+   * prototype object defined below are not generic and the this value
+   * passed to them must be an object that has a [[DateValue]] internal
+   * slot that has been initialized to a time value.
+   */
+  const datePrototype = OrdinaryObjectCreate({
+    Prototype: realm.Intrinsics.get('%Object.prototype%')!,
+  }, {
+    /**
+     * 21.4.4.1 Date.prototype.constructor
+     * 
+     * The initial value of Date.prototype.constructor is %Date%.
+     */
+    constructor: propWC(dateCtor),
+  });
+  realm.Intrinsics.set('%Date.prototype%', datePrototype);
+
+  const datePrototypeToUTCString =
+    methodO(DatePrototypeToUTCString)(realm, 'toUTCString').Value as Obj;
+  realm.Intrinsics.set('%Date.prototype.toUTCString%', datePrototypeToUTCString);
+
+  defineProperties(realm, dateCtor, {
+    /** 21.4.3.1 Date.now ( ) */
+    'now': methodS(DateCtorNow),
+    /** 21.4.3.2 Date.parse ( string ) */
+    'parse': methodS(DateCtorParse),
+    /**
+     * 21.4.3.3 Date.prototype
+     * 
+     * The initial value of Date.prototype is the Date prototype object.
+     * 
+     * This property has the attributes { [[Writable]]: false,
+     * [[Enumerable]]: false, [[Configurable]]: false }.
+     */
+    'prototype': prop0(datePrototype),
+
+    /** 21.4.3.4 Date.UTC ( ... ) */
+    'UTC': methodS(DateCtorUTC),
+  });
+
+  defineProperties(realm, datePrototype, {
+    /** 21.4.4.2 Date.prototype.getDate ( ) */
+    'getDate': methodO(DatePrototypeGetDate),
+    /** 21.4.4.3 Date.prototype.getDay ( ) */
+    'getDay': methodO(DatePrototypeGetDay),
+    /** 21.4.4.4 Date.prototype.getFullYear ( ) */
+    'getFullYear': methodO(DatePrototypeGetFullYear),
+    /** 21.4.4.5 Date.prototype.getHours ( ) */
+    'getHours': methodO(DatePrototypeGetHours),
+    /** 21.4.4.6 Date.prototype.getMilliseconds ( ) */
+    'getMilliseconds': methodO(DatePrototypeGetMilliseconds),
+    /** 21.4.4.7 Date.prototype.getMinutes ( ) */
+    'getMinutes': methodO(DatePrototypeGetMinutes),
+    /** 21.4.4.8 Date.prototype.getMonth ( ) */
+    'getMonth': methodO(DatePrototypeGetMonth),
+    /** 21.4.4.9 Date.prototype.getSeconds ( ) */
+    'getSeconds': methodO(DatePrototypeGetSeconds),
+    /** 21.4.4.10 Date.prototype.getTime ( ) */
+    'getTime': methodO(DatePrototypeGetTime),
+    /** 21.4.4.11 Date.prototype.getTimezoneOffset ( ) */
+    'getTimezoneOffset': methodO(DatePrototypeGetTimezoneOffset),
+    /** 21.4.4.12 Date.prototype.getUTCDate ( ) */
+    'getUTCDate': methodO(DatePrototypeGetUTCDate),
+    /** 21.4.4.13 Date.prototype.getUTCDay ( ) */
+    'getUTCDay': methodO(DatePrototypeGetUTCDay),
+    /** 21.4.4.14 Date.prototype.getUTCFullYear ( ) */
+    'getUTCFullYear': methodO(DatePrototypeGetUTCFullYear),
+    /** 21.4.4.15 Date.prototype.getUTCHours ( ) */
+    'getUTCHours': methodO(DatePrototypeGetUTCHours),
+    /** 21.4.4.16 Date.prototype.getUTCMilliseconds ( ) */
+    'getUTCMilliseconds': methodO(DatePrototypeGetUTCMilliseconds),
+    /** 21.4.4.17 Date.prototype.getUTCMinutes ( ) */
+    'getUTCMinutes': methodO(DatePrototypeGetUTCMinutes),
+    /** 21.4.4.18 Date.prototype.getUTCMonth ( ) */
+    'getUTCMonth': methodO(DatePrototypeGetUTCMonth),
+    /** 21.4.4.19 Date.prototype.getUTCSeconds ( ) */
+    'getUTCSeconds': methodO(DatePrototypeGetUTCSeconds),
+    /** 21.4.4.20 Date.prototype.setDate ( date ) */
+    'setDate': methodO(DatePrototypeSetDate),
+    /** 21.4.4.21 Date.prototype.setFullYear ( year [ , month [ , date ] ] ) */
+    'setFullYear': methodO(DatePrototypeSetFullYear),
+    /** 21.4.4.22 Date.prototype.setHours ( hour [ , min [ , sec [ , ms ] ] ] ) */
+    'setHours': methodO(DatePrototypeSetHours),
+    /** 21.4.4.23 Date.prototype.setMilliseconds ( ms ) */
+    'setMilliseconds': methodO(DatePrototypeSetMilliseconds),
+    /** 21.4.4.24 Date.prototype.setMinutes ( min [ , sec [ , ms ] ] ) */
+    'setMinutes': methodO(DatePrototypeSetMinutes),
+    /** 21.4.4.25 Date.prototype.setMonth ( month [ , date ] ) */
+    'setMonth': methodO(DatePrototypeSetMonth),
+    /** 21.4.4.26 Date.prototype.setSeconds ( sec [ , ms ] ) */
+    'setSeconds': methodO(DatePrototypeSetSeconds),
+    /** 21.4.4.27 Date.prototype.setTime ( time ) */
+    'setTime': methodO(DatePrototypeSetTime),
+    /** 21.4.4.28 Date.prototype.setUTCDate ( date ) */
+    'setUTCDate': methodO(DatePrototypeSetUTCDate),
+    /** 21.4.4.29 Date.prototype.setUTCFullYear ( year [ , month [ , date ] ] ) */
+    'setUTCFullYear': methodO(DatePrototypeSetUTCFullYear),
+    /** 21.4.4.30 Date.prototype.setUTCHours ( hour [ , min [ , sec [ , ms ] ] ] ) */
+    'setUTCHours': methodO(DatePrototypeSetUTCHours),
+    /** 21.4.4.31 Date.prototype.setUTCMilliseconds ( ms ) */
+    'setUTCMilliseconds': methodO(DatePrototypeSetUTCMilliseconds),
+    /** 21.4.4.32 Date.prototype.setUTCMinutes ( min [ , sec [ , ms ] ] ) */
+    'setUTCMinutes': methodO(DatePrototypeSetUTCMinutes),
+    /** 21.4.4.33 Date.prototype.setUTCMonth ( month [ , date ] ) */
+    'setUTCMonth': methodO(DatePrototypeSetUTCMonth),
+    /** 21.4.4.34 Date.prototype.setUTCSeconds ( sec [ , ms ] ) */
+    'setUTCSeconds': methodO(DatePrototypeSetUTCSeconds),
+    /** 21.4.4.35 Date.prototype.toDateString ( ) */
+    'toDateString': methodO(DatePrototypeToDateString),
+    /** 21.4.4.36 Date.prototype.toISOString ( ) */
+    'toISOString': methodO(DatePrototypeToISOString),
+    /** 21.4.4.37 Date.prototype.toJSON ( key ) */
+    'toJSON': methodO(DatePrototypeToJSON),
+    /** 21.4.4.38 Date.prototype.toLocaleDateString ( [ reserved1 [ , reserved2 ] ] ) */
+    'toLocaleDateString': methodO(DatePrototypeToLocaleDateString),
+    /** 21.4.4.39 Date.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] ) */
+    'toLocaleString': methodO(DatePrototypeToLocaleString),
+    /** 21.4.4.40 Date.prototype.toLocaleTimeString ( [ reserved1 [ , reserved2 ] ] ) */
+    'toLocaleTimeString': methodO(DatePrototypeToLocaleTimeString),
+    /** 21.4.4.41 Date.prototype.toString ( ) */
+    'toString': methodO(DatePrototypeToString),
+    /** 21.4.4.42 Date.prototype.toTimeString ( ) */
+    'toTimeString': methodO(DatePrototypeToTimeString),
+    /** 21.4.4.43 Date.prototype.toUTCString ( ) */
+    'toUTCString': propWC(datePrototypeToUTCString),
+    /** 21.4.4.44 Date.prototype.valueOf ( ) */
+    'valueOf': methodO(DatePrototypeValueOf),
+    /** 21.4.4.45 Date.prototype [ @@toPrimitive ] ( hint ) */
+    [Symbol.toPrimitive]: methodO(DatePrototypeSymbolToPrimitive),
+  });
 }
 
 /**
@@ -203,7 +350,7 @@ export function CreateIntrinsics(
  */
 export function* DateConstructor($: VM, NewTarget: Func|undefined, ...values: Val[]): ECR<Val> {
   if (NewTarget === undefined) {
-    return DateString($, DateNow($));
+    return newDate($, DateNow($)).toString();
   }
   const numberOfArgs = values.length;
   let dv: number;
@@ -227,7 +374,7 @@ export function* DateConstructor($: VM, NewTarget: Func|undefined, ...values: Va
         if (IsAbrupt(tv)) return tv;
       }
     }
-    dv = yield* TimeClip($, tv);
+    dv = newDate($, tv).getTime();
   } else {
     // 5.
     Assert(numberOfArgs >= 2);
@@ -246,17 +393,16 @@ export function* DateConstructor($: VM, NewTarget: Func|undefined, ...values: Va
     const milli = numberOfArgs > 6 ? yield* ToNumber($, values[6]) : 0;
     if (IsAbrupt(milli)) return milli;
     // 5.k.
-    const args = [y, m, dt, h, min, s, milli].slice(0, numberOfArgs);
-    // NOTE: host Date ctor will apply default tz and any necessary clipping
-    // TODO - option for UTC or local time...? Unfortunately, there is no way
-    // to parse a string _as_ UTC - Date.parse and new Date both just assume
-    // local time.  We could convert local to UTC, but this is error-prone for
-    // a number of reasons: (1) TZ transitions like daylight savings, and (2)
-    // boundary conditions in western hemisphere where UTC is in bounds but
-    // local time is out of bounds.  We can also append ' GMT' to the string,
-    // but this is also incorrect if there _is_ a timezone included.  That said,
-    // opting into deterministic execution may be worth some edge-case breakage.
-    dv = Reflect.construct(Date, args).getTime();
+    const args = [y, m, dt, h, min, s, milli].slice(0, numberOfArgs) as [
+      year: number,
+      month: number,
+      date?: number,
+      hour?: number,
+      minute?: number,
+      seconds?: number,
+      milliseconds?: number,
+    ];
+    dv = newDate($, ...args).getTime();
   }
   return yield* OrdinaryCreateFromConstructor($, NewTarget, '%Date.prototype%', {DateValue: dv});
 }
@@ -266,115 +412,17 @@ export function DateNow_hostClock($: VM): number {
   return Date.now();
 }
 
-/** DateParse operation using the local timezone */
-export function DateParse_local($: VM, string: string): number {
-  return Date.parse(string);
-}
-
-/** DateBuild operation using the local timezone. */
-export function DateBuild_local(
-  $: VM,
-  ...args: [
-    year: number,
-    month: number,
-    date?: number,
-    hours?: number,
-    minutes?: number,
-    seconds?: number,
-    ms?: number,
-  ]
-): number {
-  return new Date(...args).getTime();
-}
-
-/** DateString operation using the local timezone. */
-export function DateString_local($: VM, time: number): string {
-  return new Date(time).toString();
-}
-
-const dateStringFormat = new RegExp(
-  '^(YYYY(?:-MM(?:-DD)?)?)(?:(THH:mm(?::ss(?:\\.sss)?)?)(Z)?)?$'
-  .replace('sss', '\\d{1,3}')
-  .replace('ss', '[0-5]\\d')
-  .replace('mm', '[0-5]\\d')
-  .replace('HH', '(?:[01]\\d|2[01234])')
-  .replace('DD', '(?:0[1-9]|[12]\\d|3[01])')
-  .replace('MM', '(?:0[1-9]|1[012])')
-  .replace('YYYY', '(?:[-+]\\d{2})?\\d{4}')
-  // NOTE: The TZ format also allows \u2212 (−) for the sign,
-  // but Date.parse doesn't seem to accept it.
-  .replace('Z', 'Z|[-+]\\d\\d:\\d\\d')
-);
-
-/** DateParse operation using the UTC timezone. */
-export function DateParse_utc($: VM, string: string): number {
-  // NOTE: there is no way to parse a string as UTC in JS, so the best we can do
-  // is restrict the format to the bare minimum allowed by the spec, so that we
-  // can explicitly request UTC in the string.
-  // NOTE: This regex has three capture groups: (1) the date, (2) the time
-  // (starting with T, not including the optional timezone specifier), and
-  // (3) the timezone.
-  const match = dateStringFormat.exec(string);
-  if (!match) return NaN;
-  // Look for a timezone specifier.
-  const [, date, time, tz] = match;
-  if (tz) return Date.parse(string); // If timezone specified, use it.
-  const utcStr = `${date}${time || 'T00:00'}Z`;
-  return Date.parse(utcStr);
-}
-
-/** DateBuild operation using the UTC timezone. */
-export function DateBuild_utc(
-  $: VM,
-  ...args: [
-    year: number,
-    month?: number,
-    date?: number,
-    hours?: number,
-    minutes?: number,
-    seconds?: number,
-    ms?: number,
-  ]
-): number {
-  return Date.UTC(...args);
-}
-
-
-
-/** DateString operation using the UTC timezone. */
-export function DateString_utc($: VM, time: number): string {
-  return new Date(time).toISOString();
+function newDate($: VM, value: string): Date;
+function newDate($: VM, value: number): Date;
+function newDate($: VM, year: number, month: number, date?: number,
+                 hours?: number, minutes?: number, seconds?: number, ms?: number): Date;
+function newDate($: VM, ...args: any[]): Date {
+  return new (($.abstractOperations.LocalDate || Date) as any)(...args);
 }
 
 /** Calls DateNow indirected through $, falling back on the host clock. */
 export function DateNow($: VM): number {
   return $.abstractOperations.DateNow?.($) ?? DateNow_hostClock($);
-}
-
-/** Calls DateParse indirected through $, falling back on local time default. */
-export function DateParse($: VM, string: string): number {
-  return $.abstractOperations.DateParse?.($, string) ?? DateParse_local($, string);
-}
-
-/** Calls DateBuild indirected through $, falling back on local time default. */
-export function DateBuild(
-  $: VM,
-  ...args: [
-    year: number,
-    month: number,
-    date?: number,
-    hours?: number,
-    minutes?: number,
-    seconds?: number,
-    ms?: number,
-  ]
-): number {
-  return $.abstractOperations.DateBuild?.($, ...args) ?? DateBuild_local($, ...args);
-}
-
-/** Calls DateString indirected through $, falling back on local time. */
-export function DateString($: VM, time: number): string {
-  return $.abstractOperations.DateString?.($, time) ?? DateString_local($, time);
 }
 
 /**
@@ -438,7 +486,7 @@ export function* DateCtorNow($: VM): ECR<number> {
 export function* DateCtorParse($: VM, string: Val): ECR<number> {
   const str = yield* ToString($, string);
   if (IsAbrupt(str)) return str;
-  return DateParse($, str);
+  return newDate($, str).getTime();
 }
 
 /**
@@ -516,21 +564,6 @@ function thisTimeValue($: VM, value: Val): CR<number> {
   return $.throw('TypeError', 'not a Date object');
 }
 
-/**
- * 21.4.4 Properties of the Date Prototype Object
- * 
- * The Date prototype object:
- *   - is %Date.prototype%.
- *   - is itself an ordinary object.
- *   - is not a Date instance and does not have a [[DateValue]] internal slot.
- *   - has a [[Prototype]] internal slot whose value is %Object.prototype%.
- * 
- * Unless explicitly defined otherwise, the methods of the Date
- * prototype object defined below are not generic and the this value
- * passed to them must be an object that has a [[DateValue]] internal
- * slot that has been initialized to a time value.
- */
-
 // In following descriptions of functions that are properties of the
 // Date prototype object, the phrase “this Date object” refers to the
 // object that is the this value for the invocation of the
@@ -539,12 +572,6 @@ function thisTimeValue($: VM, value: Val): CR<number> {
 // specification of a method refers to the result returned by calling
 // the abstract operation thisTimeValue with the this value of the
 // method invocation passed as the argument.
-
-/**
- * 21.4.4.1 Date.prototype.constructor
- * 
- * The initial value of Date.prototype.constructor is %Date%.
- */
 
 /**
  * 21.4.4.2 Date.prototype.getDate ( )
@@ -558,8 +585,7 @@ function thisTimeValue($: VM, value: Val): CR<number> {
 export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
   const t = thisTimeValue($, thisValue);
   if (IsAbrupt(t)) return t;
-  const date = new Date(t)
-  return DateFromTime(LocalTime($, t));
+  return newDate($, t).getDate();
 }
 
 /**
@@ -571,6 +597,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return WeekDay(LocalTime(t)).
  */
+export function* DatePrototypeGetDay($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getDay();
+}
 
 /**
  * 21.4.4.4 Date.prototype.getFullYear ( )
@@ -581,6 +612,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return YearFromTime(LocalTime(t)).
  */
+export function* DatePrototypeGetFullYear($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getFullYear();
+}
 
 /**
  * 21.4.4.5 Date.prototype.getHours ( )
@@ -591,6 +627,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return HourFromTime(LocalTime(t)).
  */
+export function* DatePrototypeGetHours($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getHours();
+}
 
 /**
  * 21.4.4.6 Date.prototype.getMilliseconds ( )
@@ -601,6 +642,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return msFromTime(LocalTime(t)).
  */
+export function* DatePrototypeGetMilliseconds($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getMilliseconds();
+}
 
 /**
  * 21.4.4.7 Date.prototype.getMinutes ( )
@@ -611,6 +657,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return MinFromTime(LocalTime(t)).
  */
+export function* DatePrototypeGetMinutes($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getMinutes();
+}
 
 /**
  * 21.4.4.8 Date.prototype.getMonth ( )
@@ -621,6 +672,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return MonthFromTime(LocalTime(t)).
  */
+export function* DatePrototypeGetMonth($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getMonth();
+}
 
 /**
  * 21.4.4.9 Date.prototype.getSeconds ( )
@@ -631,6 +687,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return SecFromTime(LocalTime(t)).
  */
+export function* DatePrototypeGetSeconds($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getSeconds();
+}
 
 /**
  * 21.4.4.10 Date.prototype.getTime ( )
@@ -639,6 +700,9 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 
  * 1. Return ? thisTimeValue(this value).
  */
+export function* DatePrototypeGetTime($: VM, thisValue: Val): ECR<number> {
+  return thisTimeValue($, thisValue);
+}
 
 /**
  * 21.4.4.11 Date.prototype.getTimezoneOffset ( )
@@ -649,6 +713,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return (t - LocalTime(t)) / msPerMinute.
  */
+export function* DatePrototypeGetTimezoneOffset($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getTimezoneOffset();
+}
 
 /**
  * 21.4.4.12 Date.prototype.getUTCDate ( )
@@ -659,6 +728,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return DateFromTime(t).
  */
+export function* DatePrototypeGetUTCDate($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getUTCDate();
+}
 
 /**
  * 21.4.4.13 Date.prototype.getUTCDay ( )
@@ -669,6 +743,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return WeekDay(t).
  */
+export function* DatePrototypeGetUTCDay($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getUTCDay();
+}
 
 /**
  * 21.4.4.14 Date.prototype.getUTCFullYear ( )
@@ -679,6 +758,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return YearFromTime(t).
  */
+export function* DatePrototypeGetUTCFullYear($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getUTCFullYear();
+}
 
 /**
  * 21.4.4.15 Date.prototype.getUTCHours ( )
@@ -689,6 +773,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return HourFromTime(t).
  */
+export function* DatePrototypeGetUTCHours($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getUTCHours();
+}
 
 /**
  * 21.4.4.16 Date.prototype.getUTCMilliseconds ( )
@@ -699,6 +788,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return msFromTime(t).
  */
+export function* DatePrototypeGetUTCMilliseconds($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getUTCMilliseconds();
+}
 
 /**
  * 21.4.4.17 Date.prototype.getUTCMinutes ( )
@@ -709,6 +803,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return MinFromTime(t).
  */
+export function* DatePrototypeGetUTCMinutes($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getUTCMinutes();
+}
 
 /**
  * 21.4.4.18 Date.prototype.getUTCMonth ( )
@@ -719,6 +818,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return MonthFromTime(t).
  */
+export function* DatePrototypeGetUTCMonth($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getUTCMonth();
+}
 
 /**
  * 21.4.4.19 Date.prototype.getUTCSeconds ( )
@@ -729,6 +833,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 2. If t is NaN, return NaN.
  * 3. Return SecFromTime(t).
  */
+export function* DatePrototypeGetUTCSeconds($: VM, thisValue: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  return newDate($, t).getUTCSeconds();
+}
 
 /**
  * 21.4.4.20 Date.prototype.setDate ( date )
@@ -745,6 +854,13 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 7. Set the [[DateValue]] internal slot of this Date object to u.
  * 8. Return u.
  */
+export function* DatePrototypeSetDate($: VM, thisValue: Obj, date: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const dt = yield* ToNumber($, date);
+  if (IsAbrupt(dt)) return dt;
+  return thisValue.DateValue = newDate($, t).setDate(dt);
+}
 
 /**
  * 21.4.4.21 Date.prototype.setFullYear ( year [ , month [ , date ] ] )
@@ -769,6 +885,23 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * present with the value getMonth(). If date is not present, it
  * behaves as if date was present with the value getDate().
  */
+export function* DatePrototypeSetFullYear(
+  $: VM,
+  thisValue: Obj,
+  _year: Val,
+  _month: Val,
+  _date: Val,
+): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const args: [number, number?, number?] = [] as any;
+  for (let i = 0; i < Math.min(arguments.length - 2, 3); i++) {
+    const num = yield* ToNumber($, arguments[i + 2]);
+    if (IsAbrupt(num)) return num;
+    args[i] = num;
+  }
+  return thisValue.DateValue = newDate($, t).setFullYear(...args);
+}
 
 /**
  * 21.4.4.22 Date.prototype.setHours ( hour [ , min [ , sec [ , ms ] ] ] )
@@ -798,6 +931,24 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * not present, it behaves as if ms was present with the value
  * getMilliseconds().
  */
+export function* DatePrototypeSetHours(
+  $: VM,
+  thisValue: Obj,
+  _hour: Val,
+  _min: Val,
+  _sec: Val,
+  _ms: Val,
+): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const args: [number, number?, number?, number?] = [] as any;
+  for (let i = 0; i < Math.min(arguments.length - 2, 4); i++) {
+    const num = yield* ToNumber($, arguments[i + 2]);
+    if (IsAbrupt(num)) return num;
+    args[i] = num;
+  }
+  return thisValue.DateValue = newDate($, t).setHours(...args);
+}
 
 /**
  * 21.4.4.23 Date.prototype.setMilliseconds ( ms )
@@ -813,6 +964,13 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 7. Set the [[DateValue]] internal slot of this Date object to u.
  * 8. Return u.
  */
+export function* DatePrototypeSetMilliseconds($: VM, thisValue: Obj, ms: Val): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const milli = yield* ToNumber($, ms);
+  if (IsAbrupt(milli)) return milli;
+  return thisValue.DateValue = newDate($, t).setMilliseconds(milli);
+}
 
 /**
  * 21.4.4.24 Date.prototype.setMinutes ( min [ , sec [ , ms ] ] )
@@ -838,6 +996,23 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * present with the value getSeconds(). If ms is not present, this
  * behaves as if ms was present with the value getMilliseconds().
  */
+export function* DatePrototypeSetMinutes(
+  $: VM,
+  thisValue: Obj,
+  _min: Val,
+  _sec: Val,
+  _ms: Val,
+): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const args: [number, number?, number?] = [] as any;
+  for (let i = 0; i < Math.min(arguments.length - 2, 3); i++) {
+    const num = yield* ToNumber($, arguments[i + 2]);
+    if (IsAbrupt(num)) return num;
+    args[i] = num;
+  }
+  return thisValue.DateValue = newDate($, t).setMinutes(...args);
+}
 
 /**
  * 21.4.4.25 Date.prototype.setMonth ( month [ , date ] )
@@ -860,6 +1035,22 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * NOTE: If date is not present, this method behaves as if date was
  * present with the value getDate().
  */
+export function* DatePrototypeSetMonth(
+  $: VM,
+  thisValue: Obj,
+  _month: Val,
+  _date: Val,
+): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const args: [number, number?] = [] as any;
+  for (let i = 0; i < Math.min(arguments.length - 2, 2); i++) {
+    const num = yield* ToNumber($, arguments[i + 2]);
+    if (IsAbrupt(num)) return num;
+    args[i] = num;
+  }
+  return thisValue.DateValue = newDate($, t).setMonth(...args);
+}
 
 /**
  * 21.4.4.26 Date.prototype.setSeconds ( sec [ , ms ] )
@@ -883,6 +1074,22 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 
  * If ms is not present, this method behaves as if ms was present with the value getMilliseconds().
  */
+export function* DatePrototypeSetSeconds(
+  $: VM,
+  thisValue: Obj,
+  _sec: Val,
+  _ms: Val,
+): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const args: [number, number?] = [] as any;
+  for (let i = 0; i < Math.min(arguments.length - 2, 2); i++) {
+    const num = yield* ToNumber($, arguments[i + 2]);
+    if (IsAbrupt(num)) return num;
+    args[i] = num;
+  }
+  return thisValue.DateValue = newDate($, t).setSeconds(...args);
+}
 
 /**
  * 21.4.4.27 Date.prototype.setTime ( time )
@@ -895,6 +1102,13 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 4. Set the [[DateValue]] internal slot of this Date object to v.
  * 5. Return v.
  */
+export function* DatePrototypeSetTime($: VM, thisValue: Obj, time: Val): ECR<number> {
+  const status = thisTimeValue($, thisValue);
+  if (IsAbrupt(status)) return status
+  const t = yield* ToNumber($, time);
+  if (IsAbrupt(t)) return t;
+  return thisValue.DateValue = t;
+}
 
 /**
  * 21.4.4.28 Date.prototype.setUTCDate ( date )
@@ -909,6 +1123,13 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 6. Set the [[DateValue]] internal slot of this Date object to v.
  * 7. Return v.
  */
+export function* DatePrototypeSetUTCDate($: VM, thisValue: Obj, date: Val): ECR<number> {
+  const t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const dt = yield* ToNumber($, date);
+  if (IsAbrupt(dt)) return dt;
+  return thisValue.DateValue = newDate($, t).setUTCDate(dt);
+}
 
 /**
  * 21.4.4.29 Date.prototype.setUTCFullYear ( year [ , month [ , date ] ] )
@@ -931,6 +1152,23 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * present with the value getUTCMonth(). If date is not present, it
  * behaves as if date was present with the value getUTCDate().
  */
+export function* DatePrototypeSetUTCFullYear(
+  $: VM,
+  thisValue: Obj,
+  _year: Val,
+  _month: Val,
+  _date: Val,
+): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const args: [number, number?, number?] = [] as any;
+  for (let i = 0; i < Math.min(arguments.length - 2, 3); i++) {
+    const num = yield* ToNumber($, arguments[i + 2]);
+    if (IsAbrupt(num)) return num;
+    args[i] = num;
+  }
+  return thisValue.DateValue = newDate($, t).setUTCFullYear(...args);
+}
 
 /**
  * 21.4.4.30 Date.prototype.setUTCHours ( hour [ , min [ , sec [ , ms ] ] ] )
@@ -959,6 +1197,24 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * is not present, it behaves as if ms was present with the value
  * getUTCMilliseconds().
  */
+export function* DatePrototypeSetUTCHours(
+  $: VM,
+  thisValue: Obj,
+  _hour: Val,
+  _min: Val,
+  _sec: Val,
+  _ms: Val,
+): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const args: [number, number?, number?, number?] = [] as any;
+  for (let i = 0; i < Math.min(arguments.length - 2, 4); i++) {
+    const num = yield* ToNumber($, arguments[i + 2]);
+    if (IsAbrupt(num)) return num;
+    args[i] = num;
+  }
+  return thisValue.DateValue = newDate($, t).setUTCHours(...args);
+}
 
 /**
  * 21.4.4.31 Date.prototype.setUTCMilliseconds ( ms )
@@ -973,6 +1229,13 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 6. Set the [[DateValue]] internal slot of this Date object to v.
  * 7. Return v.
  */
+export function* DatePrototypeSetUTCMilliseconds($: VM, thisValue: Obj, ms: Val): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const milli = yield* ToNumber($, ms);
+  if (IsAbrupt(milli)) return milli;
+  return thisValue.DateValue = newDate($, t).setUTCMilliseconds(milli);
+}
 
 /**
  * 21.4.4.32 Date.prototype.setUTCMinutes ( min [ , sec [ , ms ] ] )
@@ -998,6 +1261,23 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * behaves as if ms was present with the value return by
  * getUTCMilliseconds().
  */
+export function* DatePrototypeSetUTCMinutes(
+  $: VM,
+  thisValue: Obj,
+  _min: Val,
+  _sec: Val,
+  _ms: Val,
+): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const args: [number, number?, number?] = [] as any;
+  for (let i = 0; i < Math.min(arguments.length - 2, 3); i++) {
+    const num = yield* ToNumber($, arguments[i + 2]);
+    if (IsAbrupt(num)) return num;
+    args[i] = num;
+  }
+  return thisValue.DateValue = newDate($, t).setUTCMinutes(...args);
+}
 
 /**
  * 21.4.4.33 Date.prototype.setUTCMonth ( month [ , date ] )
@@ -1019,6 +1299,22 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * NOTE: If date is not present, this method behaves as if date was
  * present with the value getUTCDate().
  */
+export function* DatePrototypeSetUTCMonth(
+  $: VM,
+  thisValue: Obj,
+  _month: Val,
+  _date: Val,
+): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const args: [number, number?] = [] as any;
+  for (let i = 0; i < Math.min(arguments.length - 2, 2); i++) {
+    const num = yield* ToNumber($, arguments[i + 2]);
+    if (IsAbrupt(num)) return num;
+    args[i] = num;
+  }
+  return thisValue.DateValue = newDate($, t).setUTCMonth(...args);
+}
 
 /**
  * 21.4.4.34 Date.prototype.setUTCSeconds ( sec [ , ms ] )
@@ -1040,6 +1336,22 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * NOTE: If ms is not present, this method behaves as if ms was
  * present with the value getUTCMilliseconds().
  */
+export function* DatePrototypeSetUTCSeconds(
+  $: VM,
+  thisValue: Obj,
+  _sec: Val,
+  _ms: Val,
+): ECR<number> {
+  let t = thisTimeValue($, thisValue);
+  if (IsAbrupt(t)) return t;
+  const args: [number, number?] = [] as any;
+  for (let i = 0; i < Math.min(arguments.length - 2, 2); i++) {
+    const num = yield* ToNumber($, arguments[i + 2]);
+    if (IsAbrupt(num)) return num;
+    args[i] = num;
+  }
+  return thisValue.DateValue = newDate($, t).setUTCSeconds(...args);
+}
 
 /**
  * 21.4.4.35 Date.prototype.toDateString ( )
@@ -1051,6 +1363,14 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 3. If tv is NaN, return "Invalid Date".
  * 4. Let t be LocalTime(tv).
  * 5. Return DateString(t).
+ */
+export function* DatePrototypeToDateString($: VM, thisValue: Obj): ECR<string> {
+  const tv = thisTimeValue($, thisValue);
+  if (IsAbrupt(tv)) return tv;
+  return newDate($, tv).toDateString();
+}
+
+/**
  * 21.4.4.36 Date.prototype.toISOString ( )
  * 
  * If this time value is not a finite Number or if it corresponds with
@@ -1060,6 +1380,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * time scale, including all format elements and the UTC offset
  * representation "Z".
  */
+export function* DatePrototypeToISOString($: VM, thisValue: Obj): ECR<string> {
+  const tv = thisTimeValue($, thisValue);
+  if (IsAbrupt(tv)) return tv;
+  return newDate($, tv).toISOString();
+}
 
 /**
  * 21.4.4.37 Date.prototype.toJSON ( key )
@@ -1080,6 +1405,12 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * other kinds of objects for use as a method. However, it does
  * require that any such object have a toISOString method.
  */
+export function* DatePrototypeToJSON($: VM, O: Obj, key: Val): ECR<Val> {
+  const tv = yield* ToPrimitive($, O, NUMBER);
+  if (IsAbrupt(tv)) return tv;
+  if (typeof tv === 'number' && !Number.isFinite(tv)) return null;
+  return yield* Invoke($, O, 'toISOString');
+}
 
 /**
  * 21.4.4.38 Date.prototype.toLocaleDateString ( [ reserved1 [ , reserved2 ] ] )
@@ -1101,6 +1432,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * ECMA-402 support must not use those parameter positions for
  * anything else.
  */
+export function* DatePrototypeToLocaleDateString($: VM, thisValue: Obj): ECR<string> {
+  const tv = thisTimeValue($, thisValue);
+  if (IsAbrupt(tv)) return tv;
+  return newDate($, tv).toDateString();
+}
 
 /**
  * 21.4.4.39 Date.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] )
@@ -1122,6 +1458,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * ECMA-402 support must not use those parameter positions for
  * anything else.
  */
+export function* DatePrototypeToLocaleString($: VM, thisValue: Obj): ECR<string> {
+  const tv = thisTimeValue($, thisValue);
+  if (IsAbrupt(tv)) return tv;
+  return newDate($, tv).toString();
+}
 
 /**
  * 21.4.4.40 Date.prototype.toLocaleTimeString ( [ reserved1 [ , reserved2 ] ] )
@@ -1143,6 +1484,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * ECMA-402 support must not use those parameter positions for
  * anything else.
  */
+export function* DatePrototypeToLocaleTimeString($: VM, thisValue: Obj): ECR<string> {
+  const tv = thisTimeValue($, thisValue);
+  if (IsAbrupt(tv)) return tv;
+  return newDate($, tv).toTimeString();
+}
 
 /**
  * 21.4.4.41 Date.prototype.toString ( )
@@ -1160,103 +1506,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * if its this value is not a Date. Therefore, it cannot be
  * transferred to other kinds of objects for use as a method.
  */
-
-/**
- * 21.4.4.41.1 TimeString ( tv )
- * 
- * The abstract operation TimeString takes argument tv (a Number, but
- * not NaN) and returns a String. It performs the following steps when
- * called:
- * 
- * 1. Let hour be ToZeroPaddedDecimalString(ℝ(HourFromTime(tv)), 2).
- * 2. Let minute be ToZeroPaddedDecimalString(ℝ(MinFromTime(tv)), 2).
- * 3. Let second be ToZeroPaddedDecimalString(ℝ(SecFromTime(tv)), 2).
- * 4. Return the string-concatenation of hour, ":", minute, ":",
- *    second, the code unit 0x0020 (SPACE), and "GMT".
- */
-
-/**
- * 21.4.4.41.2 DateString ( tv )
- * 
- * The abstract operation DateString takes argument tv (a Number, but
- * not NaN) and returns a String. It performs the following steps when
- * called:
- * 
- * 1. Let weekday be the Name of the entry in Table 61 with the Number WeekDay(tv).
- * 2. Let month be the Name of the entry in Table 62 with the Number MonthFromTime(tv).
- * 3. Let day be ToZeroPaddedDecimalString(ℝ(DateFromTime(tv)), 2).
- * 4. Let yv be YearFromTime(tv).
- * 5. If yv is +0𝔽 or yv > +0𝔽, let yearSign be the empty String; otherwise, let yearSign be "-".
- * 6. Let paddedYear be ToZeroPaddedDecimalString(abs(ℝ(yv)), 4).
- * 7. Return the string-concatenation of weekday, the code unit 0x0020
- *    (SPACE), month, the code unit 0x0020 (SPACE), day, the code unit
- *    0x0020 (SPACE), yearSign, and paddedYear.
- * Table 61: Names of days of the week
- * Number	Name
- * +0𝔽	"Sun"
- * 1𝔽	"Mon"
- * 2𝔽	"Tue"
- * 3𝔽	"Wed"
- * 4𝔽	"Thu"
- * 5𝔽	"Fri"
- * 6𝔽	"Sat"
- * Table 62: Names of months of the year
- * Number	Name
- * +0𝔽	"Jan"
- * 1𝔽	"Feb"
- * 2𝔽	"Mar"
- * 3𝔽	"Apr"
- * 4𝔽	"May"
- * 5𝔽	"Jun"
- * 6𝔽	"Jul"
- * 7𝔽	"Aug"
- * 8𝔽	"Sep"
- * 9𝔽	"Oct"
- * 10𝔽	"Nov"
- * 11𝔽	"Dec"
- */
-
-/**
- * 21.4.4.41.3 TimeZoneString ( tv )
- * 
- * The abstract operation TimeZoneString takes argument tv (an
- * integral Number) and returns a String. It performs the following
- * steps when called:
- * 
- * 1. Let localTimeZone be DefaultTimeZone().
- * 2. If IsTimeZoneOffsetString(localTimeZone) is true, then
- *     a. Let offsetNs be ParseTimeZoneOffsetString(localTimeZone).
- * 3. Else,
- *     a. Let offsetNs be GetNamedTimeZoneOffsetNanoseconds(localTimeZone, ℤ(ℝ(tv) × 106)).
- * 4. Let offset be 𝔽(truncate(offsetNs / 106)).
- * 5. If offset is +0𝔽 or offset > +0𝔽, then
- *     a. Let offsetSign be "+".
- *     b. Let absOffset be offset.
- * 6. Else,
- *     a. Let offsetSign be "-".
- *     b. Let absOffset be -offset.
- * 7. Let offsetMin be ToZeroPaddedDecimalString(ℝ(MinFromTime(absOffset)), 2).
- * 8. Let offsetHour be ToZeroPaddedDecimalString(ℝ(HourFromTime(absOffset)), 2).
- * 9. Let tzName be an implementation-defined string that is either
- *    the empty String or the string-concatenation of the code unit
- *    0x0020 (SPACE), the code unit 0x0028 (LEFT PARENTHESIS), an
- *    implementation-defined timezone name, and the code unit 0x0029
- *    (RIGHT PARENTHESIS).
- * 10. Return the string-concatenation of offsetSign, offsetHour, offsetMin, and tzName.
- */
-
-/**
- * 21.4.4.41.4 ToDateString ( tv )
- * 
- * The abstract operation ToDateString takes argument tv (an integral
- * Number or NaN) and returns a String. It performs the following
- * steps when called:
- * 
- * 1. If tv is NaN, return "Invalid Date".
- * 2. Let t be LocalTime(tv).
- * 3. Return the string-concatenation of DateString(t), the code unit
- *    0x0020 (SPACE), TimeString(t), and TimeZoneString(tv).
- */
+export function* DatePrototypeToString($: VM, thisValue: Obj): ECR<string> {
+  const tv = thisTimeValue($, thisValue);
+  if (IsAbrupt(tv)) return tv;
+  return newDate($, tv).toString();
+}
 
 /**
  * 21.4.4.42 Date.prototype.toTimeString ( )
@@ -1269,6 +1523,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 4. Let t be LocalTime(tv).
  * 5. Return the string-concatenation of TimeString(t) and TimeZoneString(tv).
  */
+export function* DatePrototypeToTimeString($: VM, thisValue: Obj): ECR<string> {
+  const tv = thisTimeValue($, thisValue);
+  if (IsAbrupt(tv)) return tv;
+  return newDate($, tv).toTimeString();
+}
 
 /**
  * 21.4.4.43 Date.prototype.toUTCString ( )
@@ -1294,6 +1553,11 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  *     unit 0x0020 (SPACE), yearSign, paddedYear, the code unit 0x0020
  *     (SPACE), and TimeString(tv).
  */
+export function* DatePrototypeToUTCString($: VM, thisValue: Obj): ECR<string> {
+  const tv = thisTimeValue($, thisValue);
+  if (IsAbrupt(tv)) return tv;
+  return newDate($, tv).toUTCString();
+}
 
 /**
  * 21.4.4.44 Date.prototype.valueOf ( )
@@ -1302,6 +1566,9 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 
  * 1. Return ? thisTimeValue(this value).
  */
+export function* DatePrototypeValueOf($: VM, thisValue: Obj): ECR<number> {
+  return thisTimeValue($, thisValue);
+}
 
 /**
  * 21.4.4.45 Date.prototype [ @@toPrimitive ] ( hint )
@@ -1329,6 +1596,17 @@ export function* DatePrototypeGetDate($: VM, thisValue: Val): ECR<number> {
  * 
  * The value of the "name" property of this method is "[Symbol.toPrimitive]".
  */
+export function* DatePrototypeSymbolToPrimitive($: VM, thisValue: Obj, hint: Val): ECR<Val> {
+  const h = yield* ToString($, hint);
+  if (IsAbrupt(h)) return h;
+  if (h === 'string' || h === 'default') {
+    return yield* OrdinaryToPrimitive($, thisValue, STRING);
+  } else if (h === 'number') {
+    return yield* OrdinaryToPrimitive($, thisValue, NUMBER);
+  } else {
+    return $.throw('TypeError', 'invalid hint');
+  }
+}
 
 /**
  * 21.4.5 Properties of Date Instances

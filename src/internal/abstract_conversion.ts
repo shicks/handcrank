@@ -82,7 +82,7 @@ export function* ToPrimitive($: VM, input: Val, preferredType?: STRING|NUMBER): 
  * completion containing an ECMAScript language value or a throw
  * completion. It performs the following steps when called:
  */
-function* OrdinaryToPrimitive($: VM, O: Obj, hint: STRING|NUMBER): ECR<Val> {
+export function* OrdinaryToPrimitive($: VM, O: Obj, hint: STRING|NUMBER): ECR<Val> {
   // 1. If hint is string, then
   //     a. Let methodNames be « "toString", "valueOf" ».
   // 2. Else,
