@@ -121,6 +121,8 @@ export const utc: Plugin = {
   },
 }
 
+// TODO - annexB for getYear, setYear, and toGMTString?
+
 export interface DateSlots {
   DateValue: number;
 }

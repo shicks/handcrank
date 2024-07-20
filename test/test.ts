@@ -58,7 +58,9 @@ interface Metadata {
 function allIncludes(f: File, h: Harness): string[] {
   const out = new Set<string>(f.metadata.includes || []);
   const defines = new Set<string>(f.metadata.defines || []);
-  for (const ident of f.content.matchAll(/\b[$_a-z][$_a-z0-9]*\b/ig)) {
+  // TODO - we could use acorn to actually parse the file to see what needs including.
+  const content = f.content.replace(/\/\*.*?\*\//g, '').replace(/\/\/.*/g, '');
+  for (const ident of content.matchAll(/\b[$_a-z][$_a-z0-9]*\b/ig)) {
     if (defines.has(ident[0])) continue;
     const provide = h.provides.get(ident[0]);
     if (provide) out.add(provide);
