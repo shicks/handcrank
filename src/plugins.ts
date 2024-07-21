@@ -21,6 +21,7 @@ import { globalEval } from './internal/eval';
 import { math } from './internal/math';
 import { prelude } from './internal/prelude';
 import { date, utc } from './internal/date';
+import { map } from './internal/map';
 
 export const full: Plugin = {
   id: 'full',
@@ -48,6 +49,7 @@ export const full: Plugin = {
     reflect,
     globalEval,
     date,
+    map,
   ],
 };
 
@@ -76,4 +78,5 @@ export {
   globalEval,
   date,
   utc,
+  map,
 };
