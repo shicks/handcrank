@@ -7,12 +7,12 @@ import { SYNC } from './enums';
 import { CreateBuiltinFunction, IsFunc, getter, method, methodO } from './func';
 import { CreateIteratorFromClosure, GeneratorResume, GeneratorYield } from './generator';
 import { iterators } from './iterators';
-import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
+import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate, peekCtorName } from './obj';
 import { prelude } from './prelude';
 import { PropertyDescriptor, prop0, propC, propWC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
-import { ECR, Plugin, VM } from './vm';
+import { DebugString, DebugStringContext, ECR, Plugin, VM } from './vm';
 
 /**
  * 24.1 Map Objects
@@ -226,6 +226,7 @@ export function* MapConstructor($: VM, [iterable]: Val[], NewTarget: Val): ECR<O
   Assert(IsFunc(NewTarget));
   const map = yield* OrdinaryCreateFromConstructor($, NewTarget, '%Map.prototype%', {
     MapData: new Map(),
+    DebugString: MapDebugString,
   });
   if (IsAbrupt(map)) return map;
   if (iterable == null) return map;
@@ -233,6 +234,24 @@ export function* MapConstructor($: VM, [iterable]: Val[], NewTarget: Val): ECR<O
   if (IsAbrupt(adder)) return adder;
   if (!IsCallable(adder)) return $.throw('TypeError', 'Map set method is not callable');
   return yield* AddEntriesFromIterable($, map, iterable, adder);
+}
+
+export function MapDebugString(this: Obj, {circular, indent, depth}: DebugStringContext): string {
+  const name = peekCtorName(this);
+  const qualifier = name === 'Map' ? '' : ' [Map]';
+  const map = this.MapData!;
+  const elems = [];
+  for (const [k, v] of map) {
+    if (elems.length > 1000) {
+      elems.push(`... ${map.size - elems.length} more`);
+      break;
+    }
+    elems.push([
+      DebugString(k, {circular, indent: `${indent}  `, depth: depth - 1}),
+      DebugString(v, {circular, indent: `${indent}  `, depth: depth - 1}),
+    ].join(' => '));
+  }
+  return `${name}(${map.size})${qualifier} { ${elems.join(', ')} }`;
 }
 
 /**

@@ -7,12 +7,12 @@ import { SYNC } from './enums';
 import { CreateBuiltinFunction, IsFunc, getter, method, methodO } from './func';
 import { CreateIteratorFromClosure, GeneratorResume, GeneratorYield } from './generator';
 import { iterators } from './iterators';
-import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate } from './obj';
+import { Obj, OrdinaryCreateFromConstructor, OrdinaryObjectCreate, peekCtorName } from './obj';
 import { prelude } from './prelude';
 import { PropertyDescriptor, prop0, propC, propWC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
-import { ECR, Plugin, VM } from './vm';
+import { DebugString, DebugStringContext, ECR, Plugin, VM } from './vm';
 
 /**
  * 24.2 Set Objects
@@ -231,6 +231,7 @@ export function* SetConstructor($: VM, [iterable]: Val[], NewTarget: Val): ECR<O
   Assert(IsFunc(NewTarget));
   const set = yield* OrdinaryCreateFromConstructor($, NewTarget, '%Set.prototype%', {
     SetData: new Set(),
+    DebugString: SetDebugString,
   });
   if (IsAbrupt(set)) return set;
   if (iterable == null) return set;
@@ -248,6 +249,21 @@ export function* SetConstructor($: VM, [iterable]: Val[], NewTarget: Val): ECR<O
     const status = yield* Call($, adder, set, [nextValue]);
     if (IsAbrupt(status)) return yield* IteratorClose($, iteratorRecord, status);
   }
+}
+
+export function SetDebugString(this: Obj, {circular, indent, depth}: DebugStringContext): string {
+  const name = peekCtorName(this);
+  const qualifier = name === 'Set' ? '' : ' [Set]';
+  const set = this.SetData!;
+  const elems = [];
+  for (const elem of set) {
+    if (elems.length > 1000) {
+      elems.push(`... ${set.size - elems.length} more`);
+      break;
+    }
+    elems.push(DebugString(elem, {circular, indent: `${indent}  `, depth: depth - 1}));
+  }
+  return `${name}(${set.size})${qualifier} { ${elems.join(', ')} }`;
 }
 
 /**

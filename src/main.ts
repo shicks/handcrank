@@ -43,7 +43,7 @@ function runScript(script: string, filename: string, printResult = false) {
       console.dir(cr);
     }
   } else if (printResult) {
-    const s = DebugString(cr, 2);
+    const s = DebugString(cr, {depth: 2});
     console.log(s);
   }
   return 0;

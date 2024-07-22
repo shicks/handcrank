@@ -6,12 +6,11 @@ import { NodeType, NodeMap, Node, Esprima, preprocess, Source } from './tree';
 import { GetValue, ReferenceRecord } from './reference_record';
 import { InitializeHostDefinedRealm, RealmAdvice, RealmRecord, getIntrinsicName } from './realm_record';
 import { ParseScript, ScriptEvaluation, ScriptRecord } from './script_record';
-import { Obj, OrdinaryObjectCreate, peekProp } from './obj';
+import { Obj, OrdinaryObjectCreate, peekCtorName, peekProp } from './obj';
 import { EnvironmentRecord, FunctionEnvironmentRecord } from './environment_record';
 import { HasValueField, propWC } from './property_descriptor';
 import { Assert } from './assert';
 import { Func, IsFunc } from './func';
-import { ArrayExoticObject } from './exotic_array';
 import { PrivateEnvironmentRecord } from './private_environment_record';
 import { IsConstructor } from './abstract_compare';
 import { IsStrictMode } from './static/scope';
@@ -295,9 +294,7 @@ export class VM {
               const thisValue = thisEnv.GetThisBinding(this);
               if (!IsAbrupt(thisValue) && thisValue instanceof Obj) {
                 // TODO - read internal name from `this`?
-                const className =
-                  peekProp(peekProp(thisValue, 'constructor')?.Value as unknown as Obj,
-                           'name')?.Value;
+                const className = peekCtorName(thisValue);
                 if (className) func = `${String(className)}.${String(func)}`;
               }
             }
@@ -639,11 +636,15 @@ export function when<N, A extends unknown[], T>(
 //        we can just assume all prereqs exist?
 //export type Plugin = (spi: PluginSPI) => void;
 
+export interface DebugStringContext {
+  depth: number;
+  circular: Map<Obj, number>;
+  indent: string;
+}
+
 export function DebugString(
   v: Val|ReferenceRecord|ExecutionContext,
-  depth = 0,
-  circular = new Map<Obj, number>(),
-  indent = '',
+  {depth = 1, circular = new Map(), indent = ''}: Partial<DebugStringContext> = {},
 ): string {
   // TODO - consider adding an optional `color = false` argument
   //  - color null bright white, undefined dark gray, num/bool yellow, strings green, objs cyan
@@ -667,32 +668,21 @@ export function DebugString(
     const intrinsicName = getIntrinsicName(v);
     if (intrinsicName != null) return intrinsicName;
 
-    if (v.StringData != null) return `String(${JSON.stringify(v.StringData)})`;
-    if (v.NumberData != null) return `Number(${JSON.stringify(v.NumberData)})`;
-    if (v.BooleanData != null) return `Boolean(${JSON.stringify(v.BooleanData)})`;
+    if (v.StringData != null) return `[String: ${JSON.stringify(v.StringData)}]`;
+    if (v.NumberData != null) return `[Number: ${JSON.stringify(v.NumberData)}]`;
+    if (v.BooleanData != null) return `[Boolean: ${JSON.stringify(v.BooleanData)}]`;
+    if (v.BigIntData != null) return `[BigInt: ${v.BigIntData}]`;
+    if (v.SymbolData != null) return `[Symbol: ${String(v.SymbolData)}]`;
     if (v.ErrorData != null) return v.ErrorData || 'Error';
     if (IsFunc(v)) {
       const name = v.OwnProps.get('name')?.Value;
       return `[Function: ${name ? String(name) : v.InternalName || '(anonymous)'}]`;
     }
-    // TODO - consider printing props? maybe even slots?
-    if (v instanceof ArrayExoticObject()) {
-      const length = Number(v.OwnProps.get('length')?.Value);
-      if (depth <= 0) return `[... ${length} elements]`;
-      const elems = [];
-      for (let i = 0; i < length; i++) {
-        const desc = v.OwnProps.get(String(i));
-        elems.push(desc && HasValueField(desc) ? DebugString(desc.Value, depth - 1, circular) : '');
-        if (i > 1000) {
-          elems.push(`... ${length - i} more`);
-          break;
-        }
-      }
-      return `[${elems.join(', ')}]`;
-    }
-    if (depth <= 0) return '{...}';
     if (circular.has(v)) return `%circular%`;
-    circular.set(v, 0); // TODO - keep track and backpopulate.
+    circular.set(v, circular.size); // TODO - keep track and backpopulate.
+    if (depth <= 0) return '{...}';
+    if (typeof v.DebugString === 'function') return v.DebugString({circular, depth, indent});
+    // TODO - consider printing props? maybe even slots?
     const elems = [];
     let complex = false;
     let elided = 0;
@@ -704,7 +694,7 @@ export function DebugString(
       }
       const key = typeof k === 'symbol' ? `[${String(k)}]` : /^[_$a-z][_$a-z0-9]*$/i.test(k) ? k : JSON.stringify(k);
       if (d.Value instanceof Obj) complex = true;
-      const val = HasValueField(d) ? DebugString(d.Value, depth - 1, circular, `${indent}  `) : '???'
+      const val = HasValueField(d) ? DebugString(d.Value, {depth: depth - 1, circular, indent: `${indent}  `}) : '???'
       elems.push(`${key}: ${val}`);
     }
     if (elided) elems.push(`... ${elided} more`);

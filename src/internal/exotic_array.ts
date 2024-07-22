@@ -10,7 +10,7 @@ import { HasValueField, IsDataDescriptor, PropertyDescriptor, prop0, propC, prop
 import { RealmRecord, defineProperties } from './realm_record';
 import { memoize } from './slots';
 import { PropertyKey, Val } from './val';
-import { DebugString, ECR, Plugin, VM, run } from './vm';
+import { DebugString, DebugStringContext, ECR, Plugin, VM, run } from './vm';
 import { CreateIteratorFromClosure, GeneratorResume, GeneratorYield } from './generator';
 import { CreateIterResultObject, GetIterator, GetIteratorFromMethod, IteratorClose, IteratorStep, IteratorValue } from './abstract_iterator';
 import { iterators } from './iterators';
@@ -113,8 +113,23 @@ export const ArrayExoticObject = memoize(() => class ArrayExoticObject extends O
     }
     return OrdinaryDefineOwnProperty($, this, P, Desc);
   }
-});
 
+  override DebugString({circular, indent, depth}: DebugStringContext): string {
+    const length = Number(this.OwnProps.get('length')?.Value);
+    if (depth <= 0) return `[... ${length} elements]`;
+    const elems = [];
+    for (let i = 0; i < length; i++) {
+      const desc = this.OwnProps.get(String(i));
+      elems.push(desc && HasValueField(desc) ?
+        DebugString(desc.Value, {depth: depth - 1, circular, indent}) : '');
+      if (i > 1000) {
+        elems.push(`... ${length - i} more`);
+        break;
+      }
+    }
+    return `[${elems.join(', ')}]`;
+  }
+});
 
 /** 
  * 10.4.2.2 ArrayCreate ( length [ , proto ] )

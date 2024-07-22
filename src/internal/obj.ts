@@ -11,7 +11,7 @@ import { Slots, hasAnyFields, memoize } from './slots';
 import { GetSourceText, IsAnonymousFunctionDefinition } from './static/functions';
 import { PropertyLike } from './tree';
 import { PropertyKey, Val } from './val';
-import { DebugString, ECR, VM } from './vm';
+import { DebugString, DebugStringContext, ECR, VM } from './vm';
 import * as ESTree from 'estree';
 
 const {} = {DebugString};
@@ -26,6 +26,7 @@ declare global {
     // Standard slots for all objects
     Prototype?: Obj|null;
     Extensible?: boolean;
+    DebugString?(ctx: DebugStringContext): string;
   }
 }
 
@@ -1162,4 +1163,10 @@ export function peekProp(o: Obj, key: PropertyKey): PropertyDescriptor|undefined
     o = o.Prototype!;
   }
   return undefined;
+}
+
+export function peekCtorName(v: Obj): string|undefined {
+  const ctor = peekProp(v, 'constructor')?.Value as unknown as Obj;
+  const name = ctor instanceof Obj ? peekProp(ctor, 'name')?.Value : undefined;
+  return typeof name === 'string' ? name : undefined;
 }
