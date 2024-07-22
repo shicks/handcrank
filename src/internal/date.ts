@@ -406,7 +406,14 @@ export function* DateConstructor($: VM, NewTarget: Func|undefined, ...values: Va
     ];
     dv = newDate($, ...args).getTime();
   }
-  return yield* OrdinaryCreateFromConstructor($, NewTarget, '%Date.prototype%', {DateValue: dv});
+  return yield* OrdinaryCreateFromConstructor($, NewTarget, '%Date.prototype%', {
+    DateValue: dv,
+    DebugString: DateDebugString,
+  });
+}
+
+export function DateDebugString(this: Obj) {
+  return new Date(this.DateValue!).toISOString();
 }
 
 /** DateNow operation using the host clock. */

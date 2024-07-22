@@ -12,7 +12,7 @@ import { prelude } from './prelude';
 import { prop0, propC, propWC, propWEC } from './property_descriptor';
 import { RealmRecord, defineProperties } from './realm_record';
 import { Val } from './val';
-import { DebugString, ECR, Plugin, VM, just } from './vm';
+import { DebugString, DebugStringContext, ECR, Plugin, VM, just } from './vm';
 
 /**
  * 27.2 Promise Objects
@@ -804,6 +804,7 @@ export function* PromiseConstructor($: VM, [executor]: Val[], NewTarget: Val): E
     PromiseFulfillReactions: [],
     PromiseRejectReactions: [],
     PromiseIsHandled: false,
+    DebugString: PromiseDebugString,
   });
   if (IsAbrupt(promise)) return promise;
   Assert(IsPromise(promise));
@@ -815,6 +816,17 @@ export function* PromiseConstructor($: VM, [executor]: Val[], NewTarget: Val): E
     yield* Call($, resolvingFunctions.Reject, undefined, [completion.Value]);
   }
   return promise;
+}
+
+export function PromiseDebugString(this: Obj, {circular, indent, depth}: DebugStringContext): string {
+  const state = this.PromiseState!;
+  const result = this.PromiseResult!;
+  const inner = state === 'fulfilled' ?
+    DebugString(result, {circular, indent: `${indent}  `, depth}) :
+    state === 'rejected' ?
+    '<rejected> ' + DebugString(result, {circular, indent: `${indent}  `, depth}) :
+    '<pending>';
+  return `Promise { ${inner} }`;
 }
 
 /**
