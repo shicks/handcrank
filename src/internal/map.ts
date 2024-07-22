@@ -309,7 +309,7 @@ export function* AddEntriesFromIterable(
  */
 export function* MapPrototypeClear($: VM, thisArg: Val): ECR<Val> {
   const mapData = RequireInternalMapDataSlot($, thisArg);
-  if (IsAbrupt(mapData)) return $.throw('TypeError', 'not a Map');
+  if (IsAbrupt(mapData)) return mapData;
   mapData.clear();
   return undefined;
 }
@@ -335,7 +335,7 @@ export function* MapPrototypeClear($: VM, thisArg: Val): ECR<Val> {
  */
 export function* MapPrototypeDelete($: VM, thisArg: Val, key: Val): ECR<Val> {
   const mapData = RequireInternalMapDataSlot($, thisArg);
-  if (IsAbrupt(mapData)) return $.throw('TypeError', 'not a Map');
+  if (IsAbrupt(mapData)) return mapData;
   return mapData.delete(key);
 }
 
@@ -400,8 +400,8 @@ export function* MapPrototypeForEach(
   callbackfn: Val,
 ): ECR<Val> {
   const mapData = RequireInternalMapDataSlot($, thisArg);
-  if (IsAbrupt(mapData)) return $.throw('TypeError', 'not a Map');
-  if (!IsCallable(callbackfn)) return $.throw('TypeError', 'callback is not callable');
+  if (IsAbrupt(mapData)) return mapData;
+  if (!IsCallable(callbackfn)) return $.throw('TypeError', 'not a function');
   for (const [key, value] of mapData) {
     yield* Call($, callbackfn, thisArg, [value, key, thisArg]);
   }
@@ -421,8 +421,8 @@ export function* MapPrototypeForEach(
  */
 export function* MapPrototypeGet($: VM, thisArg: Val, key: Val): ECR<Val> {
   const mapData = RequireInternalMapDataSlot($, thisArg);
-  if (IsAbrupt(mapData)) return $.throw('TypeError', 'not a Map');
-  if (!mapData) return $.throw('TypeError', 'not a Map');
+  if (IsAbrupt(mapData)) return mapData;
+  if (!mapData) return mapData;
   return mapData.get(key);
 }
 
@@ -439,7 +439,7 @@ export function* MapPrototypeGet($: VM, thisArg: Val, key: Val): ECR<Val> {
  */
 export function* MapPrototypeHas($: VM, thisArg: Val, key: Val): ECR<Val> {
   const mapData = RequireInternalMapDataSlot($, thisArg);
-  if (IsAbrupt(mapData)) return $.throw('TypeError', 'not a Map');
+  if (IsAbrupt(mapData)) return mapData;
   return mapData.has(key);
 }
 
@@ -473,7 +473,7 @@ export function MapPrototypeKeys($: VM, thisArg: Val): ECR<Val> {
  */
 export function* MapPrototypeSet($: VM, thisArg: Val, key: Val, value: Val): ECR<Val> {
   const mapData = RequireInternalMapDataSlot($, thisArg);
-  if (IsAbrupt(mapData)) return $.throw('TypeError', 'not a Map');
+  if (IsAbrupt(mapData)) return mapData;
   mapData.set(key, value);
   return thisArg;
 }
@@ -494,7 +494,7 @@ export function* MapPrototypeSet($: VM, thisArg: Val, key: Val, value: Val): ECR
  */
 export function* MapPrototypeGetSize($: VM, thisArg: Val): ECR<Val> {
   const mapData = RequireInternalMapDataSlot($, thisArg);
-  if (IsAbrupt(mapData)) return $.throw('TypeError', 'not a Map');
+  if (IsAbrupt(mapData)) return mapData;
   return mapData.size;
 }
 
@@ -521,6 +521,11 @@ interface MapSlots {
 }
 declare global {
   interface ObjectSlots extends Partial<MapSlots> {}
+}
+export function RequireInternalMapDataSlot($: VM, map: Val): CR<Map<Val, Val>> {
+  if (!(map instanceof Obj)) return $.throw('TypeError', 'not an object');
+  if (!map.MapData) return $.throw('TypeError', 'not a Map');
+  return map.MapData;
 }
 
 /**
@@ -567,14 +572,14 @@ declare global {
  */
 export function* CreateMapIterator($: VM, map: Val, kind: 'key'|'value'|'key+value'): ECR<Val> {
   const mapData = RequireInternalMapDataSlot($, map);
-  if (IsAbrupt(mapData)) return $.throw('TypeError', 'not a Map');
+  if (IsAbrupt(mapData)) return mapData;
   return CreateIteratorFromClosure($, function*(): ECR<undefined> {
     for (const [key, value] of mapData) {
       let result: Val;
       if (kind === 'key') {
-        result = CreateArrayFromList($, [key]);
+        result = key;
       } else if (kind === 'value') {
-        result = CreateArrayFromList($, [value]);
+        result = value;
       } else {
         result = CreateArrayFromList($, [key, value]);
       }
@@ -582,10 +587,4 @@ export function* CreateMapIterator($: VM, map: Val, kind: 'key'|'value'|'key+val
     }
     return;
   }, '%MapIteratorPrototype%', $.getIntrinsic('%MapIteratorPrototype%'));
-}
-
-export function RequireInternalMapDataSlot($: VM, map: Val): CR<Map<Val, Val>> {
-  if (!(map instanceof Obj)) return $.throw('TypeError', 'not an object');
-  if (!map.MapData) return $.throw('TypeError', 'not a Map');
-  return map.MapData;
 }
