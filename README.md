@@ -35,8 +35,8 @@ browser or on the server.
     - [x] String
     - [x] Symbol
     - [x] Boolean
-    - [ ] BigInt
-- [ ] Well-known Object types
+    - [x] BigInt
+- [x] Well-known Object types
     - [x] Object
     - [x] Function
     - [x] Error
@@ -48,11 +48,11 @@ browser or on the server.
     - [x] Iterators
     - [x] RegExp
     - [x] Reflect
-    - [ ] Map
-    - [ ] Set
+    - [x] Map
+    - [x] Set
     - [ ] WeakMap / WeakSet
     - [ ] Proxy
-    - [ ] Date
+    - [x] Date
 - [x] Functions
     - [x] function calls
     - [x] constructor calls
@@ -85,8 +85,9 @@ browser or on the server.
         - [x] super
     - [x] use strict
     - [x] optional chaining
-    - [ ] meta properties (i.e. `new.target`, `import.meta`)
+    - [x] `new.target`
 - [ ] Modules
+    - [ ] `import.meta`
 - [ ] Debugger statement
-- [ ] SPI for host integration
+- [x] SPI for host integration
 - [x] Test-262 integration
